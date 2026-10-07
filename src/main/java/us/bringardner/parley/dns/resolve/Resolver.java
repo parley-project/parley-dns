@@ -1,0 +1,848 @@
+/**
+ * <PRE>
+ * 
+ * Copyright Tony Bringarder 1998, 2025 <A href="http://bringardner.com/tony">Tony Bringardner</A>
+ * 
+ *
+ *   Licensed under the Apache License, Version 2.0 (the "License");
+ *   you may not use this file except in compliance with the License.
+ *   You may obtain a copy of the License at
+ *
+ *       <A href="http://www.apache.org/licenses/LICENSE-2.0">http://www.apache.org/licenses/LICENSE-2.0</A>
+ *
+ *   Unless required by applicable law or agreed to in writing, software
+ *   distributed under the License is distributed on an "AS IS" BASIS,
+ *   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *   See the License for the specific language governing permissions and
+ *   limitations under the License.
+ *  </PRE>
+ *   
+ *   
+ *	@author Tony Bringardner   
+ *
+ *
+ * ~version~V000.00.05-V000.00.00-
+ */
+package us.bringardner.parley.dns.resolve;
+
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+import us.bringardner.parley.dns.Cname;
+import us.bringardner.parley.dns.DNS;
+import us.bringardner.parley.dns.DnsBaseClass;
+import us.bringardner.parley.dns.Message;
+import us.bringardner.parley.dns.RR;
+import us.bringardner.parley.dns.Section;
+import us.bringardner.parley.dns.server.DnsServer;
+import us.bringardner.parley.core.NamedThreadFactory;
+import us.bringardner.parley.io.IoUtils;
+
+public class Resolver  extends DnsBaseClass
+{
+	private static final String PROP_MAX_DNS_CACHE_AGE = "JDns.maxCacheAge";
+
+	private static final String PROP_RESOLVER_COUNT = "JDns.resolvers";
+	public static final String PROP_MAX_CACHE_ENTRIES = "JDns.maxCacheEntries";
+	public static final String PROP_CACHE_SWEEP_SECONDS = "JDns.cacheSweepSeconds";
+	//  Periodically removes expired cache entries
+	private static java.util.concurrent.ScheduledExecutorService cacheSweeper;
+
+	private static volatile Cache cache = new Cache();
+
+
+
+	private static final List<RemoteServer> sbelt = new CopyOnWriteArrayList<RemoteServer>();
+	//  this is used to 'round robin' the starting server	
+	//  so that we don't always use the same one (spread the load)
+	//private static int current=0;
+	//private static int sbeltSize;
+	public static final String PROP_MAX_DELEGATIONS = "JDns.maxDelegations";
+	/** Total time (ms) for one resolution, including referrals and CNAME hops (default 4000). */
+	public static final String PROP_RESOLVE_TIMEOUT = "JDns.resolveTimeout";
+	private static volatile long resolveTimeout = 4000;
+	/** seconds, default 10800 (3 hours) */
+	public static final String PROP_MAX_NEGATIVE_TTL = "JDns.maxNegativeTtl";
+	public static final String PROP_DELEGATION_MAX_AGE = "JDns.delegationMaxAge";
+	/** Seconds an upstream address is skipped after repeated failures (first hold-off, doubled for each further failure). */
+	public static final String PROP_UPSTREAM_HOLD_OFF_MIN = "JDns.upstreamHoldOffMin";
+	/** Longest hold-off (seconds) for an upstream address that keeps failing. */
+	public static final String PROP_UPSTREAM_HOLD_OFF_MAX = "JDns.upstreamHoldOffMax";
+	/** Validate the answers of recursive queries with DNSSEC (default false). */
+	public static final String PROP_DNSSEC_VALIDATION = "JDns.dnssecValidation";
+	/** File of trust anchors (DS or DNSKEY records); relative to JDns.dnsDir. Default: the root zone's keys, built in. */
+	public static final String PROP_DNSSEC_TRUST_ANCHORS = "JDns.dnssecTrustAnchors";
+
+	//  DNSSEC validation (null: off)
+	private static volatile Validator validator;
+
+	/** Turn validation on (a validator) or off (null). */
+	public static void setValidator(Validator v) {
+		validator = v;
+	}
+
+	public static Validator getValidator() {
+		return validator;
+	}
+
+	/** Do upstream queries ask for DNSSEC records, and are answers validated? */
+	public static boolean isValidating() {
+		return validator != null;
+	}
+
+	/** A validator that fetches through this resolver, with the given trust anchors. */
+	public static Validator newValidator(List<us.bringardner.parley.dns.Ds> anchors) {
+		return new Validator(Resolver::resolve, () -> System.currentTimeMillis()/1000, anchors,
+				Math.max(1000, Cache.getDefaultMaxEntries()));
+	}
+
+	/** An answer and, if it was validated, the result. */
+	public static final class Answer {
+		public final Message msg;
+		/** null if not validated (validation off, checking disabled, or no answer) */
+		public final Validator.Result result;
+
+		Answer(Message msg, Validator.Result result) {
+			this.msg = msg;
+			this.result = result;
+		}
+	}
+
+	/**
+	 * Resolve and, when validation is on and the client did not set CD,
+	 * validate the answer.
+	 */
+	public static Answer resolveValidated(Section question, boolean checkingDisabled) {
+		Validator v = validator;
+		if( v != null && !checkingDisabled ) {
+			//  Validated before: the result is kept with the cache entry
+			Cache.Hit h = cache.lookup(question);
+			if( h != null && h.validated != null && !isUnchasedCname(h.msg, question) ) {
+				cacheHits.incrementAndGet();
+				return new Answer(h.msg, h.validated);
+			}
+		}
+		Message m = resolve(question);
+		if( m == null || v == null || checkingDisabled ) {
+			return new Answer(m, null);
+		}
+		//  The entry m came from (or was stored as); the result is attached to it
+		Object entry = cache.current(question);
+		Validator.Result r;
+		try {
+			r = v.validate(m, question);
+		} catch(RuntimeException ex) {
+			new Resolver().logError("DNSSEC validation of "+question+" failed", ex);
+			r = new Validator.Result(Validator.Status.BOGUS, "validation failed: "+ex);
+		}
+		cache.setValidated(question, entry, r);
+		return new Answer(m, r);
+	}
+
+	//  Recursive queries answered from the cache by resolveCached
+	private static final java.util.concurrent.atomic.AtomicLong cacheHits = new java.util.concurrent.atomic.AtomicLong();
+
+	/** Recursive queries answered from the cache without a resolver thread (or validation). */
+	public static long getCacheHits() {
+		return cacheHits.get();
+	}
+
+	/**
+	 * The answer to 'question' from the cache alone: no network, no
+	 * validation, so it can run in the thread that received the query.
+	 * <p>
+	 * null if a resolver thread is needed: nothing cached, a CNAME whose
+	 * target still has to be resolved, or (validation on and CD not set) a
+	 * response that has not been validated yet.
+	 */
+	public static Answer resolveCached(Section question, boolean checkingDisabled) {
+		Cache.Hit h = cache.lookup(question);
+		if( h == null || isUnchasedCname(h.msg, question) ) {
+			return null;
+		}
+		Validator.Result r = null;
+		if( validator != null && !checkingDisabled ) {
+			if( h.validated == null || h.validated.status == Validator.Status.BOGUS ) {
+				return null;
+			}
+			r = h.validated;
+		}
+		cacheHits.incrementAndGet();
+		return new Answer(h.msg, r);
+	}
+
+	/** A cached response that is only a CNAME: resolveChain still follows it to the target. */
+	private static boolean isUnchasedCname(Message m, Section question) {
+		if( m.getAnswerCount() != 1 || question.getType() == DNS.CNAME ) {
+			return false;
+		}
+		return m.getAnswer().get(0).getType() == DNS.CNAME;
+	}
+
+	/** A zone's name servers learned from a referral. */
+	private static final class Delegation {
+		final RemoteServer server;
+		final long learnedAt;
+		Delegation(RemoteServer server, long learnedAt) {
+			this.server = server;
+			this.learnedAt = learnedAt;
+		}
+	}
+
+	private static volatile int maxDelegations = 10000;
+	//  How long a learned delegation is used before it is replaced by a fresh referral (ms)
+	private static volatile long delegationMaxAge = 60*60*1000L;
+
+	/**
+	 * Delegations learned while resolving: lower case zone name -> ONE
+	 * RemoteServer per zone (later referrals merge their addresses into it).
+	 * LRU bounded by maxDelegations. Guarded by synchronized(servers); it is
+	 * used by every ResolverThread.
+	 */
+	private static final Map<String,Delegation> servers = new LinkedHashMap<String,Delegation>(64, 0.75f, true) {
+		private static final long serialVersionUID = 1L;
+		@Override
+		protected boolean removeEldestEntry(Map.Entry<String,Delegation> eldest) {
+			return size() > maxDelegations;
+		}
+	};
+	private static ResolverThread [] resolvers;
+	private static int started = 0;
+	private static int completed = 0;
+	private static int min = 9999999;
+	private static int max = 0;
+	private static int ave = 0;
+	private static double timeAccum = 0.0;
+
+	/**
+	 * Remember the name servers from a referral.
+	 * <p>
+	 * There is one RemoteServer per zone. If a fresh one is already known,
+	 * the new addresses are merged into it (so each address keeps its
+	 * statistics and deactivation state) and the known instance is returned.
+	 * The old code appended a new RemoteServer on every referral, so the list
+	 * grew forever and a dead server was queried again with a clean slate.
+	 * 
+	 * @return the RemoteServer to use for this zone
+	 */
+	static RemoteServer addServer(RemoteServer svr) {
+		//  getName() is null when the referral had no NS records
+		if( svr == null || svr.getName() == null ) {
+			return svr;
+		}
+		//  Keys are lower case: getServers() looks up the lower case question name
+		String key = svr.getName().toLowerCase();
+		long now = System.currentTimeMillis();
+		synchronized (servers) {
+			Delegation d = servers.get(key);
+			if( d != null && (now - d.learnedAt) < delegationMaxAge ) {
+				d.server.mergeAddresses(svr);
+				return d.server;
+			}
+			servers.put(key, new Delegation(svr, now));
+			return svr;
+		}
+	}
+
+	/** @return the known, fresh delegation for this exact zone name, or null */
+	static RemoteServer getDelegation(String zone) {
+		String key = zone.toLowerCase();
+		synchronized (servers) {
+			Delegation d = servers.get(key);
+			if( d == null ) {
+				return null;
+			}
+			if( (System.currentTimeMillis() - d.learnedAt) >= delegationMaxAge ) {
+				servers.remove(key);
+				return null;
+			}
+			return d.server;
+		}
+	}
+
+	public static int delegationCount() {
+		synchronized (servers) {
+			return servers.size();
+		}
+	}
+
+	public static void setMaxDelegations(int max) {
+		synchronized (servers) {
+			maxDelegations = max > 0 ? max : 1;
+			Iterator<String> it = servers.keySet().iterator();
+			while( servers.size() > maxDelegations && it.hasNext() ) {
+				it.next();
+				it.remove();
+			}
+		}
+	}
+
+	/** @param ms how long a learned delegation is used before a fresh referral replaces it */
+	public static void setDelegationMaxAge(long ms) {
+		delegationMaxAge = ms;
+	}
+	
+	public static int cacheSize() {
+		int ret = cache.size();
+		return ret;
+	}
+	
+	public static synchronized int getAve() {
+		return ave;
+	}
+	
+	public static synchronized int getCompleted() {
+		return completed;
+	}
+
+	/*
+	private synchronized static int getCurrent() {
+
+		if( ++current >= sbeltSize ) {
+			current = 0;
+		}	
+		return current;
+	}	
+	 */
+
+	public static synchronized int getMax()	{
+		return max;
+	}
+
+	public static synchronized int getMin()	{
+		return min;
+	}
+
+	/**
+	 * 
+	 * Creation date: (10/16/2003 9:53:14 AM)
+	 * @return JDns.resolve.ResolverThread[]
+	 */
+	public static us.bringardner.parley.dns.resolve.ResolverThread[] getResolvers() {
+		return resolvers;
+	}
+
+	//	Find cached servers closest to this name
+	private static List<RemoteServer> getServers(Section nm) {
+		List<RemoteServer> ret = null;
+		RemoteServer known = getDelegation(nm.getName());
+		//  Only use it if it has an active server
+		if( known != null && known.isActive() ) {
+			ret = Collections.singletonList(known);
+		}
+
+		//  If no active server exists, search for one 'further'
+		// from the question.
+		if( ret == null ) {
+			String parent = nm.getParentName();
+			if( parent == null || parent.length() == 0 ) {
+				ret = sbelt;
+			} else {
+				ret = getServers(new Section(parent,DNS.NS,nm.getDnsClass()));
+			}
+		}
+
+		return ret;
+	}
+
+	public static synchronized int getStarted()	{
+		return started;
+	}
+
+	public static String getStats()	{
+		String ret =
+
+				"Resolver Cache size="+cacheSize()+"/"+cache.getMaxEntries()+" Delegations="+delegationCount()+"/"+maxDelegations+
+				"\n Resolver capacity="+us.bringardner.parley.dns.resolve.ResolverThread.getMaxBackLog()+
+				"  current="+us.bringardner.parley.dns.resolve.ResolverThread.getBacklog()+
+				"\nResolver Stats: inflight="+(started-completed)+
+				" dropped(backlog full)="+ResolverThread.getDropped()+
+				" servfail="+ResolverThread.getFailed()+
+				" completed="+completed+
+				" cacheHits="+cacheHits.get()+
+				" min="+min+
+				" max="+max+
+				" ave="+ave
+				;
+
+		return ret;
+	}
+
+	protected static synchronized void incComplted(int time, Section question) {
+		completed++;
+		if( min > time ) {
+			min = time;
+		}
+		if( max < time ) {
+			max = time;
+		}
+		timeAccum+= time;
+
+		ave = (int)(timeAccum / (double)completed);
+
+		if( time > 5000 ) {
+			Resolver logger = new Resolver();
+			logger.logDebug(() -> "Long search time="+time+" que="+question);
+		}	
+	}
+
+	protected static synchronized void incStart() {
+		started++;
+	}
+
+	public static void initResolver() throws IOException	{
+		//  Assume that this has been populated by the Server
+		Properties prop = System.getProperties();
+		String dnsDir = null;
+
+
+		if( (dnsDir=prop.getProperty(DnsServer.PROP_DNS_DIR)) == null ) {
+			dnsDir = DnsServer.DEFAULT_DNS_DIR;
+		}
+
+
+		java.io.File f = new File(dnsDir,"sbelt.prop");
+
+
+		//  First load the properties from the file
+		Properties p = new Properties();
+		if( f.exists() ) {
+			InputStream in = new FileInputStream(f);
+			try {
+				p.load(in);
+			} finally {
+				IoUtils.closeQuietly(in);
+			} 
+		}
+
+		Iterator<Object> it = p.keySet().iterator();
+
+		while( it.hasNext() ) {
+			String key = (String)it.next();
+			RemoteServer svr = new RemoteServer(key);
+			String val = p.getProperty(key);
+			// format hostname=ip4,ip6,org name
+			String parts[] = val.split(",");
+			String ip4 = parts[0];
+			svr.addAddress(key,ip4);
+			sbelt.add(svr);
+		}
+		//sbeltSize = sbelt.size();
+
+		String tmp = null;
+
+		if( (tmp=prop.getProperty(PROP_MAX_DNS_CACHE_AGE)) != null ) {
+			try {
+				Cache.setDefaultMaxAge(Long.parseLong(tmp));
+			} catch(Exception ex) {
+				Resolver logger = new Resolver();
+				logger.logError("Error setting maxCacheAge",ex);
+			}
+		}
+
+		if( (tmp=prop.getProperty(PROP_MAX_CACHE_ENTRIES)) != null ) {
+			try {
+				int max = Integer.parseInt(tmp.trim());
+				Cache.setDefaultMaxEntries(max);
+				cache.setMaxEntries(max);
+
+			} catch(Exception ex) {
+				Resolver logger = new Resolver();
+				logger.logError("Error setting "+PROP_MAX_CACHE_ENTRIES,ex);
+			}
+		}
+		startCacheSweeper(prop);
+
+		if( (tmp=prop.getProperty(PROP_MAX_NEGATIVE_TTL)) != null ) {
+			try {
+				Cache.setMaxNegativeTtl(Long.parseLong(tmp.trim()));
+			} catch(Exception ex) {
+				new Resolver().logError("Error setting "+PROP_MAX_NEGATIVE_TTL,ex);
+			}
+		}
+		if( (tmp=prop.getProperty(PROP_RESOLVE_TIMEOUT)) != null ) {
+			try {
+				setResolveTimeout(Long.parseLong(tmp.trim()));
+			} catch(Exception ex) {
+				new Resolver().logError("Error setting "+PROP_RESOLVE_TIMEOUT,ex);
+			}
+		}
+		if( (tmp=prop.getProperty(PROP_MAX_DELEGATIONS)) != null ) {
+			try {
+				setMaxDelegations(Integer.parseInt(tmp.trim()));
+			} catch(Exception ex) {
+				new Resolver().logError("Error setting "+PROP_MAX_DELEGATIONS,ex);
+			}
+		}
+		if( (tmp=prop.getProperty(PROP_DELEGATION_MAX_AGE)) != null ) {
+			try {
+				setDelegationMaxAge(Long.parseLong(tmp.trim())*1000L);
+			} catch(Exception ex) {
+				new Resolver().logError("Error setting "+PROP_DELEGATION_MAX_AGE,ex);
+			}
+		}
+
+		if( (tmp=prop.getProperty(PROP_UPSTREAM_HOLD_OFF_MIN)) != null ) {
+			try {
+				ServerA.HOLD_OFF_MIN = Math.max(1, Long.parseLong(tmp.trim()))*1000L;
+			} catch(Exception ex) {
+				new Resolver().logError("Error setting "+PROP_UPSTREAM_HOLD_OFF_MIN,ex);
+			}
+		}
+		if( (tmp=prop.getProperty(PROP_UPSTREAM_HOLD_OFF_MAX)) != null ) {
+			try {
+				ServerA.DEACTIVATE = Math.max(1, Long.parseLong(tmp.trim()))*1000L;
+			} catch(Exception ex) {
+				new Resolver().logError("Error setting "+PROP_UPSTREAM_HOLD_OFF_MAX,ex);
+			}
+		}
+
+		//  DNSSEC validation
+		String val = prop.getProperty(PROP_DNSSEC_VALIDATION);
+		if( val != null && val.trim().equalsIgnoreCase("true") ) {
+			List<us.bringardner.parley.dns.Ds> anchors = Validator.rootAnchors();
+			String af = prop.getProperty(PROP_DNSSEC_TRUST_ANCHORS);
+			if( af != null && !af.trim().isEmpty() ) {
+				File a = new File(af.trim());
+				if( !a.isAbsolute() ) {
+					a = new File(dnsDir, af.trim());
+				}
+				anchors = Validator.loadAnchors(a);
+			}
+			setValidator(newValidator(anchors));
+			new Resolver().log("DNSSEC validation on, "+anchors.size()+" trust anchors");
+		} else {
+			setValidator(null);
+		}
+
+		int resolverCount = 10;
+
+		if( (tmp=prop.getProperty(PROP_RESOLVER_COUNT)) != null ) {
+			try {
+				resolverCount = Integer.parseInt(tmp);
+			} catch(Exception ex){}
+		}
+
+		//  Stop the threads of an earlier initResolver(): they used to be left
+		//  running, out of reach of shutDown(), and kept taking queries off the
+		//  backlog (each DnsServer that starts calls this method).
+		ResolverThread [] old = resolvers;
+		if( old != null ) {
+			for(ResolverThread t : old) {
+				t.stop();
+			}
+			for(ResolverThread t : old) {
+				try {
+					t.join(1000);
+				} catch(InterruptedException ex) {
+					Thread.currentThread().interrupt();
+					break;
+				}
+			}
+		}
+		resolvers = new ResolverThread[resolverCount];
+
+		for(int i=0; i<resolverCount; i++ ) {
+			resolvers[i] = new ResolverThread();
+			resolvers[i].start("ResolverThread"+i);
+		}
+
+
+	}
+
+	public static void initResolver(String[] args) throws IOException {
+		for(int i=0; i< args.length; i++ ) {
+			System.setProperty(args[i],args[++i]);
+		}
+		initResolver();
+	}
+	
+	public static void main(String[] args) throws IOException {
+		initResolver(args);
+
+		String que = null;
+		boolean done = false;
+		BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
+
+		Message ans = null;
+
+		while( !done ) {
+			if( (que=in.readLine()) == null || que.equalsIgnoreCase("exit")) {
+				done = true;
+				continue;
+			}
+			if( que.endsWith("arpa") ) {
+				ans = resolve(que,DNS.PTR,DNS.IN);
+			} else {
+				ans = resolve(que);
+			}
+			if ( ans == null ) {
+				System.out.println("No answer availible fo r"+que);
+			} else {
+				System.out.println(ans.toString());
+			}
+		}
+
+	}
+	
+	public static void removeOld() {
+		cache.removeOld();
+	}
+
+	/** Remove expired entries from the cache. @return number removed */
+	public static int removeExpired() {
+		return cache.removeExpired();
+	}
+
+	private static synchronized void startCacheSweeper(Properties prop) {
+		if( cacheSweeper != null ) {
+			return;
+		}
+		long seconds = 60;
+		String tmp = prop.getProperty(PROP_CACHE_SWEEP_SECONDS);
+		if( tmp != null ) {
+			try {
+				seconds = Math.max(1, Long.parseLong(tmp.trim()));
+			} catch(Exception ex) {}
+		}
+		cacheSweeper = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(new NamedThreadFactory("ResolverCacheSweeper"));
+		cacheSweeper.scheduleWithFixedDelay(() -> {
+			try {
+				removeExpired();
+			} catch(Throwable ex) {
+				new Resolver().logError("Cache sweep failed",ex);
+			}
+		}, seconds, seconds, java.util.concurrent.TimeUnit.SECONDS);
+	}
+
+	private static synchronized void stopCacheSweeper() {
+		if( cacheSweeper != null ) {
+			cacheSweeper.shutdownNow();
+			cacheSweeper = null;
+		}
+	}
+	
+	/** Empty the cache and the learned delegations (admin 'reset'). */
+	public static void reset() {
+		//  (used to swap in a spare cache kept for out-of-memory emergencies
+		//  and call System.gc(); the cache is bounded now)
+		cache.clear();
+		synchronized (servers) {
+			servers.clear();
+		}
+	}
+	/**
+	 * Attempt to get an answer to a question
+	 **/
+	public static Message resolve(String name) {
+		return resolve(name,DNS.A,DNS.IN);
+	}
+	
+	/**
+	 * Attempt to get an answer to a question
+	 **/
+	public static Message resolve(String name, int type, int dnsClass)  {
+		return resolve(new Section(name,type,dnsClass));
+	}
+	
+	public static Message resolve(Section question) {
+		incStart();
+		long time = System.currentTimeMillis();
+
+		//  One deadline for the whole resolution: referrals and CNAME hops used
+		//  to start a fresh 4 s each
+		long deadline = System.currentTimeMillis() + resolveTimeout;
+		Message ret = resolveChain(question, new HashSet<String>(), 0, deadline);
+
+		incComplted((int)(System.currentTimeMillis()-time),question);
+
+		return ret;
+	}
+
+	/**
+	 * Resolve 'question', following a CNAME answer to its target.
+	 * <p>
+	 * The chain is limited to QueryData.MAX_CNAME_CHAIN hops and a name is
+	 * never followed twice, so a loop (a -> b -> a) ends with the chain found
+	 * so far instead of recursing until StackOverflowError.
+	 * 
+	 * @param seen lower case names already visited in this chain
+	 * @param depth number of CNAMEs followed so far
+	 */
+	private static Message resolveChain(Section question, Set<String> seen, int depth, long deadline) {
+		seen.add(question.getName().toLowerCase());
+
+		Message ret = cache.get(question);
+		if( ret == null ) {
+			//  Nothing in cache, search for it. A DS record lives in the parent
+			//  zone (RFC 4035 3.1.4.1): start from the parent's servers, not
+			//  from the child's (which would answer NODATA from the child side)
+			Section where = question;
+			if( question.getType() == DNS.DS && question.getParentName() != null && !question.getParentName().isEmpty() ) {
+				where = new Section(question.getParentName(), DNS.NS, question.getDnsClass());
+			}
+			if( (ret=resolve(question, getServers(where), deadline)) != null ) {
+				cache.put(ret);						
+			}
+		}
+
+		//  If this is the first time for a CNAME, AnswerCount should be 1
+		//  If it's grater than that, it's already been combined
+		if( ret != null && ret.getAnswerCount() == 1 ) {
+			//  Check for CNAME
+			RR rr = (RR)ret.getAnswer().get(0);
+			if( rr.getType() == DNS.CNAME && question.getType() != DNS.CNAME ) {
+				String target = ((Cname)rr).getCname();
+				if( depth >= QueryData.MAX_CNAME_CHAIN || seen.contains(target.toLowerCase()) ) {
+					new Resolver().logError("CNAME loop or chain too long at "+question.getName()+" -> "+target
+							+" (followed "+depth+"), returning the chain so far");
+					return ret;
+				}
+				Message ret2 = resolveChain(new Section(target,question.getType(),question.getDnsClass()), seen, depth+1, deadline);
+				if( ret2 == null ) {
+					ret = ret2;
+				} else {
+					//  Combine the results
+					ret.combine(ret2);
+					//  Need to do this so that expirte will work correctly
+					cache.put(ret);
+
+				}
+			}
+		}
+
+		return ret;
+	}
+
+	public static long getResolveTimeout() {
+		return resolveTimeout;
+	}
+
+	/** @param ms total time for one resolution, including referrals and CNAME hops */
+	public static void setResolveTimeout(long ms) {
+		resolveTimeout = Math.max(1, ms);
+	}
+
+	/** For tests: set the root ('safety belt') servers. */
+	static void setRootServersForTests(List<RemoteServer> list) {
+		sbelt.clear();
+		sbelt.addAll(list);
+	}
+
+	/** For tests: the live cache. */
+	static Cache getCache() {
+		return cache;
+	}
+
+	private static Message resolve(Section question, List<RemoteServer> slist, long deadline) {
+
+		Message ret = null;
+		//  OK Loop through each server in the slist until we get a response
+		RemoteServer svr = null;
+
+		long maxTime = deadline;
+		//  The zones' servers that are available; if none is (all held off after
+		//  failures), the one that comes back first: RemoteServer.resolve then
+		//  probes it. Recursion used to stop here until a hold-off ended.
+		List<RemoteServer> candidates = new java.util.ArrayList<RemoteServer>(slist.size());
+		RemoteServer first = null;
+		for(RemoteServer r : slist) {
+			if( r.isActive() ) {
+				candidates.add(r);
+			} else if( first == null || r.reactivatesAt() < first.reactivatesAt() ) {
+				first = r;
+			}
+		}
+		if( candidates.isEmpty() && first != null ) {
+			candidates.add(first);
+		}
+		slist = candidates;
+		for(int idx=0,sz=slist.size(); idx < sz; idx++ ) {
+			svr = slist.get(idx);
+			{
+				if( (ret = svr.resolve(question,maxTime)) != null) {
+					if( ret.isRecursive() ) {
+						//The server did the work so we're done
+						break;
+					}
+
+					//  Got something.  It could be an answer or a delegation
+					if( ret.getResponseCode() != DNS.NOERROR || ret.getAnswerCount() > 0 || isNoData(ret) ) {
+						//  Got it (NODATA too: an SOA in the authority section is
+						//  a negative answer, not a referral; it used to be taken
+						//  for one and the query failed with SERVFAIL)
+						break;
+					}
+					//  Check for a delegation here
+					if( ret.getNSCount() > 0 ) {
+						//  a delegation
+						RemoteServer svr2 = new RemoteServer(ret);
+
+						if( svr2 != null && svr.matchCount(question) < svr2.matchCount(question) ) {
+							//  This set of servers is 'closer' to the
+							//  answer, so cache it 
+							//  (the zone's known RemoteServer, with these addresses merged in)
+							RemoteServer use = addServer(svr2);
+							// and use them instead.
+							slist = Collections.singletonList(use);
+							//TODO:  Major testing here
+							return resolve(question,slist,deadline);
+						}
+
+					}
+				}
+			}
+		}
+
+		return ret;
+	}
+	
+	/** An answer that the name has no data of the type: no answers, an SOA in the authority section (RFC 2308 2.2). */
+	static boolean isNoData(Message m) {
+		if( m.getAnswerCount() > 0 ) {
+			return false;
+		}
+		for(RR rr : m.getAuthority()) {
+			if( rr.getType() == DNS.SOA ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Wait up to ms for the resolver threads stopped by shutDown() to finish.
+	 * @return true if they all have
+	 */
+	public static boolean awaitShutdown(long ms) throws InterruptedException {
+		ResolverThread [] list = resolvers;
+		boolean ret = true;
+		long deadline = System.currentTimeMillis()+ms;
+		for(int i=0; list != null && i< list.length; i++ ) {
+			long left = Math.max(1, deadline - System.currentTimeMillis());
+			ret &= list[i].join(left);
+		}
+		return ret;
+	}
+
+	public static void shutDown() {
+		stopCacheSweeper();
+		for(int i=0; resolvers != null && i< resolvers.length; i++ ) {
+			resolvers[i].stop();
+		}
+		//ResolverThread.notifyThreads();
+	}
+}

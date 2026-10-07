@@ -1,4 +1,18 @@
-# BjlDns
+# parley-dns
+
+> parley-dns is part of **Parley**, a family of Java libraries for implementing internet protocols.
+> It was previously `us.bringardner:bjl_dns` (BjlDns), with packages under `us.bringardner.net.dns`.
+> Moving over means changing the dependency and replacing `us.bringardner.net.dns` with
+> `us.bringardner.parley.dns` in imports and in class names on the command line.
+> Configuration properties (`JDns.*`) are unchanged.
+
+```xml
+<dependency>
+    <groupId>us.bringardner.parley</groupId>
+    <artifactId>parley-dns</artifactId>
+    <version>1.0.0</version>
+</dependency>
+```
  The DNS project provides everything you need to run a DNS server and  a DNS client
  and the NsLookup and NsUpdate tools (work-alikes of nslookup and nsupdate).
 
@@ -39,7 +53,7 @@ The zone file is never rewritten. Changes are appended to a journal next to it, 
 
 A zone is signed when the key directory (`JDns.dnssecKeyDir`, by default the zone directory) has keys for it. The server signs it when it loads it, after every dynamic update or dynamic entry change, and again before the signatures expire; nothing needs to be run by hand after the keys exist.
 
-1. Make a key: `java -cp bjl_dns.jar:bjl_core.jar:bjl_io.jar us.bringardner.net.dns.dnssec.DnssecKeyTool keygen -d zones example.com`. This writes `Kexample.com.+013+<tag>.key` and `.private` (keep that one secret) and prints the DS record. One key (ECDSA P-256, a combined signing key) is all a zone needs; `-ksk` / `-zsk` make separate key and zone signing keys, `-a` picks the algorithm: ECDSAP256SHA256 (default), ECDSAP384SHA384, ED25519 (Java 15 or later), RSASHA256, RSASHA512. Keys made with BIND's `dnssec-keygen` work too.
+1. Make a key: `java -cp parley-dns.jar:parley-core.jar:parley-io.jar us.bringardner.parley.dns.dnssec.DnssecKeyTool keygen -d zones example.com`. This writes `Kexample.com.+013+<tag>.key` and `.private` (keep that one secret) and prints the DS record. One key (ECDSA P-256, a combined signing key) is all a zone needs; `-ksk` / `-zsk` make separate key and zone signing keys, `-a` picks the algorithm: ECDSAP256SHA256 (default), ECDSAP384SHA384, ED25519 (Java 15 or later), RSASHA256, RSASHA512. Keys made with BIND's `dnssec-keygen` work too.
 2. Start (or wait for the next reload): the zone is served signed.
 3. Give the DS record to the parent zone (your registrar). `DnssecKeyTool ds -d zones example.com` prints it again. Until the parent has it, validators treat the zone as unsigned; once it does, they reject answers that don't verify.
 
@@ -72,19 +86,19 @@ With `JDns.dnssecValidation=true` the resolver validates the answers it fetches 
  +  Algorithms: RSASHA1 and NSEC3RSASHA1 (validation only), RSASHA256, RSASHA512, ECDSA P-256 and P-384, Ed25519 (Java 15+). DS digests SHA-1, SHA-256, SHA-384. NSEC3 with more than 150 iterations, and answers resting on an opt-out NSEC3, are treated as insecure (RFC 9276, RFC 5155 9.2).
  +  Key sets and zone cuts are cached (their TTLs, at most an hour; failures for a minute).
  +  The result is kept with the cached answer, so a cached answer is validated once, not on every query. A BOGUS answer is not kept: the next query fetches it again.
- +  `JDns.dnssecTrustAnchors` names a file of anchors, one DS or DNSKEY record per line (BIND's `root.key` or `root.ds` work), e.g. for a private zone; it replaces the built in root anchors. The root anchors are not updated automatically: if the root zone rolls its key again, update BjlDns or give the new key in this file.
+ +  `JDns.dnssecTrustAnchors` names a file of anchors, one DS or DNSKEY record per line (BIND's `root.key` or `root.ds` work), e.g. for a private zone; it replaces the built in root anchors. The root anchors are not updated automatically: if the root zone rolls its key again, update parley-dns or give the new key in this file.
  +  Validation needs correct time on the server (signatures have validity periods) and upstream servers that pass on DNSSEC records.
- +  It only matters when BjlDns resolves for clients (`JDns.ra=true`); an authoritative-only server doesn't need it.
+ +  It only matters when parley-dns resolves for clients (`JDns.ra=true`); an authoritative-only server doesn't need it.
    
  
 Dependencies:  
-+ BjlCore  
-+ BjlIo
++ [parley-core](https://github.com/tony-bringardner/parley-core)  
++ [parley-io](https://github.com/tony-bringardner/parley-io)
  			
 
 # Typed lookups (client API)
 
-`us.bringardner.net.dns.resolve.Lookup` asks the resolver for one record type and returns the values with a status, for code such as SPF, DKIM and DMARC checks that needs to tell "no such name" from "no record" from "try again later".
+`us.bringardner.parley.dns.resolve.Lookup` asks the resolver for one record type and returns the values with a status, for code such as SPF, DKIM and DMARC checks that needs to tell "no such name" from "no record" from "try again later".
 
 ```java
 LookupResult<String> r = Lookup.txt("_dmarc.example.com");
@@ -101,14 +115,14 @@ switch( r.getStatus() ) {
 + `Lookup.txt(name, response)` and `Lookup.fromResponse(...)` apply the same rules to a response you got another way, e.g. from a query sent straight to a recursive server (BjlEmail's stub resolver does this for DKIM keys).
 + Answers come from and go into the resolver cache. The resolver must be initialized (`Resolver.initResolver()`); with no servers configured a lookup that misses the cache is TEMPFAIL.
 
-`us.bringardner.net.dns.ReverseName` makes the `in-addr.arpa` / `ip6.arpa` name of an address (`ReverseName.of(addr)`, or `of("2001:db8::1")`, which returns null for text that is not an address literal) and turns one back into an address (`toAddress`).
+`us.bringardner.parley.dns.ReverseName` makes the `in-addr.arpa` / `ip6.arpa` name of an address (`ReverseName.of(addr)`, or `of("2001:db8::1")`, which returns null for text that is not an address literal) and turns one back into an address (`toAddress`).
 
 # NsLookup
 
-`us.bringardner.net.dns.util.NsLookup` works like the Linux (ISC BIND 9) `nslookup`: the same command line, interactive commands, options, output and exit status. Its output was checked line by line against `nslookup` 9.18 (`TestNsLookupOffline` replays the recorded output).
+`us.bringardner.parley.dns.util.NsLookup` works like the Linux (ISC BIND 9) `nslookup`: the same command line, interactive commands, options, output and exit status. Its output was checked line by line against `nslookup` 9.18 (`TestNsLookupOffline` replays the recorded output).
 
 ```
-java -cp bjl_dns.jar:bjl_core.jar:bjl_io.jar us.bringardner.net.dns.util.NsLookup [-option ...] [host [server]]
+java -cp parley-dns.jar:parley-core.jar:parley-io.jar us.bringardner.parley.dns.util.NsLookup [-option ...] [host [server]]
 java ... NsLookup -type=mx example.com 192.0.2.53
 java ... NsLookup -port=5353 -debug www.example.com 127.0.0.1
 java ... NsLookup 192.0.2.1              # an address: its PTR record
@@ -121,7 +135,7 @@ java ... NsLookup - 127.0.0.1            # interactive, using 127.0.0.1
 + **Options** (`set OPTION`, or `-OPTION` on the command line; like `nslookup`, a unique prefix works, e.g. `set deb`, `-q=mx`): `all`, `type=` (`querytype=`), `class=`, `domain=`, `srchlist=a/b/c`, `port=`, `timeout=` (seconds), `retry=`, `ndots=`, `[no]debug`, `[no]d2`, `[no]recurse`, `[no]search` (`[no]defname`), `[no]vc` (TCP; ANY queries use TCP unless `novc` is set), `[no]fail` (`nofail`: try the next server after SERVFAIL).
 + **Exit status**: 1 if a lookup failed (an error answer such as NXDOMAIN, or no server could be reached), else 0.
 
-Differences from `nslookup`: `help` prints the commands (nslookup says it is not implemented), `quit` exits (nslookup looks up the host "quit"), `srchlist=` is accepted (from the older nslookup), `d2` turns on BjlDns debug logging, and `NAME SERVER` works in interactive mode (as the nslookup manual says; BIND 9 ignores the server there). `ls`, `finger`, `root` and `view` are not implemented, as in BIND 9.
+Differences from `nslookup`: `help` prints the commands (nslookup says it is not implemented), `quit` exits (nslookup looks up the host "quit"), `srchlist=` is accepted (from the older nslookup), `d2` turns on parley-dns debug logging, and `NAME SERVER` works in interactive mode (as the nslookup manual says; BIND 9 ignores the server there). `ls`, `finger`, `root` and `view` are not implemented, as in BIND 9.
 
 | Property | Default | Meaning |
 |---|---|---|
@@ -131,10 +145,10 @@ The old options `-s SERVER` and `-p PORT` are gone: use `nslookup host SERVER` a
 
 # NsUpdate
 
-`us.bringardner.net.dns.util.NsUpdate` works like the ISC BIND 9 `nsupdate` (RFC 2136 dynamic update): the same command line, commands, output (`show`, `answer`, `-d`), messages and exit status. It was checked against `nsupdate` 9.18 on the same scripts and server, output and resulting zone (`TestNsUpdate` replays 64 recorded cases).
+`us.bringardner.parley.dns.util.NsUpdate` works like the ISC BIND 9 `nsupdate` (RFC 2136 dynamic update): the same command line, commands, output (`show`, `answer`, `-d`), messages and exit status. It was checked against `nsupdate` 9.18 on the same scripts and server, output and resulting zone (`TestNsUpdate` replays 64 recorded cases).
 
 ```
-java -cp bjl_dns.jar:bjl_core.jar:bjl_io.jar us.bringardner.net.dns.util.NsUpdate [options] [script]
+java -cp parley-dns.jar:parley-core.jar:parley-io.jar us.bringardner.parley.dns.util.NsUpdate [options] [script]
 ```
 
 ```
@@ -146,11 +160,11 @@ send
 ```
 
 + **Command line**: `-y [hmac:]keyname:secret` or `-k keyfile` (a named.conf `key` clause as `tsig-keygen` writes it, or a `K*.+163+*` pair) sign the updates with TSIG; `-l` (localhost, key from `/var/run/named/session.key`), `-p port`, `-v` (TCP), `-t timeout`, `-u udptimeout`, `-r udpretries`, `-C resolv.conf`, `-d`/`-D` (debug), `-i`, `-4`/`-6`, `-V`. Without a script file, commands come from standard input.
-+ **Commands**: `server name [port]`, `local address [port]`, `zone name`, `class`, `ttl`, `key [hmac:]name secret`, `check-names on|off`, `[prereq] nxdomain|yxdomain|nxrrset|yxrrset ...`, `[update] add|del[ete] ...`, `show`, `send` (or a blank line), `answer`, `debug`, `version`, `help`, `quit`. Record data is written as in a zone file (all the types BjlDns reads, and `\# length hex` for any type); names are absolute.
++ **Commands**: `server name [port]`, `local address [port]`, `zone name`, `class`, `ttl`, `key [hmac:]name secret`, `check-names on|off`, `[prereq] nxdomain|yxdomain|nxrrset|yxrrset ...`, `[update] add|del[ete] ...`, `show`, `send` (or a blank line), `answer`, `debug`, `version`, `help`, `quit`. Record data is written as in a zone file (all the types parley-dns reads, and `\# length hex` for any type); names are absolute.
 + **Finding the zone**: without `zone` and `server`, the zone and its primary come from an SOA query to the servers in resolv.conf (as `nsupdate`), then the update goes to the primary named in the SOA.
 + **Exit status**: 0; 1 for a syntax or setup error (a script stops at the first one); 2 when an update failed (e.g. `update failed: NXRRSET`).
 
-Differences from `nsupdate`: no GSS-TSIG (`-g`, `-o`), SIG(0) keys or truncated MACs (`hmac-sha256-128`); `-T` lists the types BjlDns knows and `-P` none; the time stamped messages of BIND's own log (e.g. `dns_rdata_fromtext: ... near '10.3.0.999'` before "invalid rdata format") are not printed; `-D` prints fewer internal steps.
+Differences from `nsupdate`: no GSS-TSIG (`-g`, `-o`), SIG(0) keys or truncated MACs (`hmac-sha256-128`); `-T` lists the types parley-dns knows and `-P` none; the time stamped messages of BIND's own log (e.g. `dns_rdata_fromtext: ... near '10.3.0.999'` before "invalid rdata format") are not printed; `-D` prints fewer internal steps.
 
 # Running in production
 
@@ -159,7 +173,7 @@ Run the server under a supervisor (systemd, launchd, a container runtime) that r
 ```
 java -Xmx256m -XX:+ExitOnOutOfMemoryError \
      -DJDns.properties=/data/services/dns/config/JDns.properties \
-     -cp bjl_dns.jar:bjl_core.jar:bjl_io.jar us.bringardner.net.dns.server.DnsServer
+     -cp parley-dns.jar:parley-core.jar:parley-io.jar us.bringardner.parley.dns.server.DnsServer
 ```
 
 `DnsServer.main` also installs `FatalErrorHandler`: any thread that dies from an uncaught error is logged, and on a JVM error (e.g. `OutOfMemoryError`) the process halts with exit code 1 so the supervisor starts a clean one. Set `-DJDns.exitOnFatalError=false` to only log. Applications that embed the server can call `FatalErrorHandler.install(true)`.
@@ -172,11 +186,11 @@ Example systemd unit:
 
 ```
 [Unit]
-Description=BjlDns
+Description=parley-dns
 After=network-online.target
 
 [Service]
-ExecStart=/usr/bin/java -Xmx256m -XX:+ExitOnOutOfMemoryError -DJDns.properties=/data/services/dns/config/JDns.properties -cp /opt/bjldns/lib/* us.bringardner.net.dns.server.DnsServer
+ExecStart=/usr/bin/java -Xmx256m -XX:+ExitOnOutOfMemoryError -DJDns.properties=/data/services/dns/config/JDns.properties -cp /opt/parley-dns/lib/* us.bringardner.parley.dns.server.DnsServer
 Restart=on-failure
 RestartSec=2
 
@@ -186,7 +200,7 @@ WantedBy=multi-user.target
 
 ## Configuration properties
 
-Set them in the properties file (`JDns.properties`, see below) or with `-D` on the command line; `-D` wins. Every BjlDns property starts with `JDns.`.
+Set them in the properties file (`JDns.properties`, see below) or with `-D` on the command line; `-D` wins. Every parley-dns property starts with `JDns.`.
 
 A bind address of `localhost` means this host's own name (its network address), not the loopback interface, so the server is reachable from the network; a warning is logged. Use `127.0.0.1` to listen on loopback only.
 
@@ -292,9 +306,9 @@ The standalone `DynamicDns` class uses the same four `JDns.jdbc*` properties.
 | `JDns.dnssecNsec3Iterations` | 0 | NSEC3 extra hash iterations (0-100; RFC 9276 recommends 0) |
 | `JDns.dnssecNsec3Salt` | - | NSEC3 salt in hex, `-` for none (RFC 9276 recommends none) |
 
-### Logging (BjlCore)
+### Logging (parley-core)
 
-Logging comes from the BjlCore library, whose property names are its own: `LogLevel` (default ERROR; e.g. DEBUG, INFO), `<logger name>.LogLevel` for one logger, `LogFile` (default: standard output) and `ILogger` (the logger class).
+Logging comes from the parley-core library, whose property names are its own: `LogLevel` (default ERROR; e.g. DEBUG, INFO), `<logger name>.LogLevel` for one logger, `LogFile` (default: standard output) and `ILogger` (the logger class).
 
 ### Renamed properties
 

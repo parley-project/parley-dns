@@ -1,0 +1,111 @@
+/**
+ * <PRE>
+ * 
+ * Copyright Tony Bringarder 1998, 2025 <A href="http://bringardner.com/tony">Tony Bringardner</A>
+ * 
+ *
+ *   Licensed under the Apache License, Version 2.0 (the "License");
+ *   you may not use this file except in compliance with the License.
+ *   You may obtain a copy of the License at
+ *
+ *       <A href="http://www.apache.org/licenses/LICENSE-2.0">http://www.apache.org/licenses/LICENSE-2.0</A>
+ *
+ *   Unless required by applicable law or agreed to in writing, software
+ *   distributed under the License is distributed on an "AS IS" BASIS,
+ *   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *   See the License for the specific language governing permissions and
+ *   limitations under the License.
+ *  </PRE>
+ *   
+ *   
+ *	@author Tony Bringardner   
+ *
+ *
+ * ~version~V000.01.02-V000.00.05-V000.00.00-
+ */
+package us.bringardner.parley.dns;
+
+import us.bringardner.parley.core.BaseObject;
+
+/**
+ * 
+ * Creation date: (4/23/2003 9:38:50 AM)
+ * @author: Tony Bringardner
+ * 
+ */
+public class DnsBaseClass extends BaseObject {
+	
+	//  setState is called several times per query, so it only stores
+	//  references; the text is built when someone asks (admin status).
+	private static final class State {
+		final String text;
+		final Object detail;
+		final long time = System.currentTimeMillis();
+		State(String text, Object detail) {
+			this.text = text;
+			this.detail = detail;
+		}
+	}
+	private volatile State state = new State("Not Started", null);
+/**
+ * FtpBaseClass constructor comment.
+ */
+public DnsBaseClass() 
+{
+	super();
+}
+
+public void log(String msg) {
+	logDebug(msg);
+}
+
+/**
+ * Debug log entry whose text is only built when debug logging is enabled.
+ * Use it where the message is built per packet / query:
+ * log(() -> "Reply Sent ("+q+")");
+ */
+public void log(java.util.function.Supplier<String> msg) {
+	logDebug(msg);
+}
+
+public void log(String msg, Throwable e1) {
+	logError(msg,e1);
+}
+public void log(Exception ex,String msg) {
+	logError(msg,ex);
+}
+
+/**
+ * 
+ * Creation date: (10/14/2003 7:46:22 AM)
+ * @return java.lang.String
+ */
+public java.lang.String getState() {
+	State s = state;
+	StringBuilder ret = new StringBuilder(s.text);
+	if( s.detail != null ) {
+		ret.append(':').append(s.detail);
+	}
+	return ret.append(' ').append(new java.util.Date(s.time)).toString();
+}
+
+
+/**
+ * 
+ * Creation date: (10/14/2003 7:46:22 AM)
+ * @param newState java.lang.String
+ */
+public void setState(java.lang.String newState) 
+{
+	state = new State(newState, null);
+}
+
+/**
+ * Like setState(String) but detail.toString() is only called if the state
+ * is displayed.
+ */
+public void setState(java.lang.String newState, Object detail) 
+{
+	state = new State(newState, detail);
+}
+}
