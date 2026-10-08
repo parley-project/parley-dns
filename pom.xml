@@ -21,7 +21,6 @@
 	<inceptionYear>1999</inceptionYear>
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-		<maven.compiler.release>11</maven.compiler.release>
 		<!-- Written to the jar manifest as Automatic-Module-Name -->
 		<parley.moduleName>us.bringardner.parley.dns</parley.moduleName>
 	</properties>
@@ -34,16 +33,6 @@
 			so Maven's default (older) compiler and surefire versions were used.
 		-->
 		<plugins>
-			<plugin>
-				<!-- 'release' checks the Java 11 API as well as the language level
-				     (source/target 11 on a newer JDK could still use newer APIs) -->
-				<groupId>org.apache.maven.plugins</groupId>
-				<artifactId>maven-compiler-plugin</artifactId>
-				<version>3.13.0</version>
-				<configuration>
-					<release>11</release>
-				</configuration>
-			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-surefire-plugin</artifactId>
