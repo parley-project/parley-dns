@@ -22,6 +22,7 @@
  */
 package us.bringardner.parley.dns.server;
 
+import us.bringardner.parley.core.util.Hex;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
@@ -52,7 +53,7 @@ public final class AdminAuth {
 	public static String newChallenge() {
 		byte [] b = new byte[16];
 		RANDOM.nextBytes(b);
-		return hex(b);
+		return Hex.encode(b);
 	}
 
 	/** The answer a client sends for this challenge. */
@@ -60,7 +61,7 @@ public final class AdminAuth {
 		try {
 			Mac mac = Mac.getInstance(ALG);
 			mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), ALG));
-			return hex(mac.doFinal(challenge.getBytes(StandardCharsets.UTF_8)));
+			return Hex.encode(mac.doFinal(challenge.getBytes(StandardCharsets.UTF_8)));
 		} catch(Exception ex) {
 			throw new IllegalStateException("HmacSHA256 not available", ex);
 		}
@@ -87,14 +88,5 @@ public final class AdminAuth {
 			}
 		}
 		return null;
-	}
-
-	private static String hex(byte [] b) {
-		StringBuilder sb = new StringBuilder(b.length*2);
-		for(byte x : b) {
-			sb.append(Character.forDigit((x >> 4) & 0xf, 16));
-			sb.append(Character.forDigit(x & 0xf, 16));
-		}
-		return sb.toString();
 	}
 }

@@ -23,6 +23,7 @@
  */
 package us.bringardner.parley.dns.dnssec;
 
+import us.bringardner.parley.core.util.Der;
 import java.math.BigInteger;
 import java.security.AlgorithmParameters;
 import java.security.GeneralSecurityException;
@@ -411,19 +412,11 @@ public abstract class Algorithm {
 
 	static final class Ed25519 extends Algorithm {
 		//  DER prefixes of the PKCS#8 private key and X.509 public key encodings
-		private static final byte [] PKCS8_PREFIX = hex("302e020100300506032b657004220420");
-		private static final byte [] X509_PREFIX = hex("302a300506032b6570032100");
+		private static final byte [] PKCS8_PREFIX = Der.ED25519_PKCS8_PREFIX;
+		private static final byte [] X509_PREFIX = Der.ED25519_SPKI_PREFIX;
 
 		Ed25519() {
 			super(ED25519, "ED25519");
-		}
-
-		private static byte [] hex(String h) {
-			byte [] b = new byte[h.length()/2];
-			for(int i=0; i < b.length; i++ ) {
-				b[i] = (byte)Integer.parseInt(h.substring(2*i, 2*i+2), 16);
-			}
-			return b;
 		}
 
 		private static byte [] concat(byte [] a, byte [] b) {

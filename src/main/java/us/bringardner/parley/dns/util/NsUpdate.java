@@ -22,9 +22,9 @@
  */
 package us.bringardner.parley.dns.util;
 
+import us.bringardner.parley.dns.DnsTransport;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -57,7 +57,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import us.bringardner.parley.dns.ByteBuffer;
-import us.bringardner.parley.dns.Cname;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.Mx;
@@ -1906,25 +1905,13 @@ public class NsUpdate extends Utility {
 		long overall = System.currentTimeMillis() + 1000L*Math.min(timeout, 1000000);
 		try(DatagramSocket sock = local != null ? new DatagramSocket(new InetSocketAddress(local, localPort)) : new DatagramSocket()) {
 			sock.connect(server);
-			byte [] buf = new byte[65535];
 			for(int attempt=0; attempt <= udpRetries; attempt++ ) {
 				sock.send(new DatagramPacket(data, data.length));
 				long deadline = Math.min(overall, System.currentTimeMillis() + 1000L*Math.max(udpTimeout, 1));
-				while( true ) {
-					long remaining = deadline - System.currentTimeMillis();
-					if( remaining <= 0 ) {
-						break;
-					}
-					sock.setSoTimeout((int)remaining);
-					DatagramPacket p = new DatagramPacket(buf, buf.length);
-					try {
-						sock.receive(p);
-					} catch(SocketTimeoutException ex) {
-						break;
-					}
-					if( p.getLength() >= 12 && (((buf[0] & 0xff) << 8) | (buf[1] & 0xff)) == id && (buf[2] & 0x80) != 0 ) {
-						return Arrays.copyOf(buf, p.getLength());
-					}
+				byte [] resp = DnsTransport.udpAwait(sock, null, deadline,
+						w -> w.length >= 12 && (((w[0] & 0xff) << 8) | (w[1] & 0xff)) == id && (w[2] & 0x80) != 0, null);
+				if( resp != null ) {
+					return resp;
 				}
 				if( System.currentTimeMillis() >= overall ) {
 					break;
@@ -1956,17 +1943,9 @@ public class NsUpdate extends Utility {
 			}
 			sock.setSoTimeout(ms);
 			OutputStream os = sock.getOutputStream();
-			ByteArrayOutputStream b = new ByteArrayOutputStream();
-			b.write(data.length >> 8);
-			b.write(data.length);
-			b.write(data);
-			os.write(b.toByteArray());
+			os.write(DnsTransport.frame(data));
 			os.flush();
-			DataInputStream din = new DataInputStream(sock.getInputStream());
-			int len = din.readUnsignedShort();
-			byte [] resp = new byte[len];
-			din.readFully(resp);
-			return resp;
+			return DnsTransport.readFramed(sock, System.currentTimeMillis()+ms);
 		} catch(SocketTimeoutException ex) {
 			throw new CommunicationsError("timed out");
 		} catch(CommunicationsError ex) {
