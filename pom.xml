@@ -59,6 +59,11 @@
 					</plugins>
 				</configuration>
 			</plugin>
+			<!-- Runs the source plugin set up in pluginManagement below, so the -sources.jar is attached -->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-source-plugin</artifactId>
+			</plugin>
 		</plugins>
 		<pluginManagement>
 			<plugins>
