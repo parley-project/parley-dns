@@ -28,6 +28,7 @@ package us.bringardner.parley.dns;
 /*
 	Copyright Tony Bringardner 1999, 2000
  */
+import java.net.InetSocketAddress;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InterruptedIOException;
@@ -923,33 +924,21 @@ TC              TrunCation - specifies that this message was truncated
 			}
 			try {
 
-				byte [] sz = new byte[2];
-				setShort(sz,0,(short)data.length);
 				byte [] resp = null;
 				Socket sock = new Socket();
 				try {
-					sock.connect(new java.net.InetSocketAddress(svr,port), remaining(end));
+					sock.connect(new java.net.InetSocketAddress(svr,port), DnsTransport.remaining(end));
 					sock.setTcpNoDelay(true);
 					OutputStream out = sock.getOutputStream();
-					InputStream  in  = sock.getInputStream();
 
 					//  One write (length and message): avoids a small first segment
-					byte [] framed = new byte[2+data.length];
-					System.arraycopy(sz, 0, framed, 0, 2);
-					System.arraycopy(data, 0, framed, 2, data.length);
-					sock.setSoTimeout(remaining(end));
-					out.write(framed);
+					sock.setSoTimeout(DnsTransport.remaining(end));
+					out.write(DnsTransport.frame(data));
 					out.flush();
-
-					readFully(sock, in, sz, end);
-
-					int len = makeShort(sz[0], sz[1]) & 0xFFFF;
 
 					//  Separate buffer: the old code overwrote 'data' with the
 					//  response, so a retry re-sent the previous response.
-					resp = new byte[len];
-
-					readFully(sock, in, resp, end);
+					resp = DnsTransport.readFramed(sock, end);
 
 				}finally {
 					sock.close();
@@ -968,31 +957,6 @@ TC              TrunCation - specifies that this message was truncated
 			} catch(InterruptedIOException ex) {}
 		}
 		throw new InterruptedIOException("Timed out "+retry+" times");
-	}
-
-	/** ms left until end, at least 1 (a socket timeout of 0 would mean forever). */
-	private static int remaining(long end) throws InterruptedIOException {
-		long left = end - System.currentTimeMillis();
-		if( left <= 0 ) {
-			throw new java.net.SocketTimeoutException("Deadline passed");
-		}
-		return (int)Math.min(Integer.MAX_VALUE, left);
-	}
-
-	/**
-	 * Fill ba from in, giving up at 'end' (ms): the socket timeout is set to
-	 * the time left before every read, so the whole read is bounded.
-	 */
-	static void readFully(Socket sock, InputStream in, byte [] ba, long end) throws IOException {
-		int pos = 0;
-		while( pos < ba.length ) {
-			sock.setSoTimeout(remaining(end));
-			int cnt = in.read(ba, pos, ba.length-pos);
-			if( cnt == -1 ) {
-				throw new IOException("Unexpected EOF in Message.readFully");
-			}
-			pos += cnt;
-		}
 	}
 
 	public Message queryUDP() throws InterruptedIOException , UnknownHostException,IOException , SocketException {
@@ -1030,7 +994,9 @@ TC              TrunCation - specifies that this message was truncated
 
 		DatagramPacket pckt = new DatagramPacket(data,data.length,server, port);
 		Message ret = null;
-		int rejected = 0;
+		int[] rejected = new int[1];
+		InetSocketAddress from = new InetSocketAddress(server, port);
+		Message[] answer = new Message[1];
 		DatagramSocket sock = new DatagramSocket();
 		try {
 			for(int i=0; i<retry && ret == null; i++ ) {
@@ -1039,48 +1005,28 @@ TC              TrunCation - specifies that this message was truncated
 					break;
 				}
 				sock.send(pckt);
-				while( ret == null ) {
-					long remaining = attemptEnd - System.currentTimeMillis();
-					if( remaining <= 0 ) {
-						break;
-					}
-					sock.setSoTimeout((int)remaining);
-					byte [] buf = new byte[MAXUDPLEN];
-					DatagramPacket recPckt = new DatagramPacket(buf,buf.length);
-					try {
-						sock.receive(recPckt);
-					} catch(InterruptedIOException ex) {
-						break;
-					}
-
-					//  Must come from the address and port we sent to
-					if( !server.equals(recPckt.getAddress()) || recPckt.getPort() != port ) {
-						rejected++;
-						continue;
-					}
-
-					Message m = null;
+				//  Must come from the address and port we sent to, parse, be a response to this query
+				DnsTransport.udpAwait(sock, from, attemptEnd, wire -> {
 					try {
 						//  Parse only the bytes received
-						m = new Message(new ByteBuffer(java.util.Arrays.copyOf(buf, recPckt.getLength())));
+						Message m = new Message(new ByteBuffer(wire));
+						if( isResponseTo(m,id) ) {
+							answer[0] = m;
+							return true;
+						}
 					} catch(RuntimeException ex) {
-						rejected++;
-						continue;
+						//  not a DNS message
 					}
-
-					if( isResponseTo(m,id) ) {
-						ret = m;
-					} else {
-						rejected++;
-					}
-				}
+					return false;
+				}, () -> rejected[0]++);
+				ret = answer[0];
 			}
 		} finally {
 			sock.close();
 		}
 
-		if( rejected > 0 ) {
-			final int ignored = rejected;
+		if( rejected[0] > 0 ) {
+			final int ignored = rejected[0];
 			logDebug(() -> "Ignored "+ignored+" unexpected/mismatched UDP packet(s) while querying "+server+":"+port+" for "+getFirstQuestion());
 		}
 

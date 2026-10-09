@@ -23,12 +23,12 @@
  */
 package us.bringardner.parley.dns.server;
 
+import us.bringardner.parley.dns.DnsTransport;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -183,37 +183,30 @@ public class ZoneNotifier extends DnsBaseClass {
 				sock.send(new DatagramPacket(data, data.length, target));
 				sent.incrementAndGet();
 				long end = System.currentTimeMillis()+wait;
-				byte [] buf = new byte[4096];
-				while( System.currentTimeMillis() < end ) {
-					sock.setSoTimeout((int)Math.max(1, end-System.currentTimeMillis()));
-					DatagramPacket p = new DatagramPacket(buf, buf.length);
+				us.bringardner.parley.dns.Tsig.Session session = tsig;
+				byte [] answer = DnsTransport.udpAwait(sock, target, end, wire -> {
 					try {
-						sock.receive(p);
-					} catch(SocketTimeoutException e) {
-						break;
-					}
-					if( !p.getAddress().equals(target.getAddress()) || p.getPort() != target.getPort() ) {
-						continue;
-					}
-					try {
-						byte [] wire = java.util.Arrays.copyOf(buf, p.getLength());
 						Message r = new Message(new ByteBuffer(wire));
 						if( r.getID() == id && !r.isQuery() && r.getHeader().getOPCODE() == DNS.NOTIFY ) {
-							if( tsig != null ) {
+							if( session != null ) {
 								try {
-									tsig.verifyResponse(wire);
+									session.verifyResponse(wire);
 								} catch(us.bringardner.parley.dns.Tsig.TsigException ex) {
 									logError("NOTIFY answer for "+zoneName+" from "+target+" failed TSIG: "+ex.getMessage());
-									continue;
+									return false;
 								}
 							}
-							acknowledged.incrementAndGet();
-							log(() -> "NOTIFY for "+zoneName+" acknowledged by "+target);
-							return;
+							return true;
 						}
 					} catch(RuntimeException ignore) {
 						//  not a DNS message
 					}
+					return false;
+				}, null);
+				if( answer != null ) {
+					acknowledged.incrementAndGet();
+					log(() -> "NOTIFY for "+zoneName+" acknowledged by "+target);
+					return;
 				}
 				wait *= 2;
 			}

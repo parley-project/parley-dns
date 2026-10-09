@@ -25,13 +25,11 @@
  */
 package us.bringardner.parley.dns.util;
 
+import us.bringardner.parley.dns.DnsTransport;
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.PrintStream;
@@ -49,7 +47,6 @@ import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.security.SecureRandom;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Hashtable;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -1383,26 +1380,23 @@ public class NsLookup extends Utility {
 			//  Connected, so an ICMP port unreachable is reported (connection refused)
 			sock.connect(server, port);
 			sock.send(new DatagramPacket(data, data.length));
-			long deadline = System.currentTimeMillis()+ms;
-			byte [] buf = new byte[65535];
-			while( true ) {
-				long remaining = deadline-System.currentTimeMillis();
-				if( remaining <= 0 ) {
-					throw new SocketTimeoutException();
-				}
-				sock.setSoTimeout((int)remaining);
-				DatagramPacket p = new DatagramPacket(buf, buf.length);
-				sock.receive(p);
-				Message m;
+			Message[] answer = new Message[1];
+			byte [] wire = DnsTransport.udpAwait(sock, null, System.currentTimeMillis()+ms, w -> {
 				try {
-					m = new Message(new ByteBuffer(Arrays.copyOf(buf, p.getLength())));
+					Message m = new Message(new ByteBuffer(w));
+					if( q.isResponseTo(m, id) ) {
+						answer[0] = m;
+						return true;
+					}
 				} catch(RuntimeException ex) {
-					continue;
+					//  not a DNS message
 				}
-				if( q.isResponseTo(m, id) ) {
-					return m;
-				}
+				return false;
+			}, null);
+			if( wire == null ) {
+				throw new SocketTimeoutException();
 			}
+			return answer[0];
 		}
 	}
 
@@ -1411,17 +1405,9 @@ public class NsLookup extends Utility {
 			sock.connect(new InetSocketAddress(server, port), ms);
 			sock.setSoTimeout(ms);
 			OutputStream os = sock.getOutputStream();
-			ByteArrayOutputStream bo = new ByteArrayOutputStream();
-			bo.write(data.length >> 8);
-			bo.write(data.length);
-			bo.write(data);
-			os.write(bo.toByteArray());
+			os.write(DnsTransport.frame(data));
 			os.flush();
-			InputStream is = sock.getInputStream();
-			DataInputStream din = new DataInputStream(is);
-			int len = din.readUnsignedShort();
-			byte [] resp = new byte[len];
-			din.readFully(resp);
+			byte [] resp = DnsTransport.readFramed(sock, System.currentTimeMillis()+ms);
 			Message m;
 			try {
 				m = new Message(new ByteBuffer(resp));
