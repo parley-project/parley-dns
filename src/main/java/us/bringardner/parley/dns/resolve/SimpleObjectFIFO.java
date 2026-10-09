@@ -63,7 +63,7 @@ public synchronized int getCapacity()
 		return ( size == capacity );
 	}
 	public synchronized void printState() {
-		StringBuffer sb = new StringBuffer();
+		StringBuilder sb = new StringBuilder();
 
 		sb.append("SimpleObjectFIFO:\n");
 		sb.append("       capacity=" + capacity + "\n");

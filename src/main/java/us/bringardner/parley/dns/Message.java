@@ -1787,7 +1787,7 @@ TC              TrunCation - specifies that this message was truncated
 
 	public String toSmallString(){
 
-		StringBuffer ret = new StringBuffer();
+		StringBuilder ret = new StringBuilder();
 
 		ret.append("Q(");
 		for(Iterator<Section> e=question(); e.hasNext(); ) {
@@ -1810,7 +1810,7 @@ TC              TrunCation - specifies that this message was truncated
 		hdr.setNSCOUNT(ath.size());
 		hdr.setARCOUNT(add.size());
 
-		StringBuffer ret = new StringBuffer();
+		StringBuilder ret = new StringBuilder();
 		ret.append("Header \n");
 		ret.append(hdr.toString());
 		ret.append('\n');

@@ -44,7 +44,7 @@ public class Pointer {
 		name=newname;
 
 
-		StringBuffer buf = new StringBuffer();
+		StringBuilder buf = new StringBuilder();
 		int idx = ip.lastIndexOf('.');
 		int idx2=ip.length();
 		while( idx > 0 ) {

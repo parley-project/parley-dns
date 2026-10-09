@@ -388,7 +388,9 @@ public class Zone implements DNS {
 		if( v == null ) {
 			v = new ArrayList<RR>();
 			names.add(name);
-			rrs.add(names.indexOf(name),v);
+			//  The name was just appended and nothing before it matches it
+			//  (getMatchingRRs found nothing); indexOf() made loading quadratic
+			rrs.add(names.size()-1,v);
 			//  Keep the index current (rebuilding it per record would make
 			//  loading quadratic)
 			java.util.Map<String,Integer> exact = exactIndex;
@@ -552,9 +554,41 @@ public class Zone implements DNS {
 	}
 
 	private void invalidateIndex() {
+		invalidateQueryIndex();
+		positionIndex = null;
+	}
+
+	/**
+	 * Drop the query lookup index only. {@link #positionIndex} is kept: use this
+	 * when names were appended (it is updated in place) or no name moved.
+	 */
+	private void invalidateQueryIndex() {
 		exactIndex = null;
 		wildIndex = null;
 		ancestorIndex = null;
+	}
+
+	//  lower-case name (wildcard names included) -> position of its first entry.
+	//  Used by the writers (addRecord, removeRecords, exactRecords) so they don't
+	//  scan every name; it is updated in place when a name is appended.
+	private volatile java.util.Map<String,Integer> positionIndex;
+	//  true when two entries share a name (the index only knows the first)
+	private volatile boolean positionDuplicates;
+
+	private java.util.Map<String,Integer> positions() {
+		java.util.Map<String,Integer> ret = positionIndex;
+		if( ret == null ) {
+			ret = new java.util.concurrent.ConcurrentHashMap<String,Integer>();
+			boolean dups = false;
+			for(int i=0,sz=names.size(); i<sz; i++ ) {
+				if( ret.putIfAbsent(indexKey(names.get(i)), i) != null ) {
+					dups = true;
+				}
+			}
+			positionDuplicates = dups;
+			positionIndex = ret;
+		}
+		return ret;
 	}
 
 	/**
@@ -797,7 +831,7 @@ public class Zone implements DNS {
 			}
 
 			int pos = 0;
-			StringBuffer buf = new StringBuffer();
+			StringBuilder buf = new StringBuilder();
 
 			while(pos < b.length ) {
 				if( !Character.isWhitespace((char)b[pos]) ) {
@@ -1476,13 +1510,8 @@ public class Zone implements DNS {
 	}
 
 	private int exactIndex(String name) {
-		String key = stripDot(name).toLowerCase(java.util.Locale.ROOT);
-		for(int i=0; i < names.size(); i++ ) {
-			if( names.get(i).toString().toLowerCase(java.util.Locale.ROOT).equals(key) ) {
-				return i;
-			}
-		}
-		return -1;
+		Integer i = positions().get(stripDot(name).toLowerCase(java.util.Locale.ROOT));
+		return i == null ? -1 : i;
 	}
 
 	/** The records at exactly this name (no wildcard matching); empty if none. */
@@ -1500,9 +1529,16 @@ public class Zone implements DNS {
 			names.add(n);
 			rrs.add(new ArrayList<RR>());
 			i = names.size()-1;
+			java.util.Map<String,Integer> pos = positionIndex;
+			if( pos != null ) {
+				pos.putIfAbsent(indexKey(n), i);
+			}
+			//  a new name changes what the query index maps
+			invalidateQueryIndex();
 		}
+		//  Records added to an existing name leave every index valid (they map
+		//  names to positions, not records)
 		rrs.get(i).add(rr);
-		invalidateIndex();
 	}
 
 	/** Add records, each at exactly its own name (for many records at once). */
@@ -1537,12 +1573,31 @@ public class Zone implements DNS {
 		int before = l.size();
 		l.removeIf(which);
 		int ret = before - l.size();
-		if( l.isEmpty() ) {
+		boolean nameGone = l.isEmpty();
+		if( nameGone ) {
 			names.remove(i);
 			rrs.remove(i);
 		}
-		if( ret > 0 ) {
-			invalidateIndex();
+		if( nameGone ) {
+			java.util.Map<String,Integer> pos = positionIndex;
+			if( pos != null && !positionDuplicates ) {
+				//  Later names moved down one: fix the positions in place
+				//  instead of lower-casing every name again
+				final int gone = i;
+				if( gone == names.size() ) {
+					//  it was the last one, nothing moved
+					pos.remove(stripDot(name).toLowerCase(java.util.Locale.ROOT));
+				} else {
+					pos.values().removeIf(v -> v == gone);
+					pos.replaceAll((k, v) -> v > gone ? v-1 : v);
+				}
+				invalidateQueryIndex();
+			} else {
+				invalidateIndex();
+			}
+		} else if( ret > 0 ) {
+			//  positions are unchanged, the query index maps names to positions
+			invalidateQueryIndex();
 		}
 		return ret;
 	}
@@ -1644,7 +1699,7 @@ public class Zone implements DNS {
 	}
 
 	public String toString() {
-		StringBuffer ret = new StringBuffer( "Zone:"+name+"\r\n"+soa);
+		StringBuilder ret = new StringBuilder( "Zone:"+name+"\r\n"+soa);
 
 
 		for(int ix=0,szx=rrs.size(); ix < szx; ix++ ) {
@@ -1658,7 +1713,7 @@ public class Zone implements DNS {
 	}
 
 	public String toString(boolean fileFormat) {
-		StringBuffer ret = new StringBuffer();
+		StringBuilder ret = new StringBuilder();
 
 		if( fileFormat ) {
 			/*

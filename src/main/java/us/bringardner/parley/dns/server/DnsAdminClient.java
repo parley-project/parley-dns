@@ -289,7 +289,7 @@ public class DnsAdminClient implements DnsAdminConstants {
 
 	private String sendCommand(String cmd) throws IOException {
 
-		StringBuffer ret = new StringBuffer();
+		StringBuilder ret = new StringBuilder();
 		out.writeLine(cmd);
 		out.flush();
 

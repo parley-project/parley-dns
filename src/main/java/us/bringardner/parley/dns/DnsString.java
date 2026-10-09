@@ -47,7 +47,7 @@ public class DnsString {
 	**/
 		public DnsString(ByteBuffer in) {
 				int cnt = in.next();
-				StringBuffer sb = new StringBuffer(cnt);
+				StringBuilder sb = new StringBuilder(cnt);
 				for(int i=0; i< cnt; i++) {
 						sb.append((char)in.next());
 				}

@@ -335,7 +335,7 @@ public class Header extends Utility implements DNS
     }
     public String toString() 
     {
-        StringBuffer ret = new StringBuffer();
+        StringBuilder ret = new StringBuilder();
 
         // Set bytes 0, 1 from id
         ret.append("id="+id); 
