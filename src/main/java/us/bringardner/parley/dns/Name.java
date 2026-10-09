@@ -101,7 +101,7 @@ public class Name implements DNS
 	}
 	
 	public String getParent() {
-		StringBuffer buf = new StringBuffer();
+		StringBuilder buf = new StringBuilder();
 		if( myLables.size() > 1 ) {
 			buf.append(myLables.get(1));
 			for(int i=2,sz=myLables.size(); i< sz; i++ ) {
@@ -288,7 +288,7 @@ public class Name implements DNS
 
 		while(cnt > 0 ) {
 			chrCount += cnt;
-			StringBuffer sb = new StringBuffer(cnt);
+			StringBuilder sb = new StringBuilder(cnt);
 			for(int i=0; i< cnt; i++) {
 				sb.append((char)buf[idx++]);
 			}
@@ -371,7 +371,7 @@ public class Name implements DNS
 	 * Convert to String form l1.l2[.ln]
 	 */
 	public String toString() {
-		StringBuffer buf = new StringBuffer();
+		StringBuilder buf = new StringBuilder();
 		if( myLables.size() > 0 ) {
 			buf.append(myLables.get(0).toString());
 			for(int i=1,sz=myLables.size(); i< sz; i++ ) {
