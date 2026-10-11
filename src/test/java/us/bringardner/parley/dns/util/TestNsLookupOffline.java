@@ -124,6 +124,11 @@ public class TestNsLookupOffline {
 		}
 	}
 
+	/** The tools end lines with println, so with the platform's separator; the expected text uses \n. */
+	private static String lf(String s) {
+		return s.replace("\r\n", "\n");
+	}
+
 	/** Run NsLookup (as with stdin piped: no prompt). */
 	private static Result run(String stdin, String ... args) throws Exception {
 		ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -147,8 +152,8 @@ public class TestNsLookupOffline {
 			NsLookup.setOut(System.out);
 			NsLookup.setErr(System.err);
 		}
-		r.out = out.toString("UTF-8");
-		r.err = err.toString("UTF-8");
+		r.out = lf(out.toString("UTF-8"));
+		r.err = lf(err.toString("UTF-8"));
 		return r;
 	}
 
@@ -256,7 +261,7 @@ public class TestNsLookupOffline {
 		System.setProperty(NsLookup.PROP_RESOLV_CONF, conf.getPath());
 		try {
 			NsLookup.run(new String[] {"-port="+port});
-			String all = out.toString("UTF-8");
+			String all = lf(out.toString("UTF-8"));
 			assertTrue(all.startsWith("Default server: 127.0.0.2\nAddress: 127.0.0.2#"+port+"\nDefault server: 127.0.0.1\n"), all);
 			assertTrue(all.contains("  timeout = 1\t\tretry = 1\tport = "+port+"\tndots = 1\n"), all);
 			assertTrue(all.contains("  srchlist = nsl.test/example.invalid\n"), all);
@@ -264,7 +269,7 @@ public class TestNsLookupOffline {
 			out.reset();
 			NsLookup.setIn(new BufferedReader(new StringReader("")));
 			int exit = NsLookup.run(new String[] {"-port="+port, "www"});
-			String text = out.toString("UTF-8");
+			String text = lf(out.toString("UTF-8"));
 			//  127.0.0.2 doesn't answer; 127.0.0.1 does, without recursion (it is authoritative only)
 			assertTrue(text.contains(";; Got recursion not available from 127.0.0.1\n"), text);
 			assertTrue(text.contains("Server:\t\t127.0.0.1\n"), text);
@@ -292,7 +297,7 @@ public class TestNsLookupOffline {
 		System.setProperty(NsLookup.PROP_RESOLV_CONF, conf.getPath());
 		try {
 			NsLookup.run(new String[] {"-port="+port});
-			String all = out.toString("UTF-8");
+			String all = lf(out.toString("UTF-8"));
 			assertTrue(all.startsWith("Default server: 127.0.0.1\nAddress: 127.0.0.1#"+port+"\n\n"), all);
 			assertTrue(all.contains("  srchlist = nsl.test\n"), all);
 		} finally {
@@ -338,7 +343,7 @@ public class TestNsLookupOffline {
 			NsLookup.setInteractive(null);
 			NsLookup.setOut(System.out);
 		}
-		String text = out.toString("UTF-8");
+		String text = lf(out.toString("UTF-8"));
 		assertTrue(text.startsWith("> Commands:"), text);
 		assertTrue(text.contains("set OPTION"), text);
 		assertTrue(text.endsWith("> \n"), "the prompt, and the new line at exit: "+text);
