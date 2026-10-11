@@ -31,7 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 
-import us.bringardner.parley.core.BjlLogger;
+import us.bringardner.parley.core.ParleyLogger;
 import us.bringardner.parley.core.ILogger.Level;
 
 /**
@@ -39,8 +39,8 @@ import us.bringardner.parley.core.ILogger.Level;
  */
 public class TestLazyLogging {
 
-	private static BjlLogger logger(Level level, ByteArrayOutputStream sink) {
-		BjlLogger ret = new BjlLogger();
+	private static ParleyLogger logger(Level level, ByteArrayOutputStream sink) {
+		ParleyLogger ret = new ParleyLogger();
 		ret.init("TestLazyLogging");
 		ret.setLevel(level);
 		PrintStream ps = new PrintStream(sink, true);
