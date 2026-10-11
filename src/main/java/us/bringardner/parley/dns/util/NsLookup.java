@@ -55,7 +55,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import us.bringardner.parley.core.BjlLogger;
+import us.bringardner.parley.core.ParleyLogger;
 import us.bringardner.parley.core.ILogger;
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.ByteBuffer;
@@ -256,8 +256,8 @@ public class NsLookup extends Utility {
 		NsLookup.out = out;
 		if( msg != null ) {
 			ILogger logger = msg.getLogger();
-			if (logger instanceof BjlLogger	) {
-				BjlLogger l = (BjlLogger) logger;
+			if (logger instanceof ParleyLogger	) {
+				ParleyLogger l = (ParleyLogger) logger;
 				l.setOut(out);
 			}
 		}
