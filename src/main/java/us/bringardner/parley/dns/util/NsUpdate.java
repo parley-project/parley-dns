@@ -143,6 +143,24 @@ public class NsUpdate extends Utility {
 
 	private static final SecureRandom ID_RANDOM = new SecureRandom();
 
+	/**
+	 * Ends the line with \n, whatever the platform: the output is the same as the Linux tool's, and
+	 * not a mix of this platform's separator (println) and the \n in the text.
+	 */
+	private static void println(PrintStream ps) {
+		ps.print('\n');
+	}
+
+	private static void println(PrintStream ps, Object o) {
+		ps.print(o);
+		ps.print('\n');
+	}
+
+	private static void println(PrintStream ps, char [] chars) {
+		ps.print(chars);
+		ps.print('\n');
+	}
+
 	//  I/O
 	static PrintStream out = System.out;
 	static PrintStream err = System.err;
@@ -285,23 +303,23 @@ public class NsUpdate extends Utility {
 	}
 
 	static void fatal(String text) {
-		err.println(text);
+		println(err, text);
 		throw new Exit(1);
 	}
 
 	static void error(String text) {
-		err.println(text);
+		println(err, text);
 	}
 
 	static void debug(String text) {
 		if( debugging ) {
-			err.println(text);
+			println(err, text);
 		}
 	}
 
 	static void ddebug(String text) {
 		if( ddebugging ) {
-			err.println(text);
+			println(err, text);
 		}
 	}
 
@@ -363,7 +381,7 @@ public class NsUpdate extends Utility {
 	}
 
 	private static void usage() {
-		err.println("usage: nsupdate [-CdDi] [-L level] [-l] [-g | -o | -y keyname:secret | -k keyfile] [-p port] [-v] [-V] [-P] [-T] [-4 | -6] [filename]");
+		println(err, "usage: nsupdate [-CdDi] [-L level] [-l] [-g | -o | -y keyname:secret | -k keyfile] [-p port] [-v] [-V] [-P] [-T] [-4 | -6] [filename]");
 	}
 
 	static void preParseArgs(String [] args) {
@@ -392,11 +410,11 @@ public class NsUpdate extends Utility {
 			case ':':
 			case 'h':
 				if( o.ch == '?' ) {
-					err.println("nsupdate: illegal option -- "+o.arg);
+					println(err, "nsupdate: illegal option -- "+o.arg);
 				} else if( o.ch == ':' ) {
-					err.println("nsupdate: option requires an argument -- "+o.arg);
+					println(err, "nsupdate: option requires an argument -- "+o.arg);
 				}
-				err.println("nsupdate: invalid argument -"+(o.ch == 'h' ? "h" : o.arg));
+				println(err, "nsupdate: invalid argument -"+(o.ch == 'h' ? "h" : o.arg));
 				usage();
 				throw new Exit(1);
 			case 'P':
@@ -408,7 +426,7 @@ public class NsUpdate extends Utility {
 					String n = TYPENAMES[t];
 					if( !Character.isDigit(n.charAt(0)) && !n.equals("*") && !n.equals("OPT") && !n.equals("TSIG")
 							&& !n.equals("TKEY") && !n.equals("IXFR") && !n.equals("AXFR") && !n.equals("MAILA") && !n.equals("MAILB") ) {
-						out.println(n);
+						println(out, n);
 					}
 				}
 				doexit = true;
@@ -427,7 +445,7 @@ public class NsUpdate extends Utility {
 	}
 
 	private static void version(PrintStream s) {
-		s.println("nsupdate "+VERSION);
+		println(s, "nsupdate "+VERSION);
 	}
 
 	static void parseArgs(String [] args) {
@@ -465,7 +483,7 @@ public class NsUpdate extends Utility {
 				break;
 			case 'L':
 				if( !o.arg.matches("[0-9]+") ) {
-					err.println("bad library debug value '"+o.arg+"'");
+					println(err, "bad library debug value '"+o.arg+"'");
 					throw new Exit(1);
 				}
 				break;
@@ -480,12 +498,12 @@ public class NsUpdate extends Utility {
 				break;
 			case 'g':
 			case 'o':
-				err.println("nsupdate: cannot specify -g	or -o, program not linked with GSS API Library");
+				println(err, "nsupdate: cannot specify -g	or -o, program not linked with GSS API Library");
 				throw new Exit(1);
 			case 'p': {
 				Long n = parseUint(o.arg, 65535);
 				if( n == null ) {
-					err.println("bad port number '"+o.arg+"'");
+					println(err, "bad port number '"+o.arg+"'");
 					throw new Exit(1);
 				}
 				dnsport = n.intValue();
@@ -494,7 +512,7 @@ public class NsUpdate extends Utility {
 			case 't': {
 				Long n = parseUint(o.arg, 0xffffffffL);
 				if( n == null ) {
-					err.println("bad timeout '"+o.arg+"'");
+					println(err, "bad timeout '"+o.arg+"'");
 					throw new Exit(1);
 				}
 				timeout = n == 0 || n > Integer.MAX_VALUE ? Integer.MAX_VALUE : n.intValue();
@@ -503,7 +521,7 @@ public class NsUpdate extends Utility {
 			case 'u': {
 				Long n = parseUint(o.arg, 0xffffffffL);
 				if( n == null ) {
-					err.println("bad udp timeout '"+o.arg+"'");
+					println(err, "bad udp timeout '"+o.arg+"'");
 					throw new Exit(1);
 				}
 				udpTimeout = (int)Math.min(n, Integer.MAX_VALUE);
@@ -512,7 +530,7 @@ public class NsUpdate extends Utility {
 			case 'r': {
 				Long n = parseUint(o.arg, 0xffffffffL);
 				if( n == null ) {
-					err.println("bad udp retries '"+o.arg+"'");
+					println(err, "bad udp retries '"+o.arg+"'");
 					throw new Exit(1);
 				}
 				udpRetries = (int)Math.min(n, 1000);
@@ -526,7 +544,7 @@ public class NsUpdate extends Utility {
 			}
 		}
 		if( keyFile != null && keyStr != null ) {
-			err.println("nsupdate: cannot specify both -k and -y");
+			println(err, "nsupdate: cannot specify both -k and -y");
 			throw new Exit(1);
 		}
 		if( argIndex < args.length ) {
@@ -535,7 +553,7 @@ public class NsUpdate extends Utility {
 				try {
 					in = new BufferedReader(new InputStreamReader(new FileInputStream(f), StandardCharsets.UTF_8));
 				} catch(IOException ex) {
-					err.println("could not open '"+f+"': file not found");
+					println(err, "could not open '"+f+"': file not found");
 					throw new Exit(1);
 				}
 			}
@@ -657,14 +675,14 @@ public class NsUpdate extends Utility {
 		try {
 			secret = Base64.getDecoder().decode(secretstr.trim());
 		} catch(IllegalArgumentException ex) {
-			err.println("could not create key from "+keystr+": bad base64 encoding");
+			println(err, "could not create key from "+keystr+": bad base64 encoding");
 			return;
 		}
 		debug("keycreate");
 		try {
 			tsigKey = new Tsig.Key(absolute(name), alg, secret);
 		} catch(IllegalArgumentException ex) {
-			err.println("could not create key from "+keystr+": "+ex.getMessage());
+			println(err, "could not create key from "+keystr+": "+ex.getMessage());
 		}
 	}
 
@@ -733,12 +751,12 @@ public class NsUpdate extends Utility {
 					}
 				}
 				if( alg.find() && key.find() && name != null ) {
-					err.println(new java.text.SimpleDateFormat("dd-MMM-yyyy HH:mm:ss.SSS", Locale.ENGLISH).format(new java.util.Date())
+					println(err, new java.text.SimpleDateFormat("dd-MMM-yyyy HH:mm:ss.SSS", Locale.ENGLISH).format(new java.util.Date())
 							+" "+priv.getPath()+": Use of K* file pairs for HMAC is deprecated");
-					err.println();
+					println(err);
 					String a = KEY_ALGORITHMS.get(Integer.parseInt(alg.group(1)));
 					if( a == null ) {
-						err.println("could not create key from "+file+": SIG(0) keys are not supported");
+						println(err, "could not create key from "+file+": SIG(0) keys are not supported");
 						return;
 					}
 					setupKeyStr(a+":"+name+":"+key.group(1));
@@ -751,7 +769,7 @@ public class NsUpdate extends Utility {
 		if( readSessionKey(file) ) {
 			return;
 		}
-		err.println("could not read key from "+base+".{private,key}: file not found");
+		println(err, "could not read key from "+base+".{private,key}: file not found");
 	}
 
 	//  ------------------------------------------------------------------
@@ -861,7 +879,7 @@ public class NsUpdate extends Utility {
 		case "checknames": return evaluateCheckNames(rest);
 		case "gsstsig":
 		case "oldgsstsig":
-			err.println("gsstsig not supported");
+			println(err, "gsstsig not supported");
 			return STATUS_MORE;
 		case "help":
 			out.print("nsupdate "+VERSION+":\n"
@@ -889,7 +907,7 @@ public class NsUpdate extends Utility {
 			version(out);
 			return STATUS_MORE;
 		default:
-			err.println("incorrect section name: "+word);
+			println(err, "incorrect section name: "+word);
 			return STATUS_SYNTAX;
 		}
 	}
@@ -898,7 +916,7 @@ public class NsUpdate extends Utility {
 	static String parseName(String [] rest) {
 		String word = strsep(rest, WS);
 		if( word == null || word.isEmpty() ) {
-			err.println("could not read owner name");
+			println(err, "could not read owner name");
 			return null;
 		}
 		String n = checkName(word);
@@ -951,7 +969,7 @@ public class NsUpdate extends Utility {
 		ddebug("evaluate_prereq()");
 		String word = strsep(rest, WS);
 		if( word == null || word.isEmpty() ) {
-			err.println("could not read operation code");
+			println(err, "could not read operation code");
 			return STATUS_SYNTAX;
 		}
 		switch(word.toLowerCase(Locale.ROOT)) {
@@ -960,7 +978,7 @@ public class NsUpdate extends Utility {
 		case "nxrrset": return makePrereq(rest, false, true);
 		case "yxrrset": return makePrereq(rest, true, true);
 		default:
-			err.println("incorrect operation code: "+word);
+			println(err, "incorrect operation code: "+word);
 			return STATUS_SYNTAX;
 		}
 	}
@@ -976,19 +994,19 @@ public class NsUpdate extends Utility {
 		if( rrset ) {
 			String word = strsep(rest, WS);
 			if( word == null || word.isEmpty() ) {
-				err.println("could not read class or type");
+				println(err, "could not read class or type");
 				return STATUS_SYNTAX;
 			}
 			int c = classCode(word);
 			if( c >= 0 ) {
 				if( !setZoneClass(c) ) {
-					err.println("class mismatch: "+word);
+					println(err, "class mismatch: "+word);
 					return STATUS_SYNTAX;
 				}
 				cls = c;
 				word = strsep(rest, WS);
 				if( word == null || word.isEmpty() ) {
-					err.println("could not read type");
+					println(err, "could not read type");
 					return STATUS_SYNTAX;
 				}
 			} else {
@@ -996,7 +1014,7 @@ public class NsUpdate extends Utility {
 			}
 			type = typeCode(word);
 			if( type < 0 ) {
-				err.println("invalid type: "+word);
+				println(err, "invalid type: "+word);
 				return STATUS_SYNTAX;
 			}
 		} else {
@@ -1040,7 +1058,7 @@ public class NsUpdate extends Utility {
 		try {
 			return makeRecord(name, ttl, cls, type, text);
 		} catch(IllegalArgumentException ex) {
-			err.println("invalid rdata format: "+reason(ex));
+			println(err, "invalid rdata format: "+reason(ex));
 			return SYNTAX;
 		}
 	}
@@ -1159,12 +1177,12 @@ public class NsUpdate extends Utility {
 
 	static int evaluateServer(String [] rest) {
 		if( localOnly ) {
-			err.println("cannot reset server in localhost-only mode");
+			println(err, "cannot reset server in localhost-only mode");
 			return STATUS_SYNTAX;
 		}
 		String server = strsep(rest, WS);
 		if( server == null || server.isEmpty() ) {
-			err.println("could not read server name");
+			println(err, "could not read server name");
 			return STATUS_SYNTAX;
 		}
 		int port = dnsport;
@@ -1191,11 +1209,11 @@ public class NsUpdate extends Utility {
 		try {
 			p = Long.parseLong(word);
 		} catch(NumberFormatException ex) {
-			err.println("port '"+word+"' is not numeric");
+			println(err, "port '"+word+"' is not numeric");
 			return null;
 		}
 		if( p < 1 || p > 65535 ) {
-			err.println("port '"+word+"' is out of range (1 to 65535)");
+			println(err, "port '"+word+"' is out of range (1 to 65535)");
 			return null;
 		}
 		return (int)p;
@@ -1225,7 +1243,7 @@ public class NsUpdate extends Utility {
 	static int evaluateLocal(String [] rest) {
 		String local = strsep(rest, WS);
 		if( local == null || local.isEmpty() ) {
-			err.println("could not read server name");
+			println(err, "could not read server name");
 			return STATUS_SYNTAX;
 		}
 		int port = 0;
@@ -1258,7 +1276,7 @@ public class NsUpdate extends Utility {
 	static int evaluateKey(String [] rest) {
 		String namestr = strsep(rest, WS);
 		if( namestr == null || namestr.isEmpty() ) {
-			err.println("could not read key name");
+			println(err, "could not read key name");
 			return STATUS_SYNTAX;
 		}
 		String alg = "hmac-md5";
@@ -1271,25 +1289,25 @@ public class NsUpdate extends Utility {
 			namestr = namestr.substring(n+1);
 		}
 		if( namestr.isEmpty() ) {
-			err.println("could not parse key name");
+			println(err, "could not parse key name");
 			return STATUS_SYNTAX;
 		}
 		String secretstr = strsep(rest, "\r\n");
 		if( secretstr == null || secretstr.isEmpty() ) {
-			err.println("could not read key secret");
+			println(err, "could not read key secret");
 			return STATUS_SYNTAX;
 		}
 		byte [] secret;
 		try {
 			secret = Base64.getDecoder().decode(secretstr.trim());
 		} catch(IllegalArgumentException ex) {
-			err.println("could not create key from "+secretstr+": bad base64 encoding");
+			println(err, "could not create key from "+secretstr+": bad base64 encoding");
 			return STATUS_SYNTAX;
 		}
 		try {
 			tsigKey = new Tsig.Key(absolute(namestr), alg, secret);
 		} catch(IllegalArgumentException ex) {
-			err.println("could not create key from "+namestr+" "+secretstr+": "+ex.getMessage());
+			println(err, "could not create key from "+namestr+" "+secretstr+": "+ex.getMessage());
 			return STATUS_SYNTAX;
 		}
 		return STATUS_MORE;
@@ -1298,13 +1316,13 @@ public class NsUpdate extends Utility {
 	static int evaluateZone(String [] rest) {
 		String word = strsep(rest, WS);
 		if( word == null || word.isEmpty() ) {
-			err.println("could not read zone name");
+			println(err, "could not read zone name");
 			return STATUS_SYNTAX;
 		}
 		String n = word.endsWith(".") ? word : word+".";
 		if( n.contains("..") || (n.startsWith(".") && n.length() > 1) ) {
 			userZone = null;
-			err.println("could not parse zone name");
+			println(err, "could not parse zone name");
 			return STATUS_SYNTAX;
 		}
 		userZone = n;
@@ -1314,7 +1332,7 @@ public class NsUpdate extends Utility {
 	static int evaluateTtl(String [] rest) {
 		String word = strsep(rest, WS);
 		if( word == null || word.isEmpty() ) {
-			err.println("could not read ttl");
+			println(err, "could not read ttl");
 			return STATUS_SYNTAX;
 		}
 		if( word.equalsIgnoreCase("none") ) {
@@ -1327,7 +1345,7 @@ public class NsUpdate extends Utility {
 			return STATUS_SYNTAX;
 		}
 		if( ttl > TTL_MAX ) {
-			err.println("ttl '"+word+"' is out of range (0 to "+TTL_MAX+")");
+			println(err, "ttl '"+word+"' is out of range (0 to "+TTL_MAX+")");
 			return STATUS_SYNTAX;
 		}
 		defaultTtl = ttl;
@@ -1338,16 +1356,16 @@ public class NsUpdate extends Utility {
 	static int evaluateClass(String [] rest) {
 		String word = strsep(rest, WS);
 		if( word == null || word.isEmpty() ) {
-			err.println("could not read class name");
+			println(err, "could not read class name");
 			return STATUS_SYNTAX;
 		}
 		int c = classCode(word);
 		if( c < 0 ) {
-			err.println("could not parse class name: "+word);
+			println(err, "could not parse class name: "+word);
 			return STATUS_SYNTAX;
 		}
 		if( c == CLASS_NONE || c == CLASS_ANY || c == 0 ) {
-			err.println("bad default class: "+word);
+			println(err, "bad default class: "+word);
 			return STATUS_SYNTAX;
 		}
 		defaultClass = c;
@@ -1358,7 +1376,7 @@ public class NsUpdate extends Utility {
 		ddebug("evaluate_checknames()");
 		String word = strsep(rest, WS);
 		if( word == null || word.isEmpty() ) {
-			err.println("could not read check-names directive");
+			println(err, "could not read check-names directive");
 			return STATUS_SYNTAX;
 		}
 		String w = word.toLowerCase(Locale.ROOT);
@@ -1367,7 +1385,7 @@ public class NsUpdate extends Utility {
 		} else if( w.equals("no") || w.equals("false") || w.equals("off") ) {
 			checkNames = false;
 		} else {
-			err.println("incorrect check-names directive: "+word);
+			println(err, "incorrect check-names directive: "+word);
 			return STATUS_SYNTAX;
 		}
 		return STATUS_MORE;
@@ -1377,7 +1395,7 @@ public class NsUpdate extends Utility {
 		ddebug("evaluate_update()");
 		String word = strsep(rest, WS);
 		if( word == null || word.isEmpty() ) {
-			err.println("could not read operation code");
+			println(err, "could not read operation code");
 			return STATUS_SYNTAX;
 		}
 		switch(word.toLowerCase(Locale.ROOT)) {
@@ -1385,7 +1403,7 @@ public class NsUpdate extends Utility {
 		case "del": return updateAddOrDelete(rest, true);
 		case "add": return updateAddOrDelete(rest, false);
 		default:
-			err.println("incorrect operation code: "+word);
+			println(err, "incorrect operation code: "+word);
 			return STATUS_SYNTAX;
 		}
 	}
@@ -1402,7 +1420,7 @@ public class NsUpdate extends Utility {
 		String word = strsep(rest, WS);
 		if( word == null || word.isEmpty() ) {
 			if( !isDelete ) {
-				err.println("could not read owner ttl");
+				println(err, "could not read owner ttl");
 				return STATUS_SYNTAX;
 			}
 			updates.add(empty(name, QTYPE_ALL, CLASS_ANY, 0));
@@ -1418,14 +1436,14 @@ public class NsUpdate extends Utility {
 				ttl = defaultTtl;
 				haveWord = true;
 			} else {
-				err.println("ttl '"+word+"': "+(word.matches("[0-9]+") ? "out of range" : "not a valid number"));
+				println(err, "ttl '"+word+"': "+(word.matches("[0-9]+") ? "out of range" : "not a valid number"));
 				return STATUS_SYNTAX;
 			}
 		} else {
 			if( isDelete ) {
 				ttl = 0;
 			} else if( t > TTL_MAX ) {
-				err.println("ttl '"+word+"' is out of range (0 to "+TTL_MAX+")");
+				println(err, "ttl '"+word+"' is out of range (0 to "+TTL_MAX+")");
 				return STATUS_SYNTAX;
 			} else {
 				ttl = t;
@@ -1439,13 +1457,13 @@ public class NsUpdate extends Utility {
 				updates.add(empty(name, QTYPE_ALL, CLASS_ANY, 0));
 				return STATUS_MORE;
 			}
-			err.println("could not read class or type");
+			println(err, "could not read class or type");
 			return STATUS_SYNTAX;
 		}
 		int c = classCode(word);
 		if( c >= 0 && c != CLASS_ANY ) {
 			if( !setZoneClass(c) ) {
-				err.println("class mismatch: "+word);
+				println(err, "class mismatch: "+word);
 				return STATUS_SYNTAX;
 			}
 			cls = c;
@@ -1455,19 +1473,19 @@ public class NsUpdate extends Utility {
 					updates.add(empty(name, QTYPE_ALL, CLASS_ANY, 0));
 					return STATUS_MORE;
 				}
-				err.println("could not read type");
+				println(err, "could not read type");
 				return STATUS_SYNTAX;
 			}
 			type = typeCode(word);
 			if( type < 0 ) {
-				err.println("'"+word+"' is not a valid type: unknown class/type");
+				println(err, "'"+word+"' is not a valid type: unknown class/type");
 				return STATUS_SYNTAX;
 			}
 		} else {
 			cls = getZoneClass();
 			type = typeCode(word);
 			if( type < 0 ) {
-				err.println("'"+word+"' is not a valid class or type: unknown class/type");
+				println(err, "'"+word+"' is not a valid class or type: unknown class/type");
 				return STATUS_SYNTAX;
 			}
 		}
@@ -1485,25 +1503,25 @@ public class NsUpdate extends Utility {
 			}
 		} else {
 			if( rr == null ) {
-				err.println("could not read rdata");
+				println(err, "could not read rdata");
 				return STATUS_SYNTAX;
 			}
 			if( checkNames ) {
 				String bad = checkOwner(name, type);
 				if( bad != null ) {
-					err.println("check-names failed: bad owner '"+stripDot(bad)+"'");
+					println(err, "check-names failed: bad owner '"+stripDot(bad)+"'");
 					return STATUS_SYNTAX;
 				}
 				bad = checkRdataNames(rr, name, cls);
 				if( bad != null ) {
-					err.println("check-names failed: bad name '"+stripDot(bad)+"'");
+					println(err, "check-names failed: bad name '"+stripDot(bad)+"'");
 					return STATUS_SYNTAX;
 				}
 			}
 			if( type == NSEC3PARAM ) {
 				byte [] d = rdataOf(rr);
 				if( d != null && d.length >= 4 && (((d[2] & 0xff) << 8) | (d[3] & 0xff)) > 150 ) {
-					err.println("NSEC3PARAM has excessive iterations (> 150)");
+					println(err, "NSEC3PARAM has excessive iterations (> 150)");
 					return STATUS_SYNTAX;
 				}
 			}
@@ -1778,7 +1796,7 @@ public class NsUpdate extends Utility {
 	}
 
 	static void nextServer(InetSocketAddress addr, String why) {
-		err.println("; Communication with "+sockaddr(addr)+" failed: "+why);
+		println(err, "; Communication with "+sockaddr(addr)+" failed: "+why);
 		if( ++nsInUse >= servers.size() ) {
 			fatal("could not reach any name server");
 		}
@@ -1811,7 +1829,7 @@ public class NsUpdate extends Utility {
 				updateCompleted(r);
 				return;
 			} catch(CommunicationsError ex) {
-				err.println("; Communication with "+sockaddr(primary)+" failed: "+ex.getMessage());
+				println(err, "; Communication with "+sockaddr(primary)+" failed: "+ex.getMessage());
 				if( ++primaryInUse >= primaryServers.size() ) {
 					seenError = true;
 					return;
@@ -1837,7 +1855,7 @@ public class NsUpdate extends Utility {
 				if( t != null && t.error != 0 ) {
 					text += "("+tsigErrorText(t.error)+")";
 				}
-				err.println("update failed: "+text);
+				println(err, "update failed: "+text);
 			}
 		}
 		if( debugging ) {
@@ -1892,7 +1910,7 @@ public class NsUpdate extends Utility {
 				}
 			}
 			if( problem != null ) {
-				err.println("; TSIG error with server: "+problem);
+				println(err, "; TSIG error with server: "+problem);
 				seenError = true;
 			}
 		}

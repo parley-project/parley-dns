@@ -202,6 +202,24 @@ public class NsLookup extends Utility {
 
 	//  I/O (settable for tests and embedding)
 	static Message msg = new Message();
+	/**
+	 * Ends the line with \n, whatever the platform: the output is the same as the Linux tool's, and
+	 * not a mix of this platform's separator (println) and the \n in the text.
+	 */
+	private static void println(PrintStream ps) {
+		ps.print('\n');
+	}
+
+	private static void println(PrintStream ps, Object o) {
+		ps.print(o);
+		ps.print('\n');
+	}
+
+	private static void println(PrintStream ps, char [] chars) {
+		ps.print(chars);
+		ps.print('\n');
+	}
+
 	static PrintStream out = System.out;
 	static PrintStream err = System.err;
 	static BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
@@ -328,7 +346,7 @@ public class NsLookup extends Utility {
 			String a = args[idx];
 			if( a.startsWith("-") ) {
 				if( a.regionMatches(true, 0, "-ver", 0, 4) ) {
-					err.println(VERSION);
+					println(err, VERSION);
 					return 0;
 				} else if( a.length() > 1 ) {
 					setOption(a.substring(1));
@@ -345,7 +363,7 @@ public class NsLookup extends Utility {
 				}
 				List<Server> list = resolveServer(a);
 				if( list == null ) {
-					err.println("nslookup: couldn't get address for '"+a+"': not found");
+					println(err, "nslookup: couldn't get address for '"+a+"': not found");
 					return 1;
 				}
 				servers = list;
@@ -362,17 +380,17 @@ public class NsLookup extends Utility {
 		} else {
 			interactiveLoop();
 		}
-		out.println();
+		println(out);
 		out.flush();
 		return (queryError ? 1 : 0) | (printError ? 1 : 0);
 	}
 
 	private static void usage() {
-		err.println("Usage:");
-		err.println("   nslookup [-opt ...]             # interactive mode using default server");
-		err.println("   nslookup [-opt ...] - server    # interactive mode using 'server'");
-		err.println("   nslookup [-opt ...] host        # just look up 'host' using default server");
-		err.println("   nslookup [-opt ...] host server # just look up 'host' using 'server'");
+		println(err, "Usage:");
+		println(err, "   nslookup [-opt ...]             # interactive mode using default server");
+		println(err, "   nslookup [-opt ...] - server    # interactive mode using 'server'");
+		println(err, "   nslookup [-opt ...] host        # just look up 'host' using default server");
+		println(err, "   nslookup [-opt ...] host server # just look up 'host' using 'server'");
 	}
 
 	/** Back to the defaults (the state is static, and tests run several sessions). */
@@ -414,14 +432,14 @@ public class NsLookup extends Utility {
 					break;
 				}
 				if( echoCommand ) {
-					out.println(line);
+					println(out, line);
 				}
 				if( !command(line) ) {
 					break;
 				}
 			}
 		} catch(IOException ex) {
-			out.println(";; "+ex.getMessage());
+			println(out, ";; "+ex.getMessage());
 		}
 	}
 
@@ -442,7 +460,7 @@ public class NsLookup extends Utility {
 			if( arg != null ) {
 				List<Server> list = resolveServer(arg);
 				if( list == null ) {
-					out.println("nslookup: couldn't get address for '"+arg+"': not found");
+					println(out, "nslookup: couldn't get address for '"+arg+"': not found");
 					return true;
 				}
 				servers = list;
@@ -455,7 +473,7 @@ public class NsLookup extends Utility {
 			showHelp();
 		} else if( cmd.equalsIgnoreCase("finger") || cmd.equalsIgnoreCase("root")
 				|| cmd.equalsIgnoreCase("ls") || cmd.equalsIgnoreCase("view") ) {
-			out.println("The '"+cmd+"' command is not implemented.");
+			println(out, "The '"+cmd+"' command is not implemented.");
 		} else {
 			lookup(cmd, arg);
 		}
@@ -484,13 +502,13 @@ public class NsLookup extends Utility {
 			showSettings(true, false);
 		} else if( (v=value(opt, "class=", "cl=")) != null ) {
 			if( classCode(v) < 0 ) {
-				out.println("unknown query class: "+v);
+				println(out, "unknown query class: "+v);
 			} else {
 				defclass = v;
 			}
 		} else if( (v=value(opt, "type=", "ty=", "querytype=", "query=", "qu=", "q=")) != null ) {
 			if( typeCode(v) < 0 ) {
-				out.println("unknown query type: "+v);
+				println(out, "unknown query type: "+v);
 			} else {
 				deftype = v;
 				defaultLookups = false;
@@ -564,7 +582,7 @@ public class NsLookup extends Utility {
 				ndots = n;
 			}
 		} else {
-			out.println("*** Invalid option: "+opt);
+			println(out, "*** Invalid option: "+opt);
 		}
 	}
 
@@ -574,9 +592,9 @@ public class NsLookup extends Utility {
 			if( n >= 0 && n <= max ) {
 				return (int)n;
 			}
-			out.println("value out of range: "+what+"="+v);
+			println(out, "value out of range: "+what+"="+v);
 		} catch(NumberFormatException ex) {
-			out.println("invalid "+what+": "+v);
+			println(out, "invalid "+what+": "+v);
 		}
 		return null;
 	}
@@ -584,8 +602,8 @@ public class NsLookup extends Utility {
 	/** "set all", and the server lines after "server". */
 	static void showSettings(boolean full, boolean serverOnly) {
 		for(Server s : servers) {
-			out.println("Default server: "+s.userarg);
-			out.println("Address: "+sockaddr(s.address, port));
+			println(out, "Default server: "+s.userarg);
+			println(out, "Address: "+sockaddr(s.address, port));
 			if( !full ) {
 				return;
 			}
@@ -593,13 +611,13 @@ public class NsLookup extends Utility {
 		if( serverOnly ) {
 			return;
 		}
-		out.println();
-		out.println("Set options:");
-		out.println("  "+(vc ? "vc" : "novc")+"\t\t\t"+(debug ? "debug" : "nodebug")+"\t\t"+(d2 ? "d2" : "nod2"));
-		out.println("  "+(search ? "search" : "nosearch")+"\t\t"+(recurse ? "recurse" : "norecurse"));
-		out.println("  timeout = "+timeout+"\t\tretry = "+tries+"\tport = "+port+"\tndots = "+ndots);
-		out.println("  querytype = "+String.format("%-8s", deftype)+"\tclass = "+defclass);
-		out.println("  srchlist = "+String.join("/", searchList));
+		println(out);
+		println(out, "Set options:");
+		println(out, "  "+(vc ? "vc" : "novc")+"\t\t\t"+(debug ? "debug" : "nodebug")+"\t\t"+(d2 ? "d2" : "nod2"));
+		println(out, "  "+(search ? "search" : "nosearch")+"\t\t"+(recurse ? "recurse" : "norecurse"));
+		println(out, "  timeout = "+timeout+"\t\tretry = "+tries+"\tport = "+port+"\tndots = "+ndots);
+		println(out, "  querytype = "+String.format("%-8s", deftype)+"\tclass = "+defclass);
+		println(out, "  srchlist = "+String.join("/", searchList));
 	}
 
 	//  ------------------------------------------------------------------
@@ -628,7 +646,7 @@ public class NsLookup extends Utility {
 		try(Reader r = new FileReader(f)) {
 			applyResolvConf(r);
 		} catch(IOException ex) {
-			err.println("nslookup: can't read "+path+": "+ex.getMessage());
+			println(err, "nslookup: can't read "+path+": "+ex.getMessage());
 		}
 	}
 
@@ -779,12 +797,12 @@ public class NsLookup extends Utility {
 		if( serverName != null ) {
 			list = resolveServer(serverName);
 			if( list == null ) {
-				out.println("nslookup: couldn't get address for '"+serverName+"': not found");
+				println(out, "nslookup: couldn't get address for '"+serverName+"': not found");
 				return;
 			}
 		}
 		if( list.isEmpty() ) {
-			out.println(";; no servers could be reached");
+			println(out, ";; no servers could be reached");
 			return;
 		}
 		boolean check = checkRa && serverName == null;
@@ -867,21 +885,21 @@ public class NsLookup extends Utility {
 		Message m = r.msg;
 		queryError = false;
 		if( !defaultLookups || type == A ) {
-			out.println("Server:\t\t"+r.server.userarg);
-			out.println("Address:\t"+sockaddr(r.server.address, port));
-			out.println();
+			println(out, "Server:\t\t"+r.server.userarg);
+			println(out, "Address:\t"+sockaddr(r.server.address, port));
+			println(out);
 		}
 		if( debug ) {
-			out.println("------------");
+			println(out, "------------");
 			detailSection("QUESTIONS:", m, null);
 			detailSection("ANSWERS:", m, m.getAnswer());
 			detailSection("AUTHORITY RECORDS:", m, m.getAuthority());
 			detailSection("ADDITIONAL RECORDS:", m, m.getAdditional());
-			out.println("------------");
+			println(out, "------------");
 		}
 		int rcode = m.getResponseCode();
 		if( rcode != NOERROR ) {
-			out.println("** server can't find "+qname+": "+rcodeText(rcode));
+			println(out, "** server can't find "+qname+": "+rcodeText(rcode));
 			printError = true;
 			return null;
 		}
@@ -891,18 +909,18 @@ public class NsLookup extends Utility {
 		}
 		boolean aa = m.isAuthority();
 		if( !aa && (!defaultLookups || type == A) ) {
-			out.println("Non-authoritative answer:");
+			println(out, "Non-authoritative answer:");
 		}
 		if( !m.getAnswer().isEmpty() ) {
 			printSection(m.getAnswer(), true);
 		} else if( defaultLookups && type == A ) {
 			aNoAnswer = true;
 		} else if( !defaultLookups || (type == AAAA && aNoAnswer) ) {
-			out.println("*** Can't find "+textname+": No answer");
+			println(out, "*** Can't find "+textname+": No answer");
 		}
 		if( !aa && type != A && type != AAAA ) {
-			out.println();
-			out.println("Authoritative answers can be found from:");
+			println(out);
+			println(out, "Authoritative answers can be found from:");
 			printSection(m.getAuthority(), false);
 			printSection(m.getAdditional(), false);
 		}
@@ -938,48 +956,48 @@ public class NsLookup extends Utility {
 			String owner = ownerText(rr.getName());
 			int t = rr.getType();
 			if( (t == A || t == AAAA) && answer ) {
-				out.println("Name:\t"+owner);
-				out.println("Address: "+rdataText(rr));
+				println(out, "Name:\t"+owner);
+				println(out, "Address: "+rdataText(rr));
 			} else if( t == SOA ) {
-				out.println(owner);
+				println(out, owner);
 				printSoa(rr);
 			} else {
-				out.println(owner+"\t"+rtypeText(t)+rdataText(rr));
+				println(out, owner+"\t"+rtypeText(t)+rdataText(rr));
 			}
 		}
 	}
 
 	private static void detailSection(String header, Message m, List<RR> section) {
-		out.println("    "+header);
+		println(out, "    "+header);
 		if( section == null ) {
 			for(Section q : m.getQuestion()) {
-				out.println("\t"+ownerText(q.getName())+", type = "+typeName(q.getType())+", class = "+className(q.getDnsClass()));
+				println(out, "\t"+ownerText(q.getName())+", type = "+typeName(q.getType())+", class = "+className(q.getDnsClass()));
 			}
 			return;
 		}
 		for(RR rr : grouped(section)) {
-			out.println("    ->  "+ownerText(rr.getName()));
+			println(out, "    ->  "+ownerText(rr.getName()));
 			if( rr.getType() == SOA ) {
 				printSoa(rr);
 			} else {
-				out.println("\t"+rtypeText(rr.getType())+rdataText(rr));
+				println(out, "\t"+rtypeText(rr.getType())+rdataText(rr));
 			}
-			out.println("\tttl = "+Integer.toUnsignedString(rr.getTTL()));
+			println(out, "\tttl = "+Integer.toUnsignedString(rr.getTTL()));
 		}
 	}
 
 	private static void printSoa(RR rr) {
 		if( rr instanceof Soa ) {
 			Soa s = (Soa) rr;
-			out.println("\torigin = "+ownerText(s.getMname()));
-			out.println("\tmail addr = "+ownerText(s.getRname()));
-			out.println("\tserial = "+Integer.toUnsignedString(s.getSerial()));
-			out.println("\trefresh = "+Integer.toUnsignedString(s.getRefreash()));
-			out.println("\tretry = "+Integer.toUnsignedString(s.getRetry()));
-			out.println("\texpire = "+Integer.toUnsignedString(s.getExpire()));
-			out.println("\tminimum = "+Integer.toUnsignedString(s.getMinimum()));
+			println(out, "\torigin = "+ownerText(s.getMname()));
+			println(out, "\tmail addr = "+ownerText(s.getRname()));
+			println(out, "\tserial = "+Integer.toUnsignedString(s.getSerial()));
+			println(out, "\trefresh = "+Integer.toUnsignedString(s.getRefreash()));
+			println(out, "\tretry = "+Integer.toUnsignedString(s.getRetry()));
+			println(out, "\texpire = "+Integer.toUnsignedString(s.getExpire()));
+			println(out, "\tminimum = "+Integer.toUnsignedString(s.getMinimum()));
 		} else {
-			out.println("\t"+rtypeText(SOA)+rdataText(rr));
+			println(out, "\t"+rtypeText(SOA)+rdataText(rr));
 		}
 	}
 
@@ -1316,34 +1334,34 @@ public class NsLookup extends Utility {
 				try {
 					Message resp = exchange(qname, type, cls, server.address, tcp);
 					if( resp.isTruncated() && !tcp ) {
-						out.println(";; Truncated, retrying in TCP mode.");
+						println(out, ";; Truncated, retrying in TCP mode.");
 						resp = exchange(qname, type, cls, server.address, true);
 					}
 					boolean servfail = resp.getResponseCode() == SERVER_ERROR && !fail;
 					if( servfail || (check && recurse && !resp.isRecursiveAvailable()) ) {
 						String why = servfail ? "SERVFAIL reply" : "recursion not available";
 						if( !last ) {
-							out.println(";; Got "+why+" from "+server.userarg+", trying next server");
+							println(out, ";; Got "+why+" from "+server.userarg+", trying next server");
 							break;
 						}
-						out.println(";; Got "+why+" from "+server.userarg);
+						println(out, ";; Got "+why+" from "+server.userarg);
 					}
 					return new Response(resp, server);
 				} catch(CommunicationsError ex) {
 					if( ex.connect ) {
 						//  (as nslookup: this pair of lines for every failed TCP connection)
-						out.println(";; Connection to "+sockaddr(server.address, port)+"("+server.userarg+") for "+qname+" failed: "+ex.getMessage()+".");
-						out.println(";; no servers could be reached");
+						println(out, ";; Connection to "+sockaddr(server.address, port)+"("+server.userarg+") for "+qname+" failed: "+ex.getMessage()+".");
+						println(out, ";; no servers could be reached");
 						reported = true;
 					} else {
-						out.println(";; communications error to "+sockaddr(server.address, port)+": "+ex.getMessage());
+						println(out, ";; communications error to "+sockaddr(server.address, port)+": "+ex.getMessage());
 						reported = false;
 					}
 				}
 			}
 		}
 		if( !reported ) {
-			out.println(";; no servers could be reached");
+			println(out, ";; no servers could be reached");
 		}
 		return null;
 	}
@@ -1358,7 +1376,7 @@ public class NsLookup extends Utility {
 		byte [] data = q.toByteArray();
 		int ms = 1000 * (timeout > 0 ? timeout : (tcp ? TCP_TIMEOUT : UDP_TIMEOUT));
 		if( d2 ) {
-			out.println(";; sending "+(tcp ? "TCP" : "UDP")+" query "+id+" for "+qname+" "+typeName(type)+" to "+sockaddr(server, port));
+			println(out, ";; sending "+(tcp ? "TCP" : "UDP")+" query "+id+" for "+qname+" "+typeName(type)+" to "+sockaddr(server, port));
 		}
 		try {
 			return tcp || data.length > MAX_UDP_PAYLOAD ? tcpExchange(q, id, data, server, ms) : udpExchange(q, id, data, server, ms);

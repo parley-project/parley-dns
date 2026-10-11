@@ -154,11 +154,6 @@ public class TestNsUpdate {
 		String err;
 	}
 
-	/** The tools end lines with println, so with the platform's separator; the expected text uses \n. */
-	private static String lf(String s) {
-		return s.replace("\r\n", "\n");
-	}
-
 	private static Result run(String stdin, String ... args) throws Exception {
 		ByteArrayOutputStream out = new ByteArrayOutputStream();
 		ByteArrayOutputStream err = new ByteArrayOutputStream();
@@ -173,8 +168,8 @@ public class TestNsUpdate {
 			NsUpdate.setOut(System.out);
 			NsUpdate.setErr(System.err);
 		}
-		r.out = lf(out.toString("UTF-8"));
-		r.err = lf(err.toString("UTF-8"));
+		r.out = out.toString("UTF-8");
+		r.err = err.toString("UTF-8");
 		return r;
 	}
 
