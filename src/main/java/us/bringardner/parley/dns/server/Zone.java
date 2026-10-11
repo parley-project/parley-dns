@@ -1306,6 +1306,7 @@ public class Zone implements DNS {
 			return;
 		}
 		int line = 0;
+		boolean outOfDate = false;
 		try(BufferedReader in = new BufferedReader(new FileReader(jnl))) {
 			String text;
 			boolean based = false;
@@ -1322,13 +1323,10 @@ public class Zone implements DNS {
 						throw new IOException("journal must start with 'base <serial>'");
 					}
 					if( Long.parseLong(t.get(1)) != (soa.getSerial() & 0xffffffffL) ) {
-						//  The zone file was edited (new serial): its content wins
-						File old = new File(jnl.getPath()+".old");
-						old.delete();
-						if( !jnl.renameTo(old) ) {
-							throw new IOException("can't set aside the out of date journal "+jnl);
-						}
-						return;
+						//  The zone file was edited (new serial): its content wins. The journal is
+						//  set aside below, once it is closed: Windows won't rename an open file.
+						outOfDate = true;
+						break;
 					}
 					based = true;
 					continue;
@@ -1337,6 +1335,13 @@ public class Zone implements DNS {
 			}
 		} catch(IOException | RuntimeException e) {
 			throw new IOException("Error in "+jnl.getName()+" at line "+line+": "+e.getMessage(), e);
+		}
+		if( outOfDate ) {
+			File old = new File(jnl.getPath()+".old");
+			old.delete();
+			if( !jnl.renameTo(old) ) {
+				throw new IOException("Error in "+jnl.getName()+" at line "+line+": can't set aside the out of date journal "+jnl);
+			}
 		}
 	}
 
