@@ -239,7 +239,9 @@ public class RemoteServer  extends DnsBaseClass {
 		if( !usable(ret) ) {
 			return false;
 		}
-		if( ret.getAnswerCount() == 0 && ret.getResponseCode() == DNS.NOERROR && !Resolver.isNoData(ret) && !ret.isRecursive() ) {
+		//  (also with RA set: a server can set that itself; an authoritative answer with no
+		//  data and only its own NS records is a NODATA, not a referral)
+		if( ret.getAnswerCount() == 0 && ret.getResponseCode() == DNS.NOERROR && !Resolver.isNoData(ret) && !ret.getHeader().getAA() ) {
 			String zone = us.bringardner.parley.dns.dnssec.Canonical.key(nameStr == null ? "" : nameStr);
 			for(us.bringardner.parley.dns.RR rr : ret.getAuthority()) {
 				if( rr.getType() == DNS.NS && !us.bringardner.parley.dns.dnssec.Canonical.isBelow(rr.getName(), zone, false) ) {

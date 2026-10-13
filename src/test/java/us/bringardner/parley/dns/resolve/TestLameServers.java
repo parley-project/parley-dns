@@ -216,4 +216,64 @@ public class TestLameServers {
 		assertNull(Resolver.unansweredChainEnd(m, new Section("a.zone.test", DNS.A, DNS.IN)), "complete");
 		assertEquals(3, Resolver.scrub(m, ".").getAnswerCount(), "the root may speak for everything");
 	}
+
+	/** Review of chunk 10: the RA bit (which the server sets itself) doesn't switch scrubbing off. */
+	@Test
+	public void raDoesNotTurnOffTheBailiwickCheck() throws Exception {
+		try(Upstream evil = new Upstream(r -> {
+					r.getHeader().setRA(true);
+					return poison(r);
+				})) {
+			RemoteServer zone = new RemoteServer();
+			zone.setName("evil.test");
+			zone.addAddress("ns.evil.test", "127.0.0.1");
+			zone.iterator().next().setPort(evil.port());
+			Resolver.getCache().clear();
+			Resolver.setRootServersForTests(Collections.singletonList(zone));
+			Message m = Resolver.resolve(new Section("www.evil.test", DNS.A, DNS.IN));
+			if( m != null ) {
+				for(us.bringardner.parley.dns.RR rr : m.getAnswer()) {
+					assertTrue(rr.getType() != DNS.A, "poisoned: "+rr);
+				}
+			}
+		}
+	}
+
+	/** An authoritative NODATA with only the zone's own NS records is an answer, not a lame referral. */
+	@Test
+	public void anAuthoritativeNoDataWithNsIsAnAnswer() throws Exception {
+		try(Upstream up = new Upstream(r -> {
+					r.getHeader().setAA(true);
+					Ns ns = new Ns("zone.test");
+					ns.setNs("ns.zone.test");
+					ns.setTTL(3600);
+					r.addAuthority(ns);
+					return r;
+				})) {
+			RemoteServer zone = new RemoteServer();
+			zone.setName("zone.test");
+			zone.addAddress("ns.zone.test", "127.0.0.1");
+			ServerA s = zone.iterator().next();
+			s.setPort(up.port());
+			Resolver.getCache().clear();
+			Resolver.setRootServersForTests(Collections.singletonList(zone));
+			Message m = Resolver.resolve(new Section("www.zone.test", DNS.AAAA, DNS.IN));
+			assertNotNull(m, "NOERROR, no data");
+			assertEquals(DNS.NOERROR, m.getResponseCode());
+			assertEquals(0, s.getHealth().getConsecutiveFailures());
+		}
+	}
+
+	/** SERVFAIL can be about one name: it doesn't count against the server. */
+	@Test
+	public void servfailIsNotARefusal() throws Exception {
+		try(Upstream up = new Upstream(r -> {
+					r.setResponseCode(DNS.SERVER_ERROR);
+					return r;
+				})) {
+			ServerA s = server(up.port());
+			s.query(new Section("broken.lame.test", DNS.A, DNS.IN));
+			assertEquals(0, s.getHealth().getConsecutiveFailures());
+		}
+	}
 }

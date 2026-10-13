@@ -294,10 +294,13 @@ public class ServerA  extends DnsBaseClass
 		return ret;
 	}
 
-	/** RCODEs that mean this server can't answer the question for us (round 4 #62). */
+	/**
+	 * RCODEs that mean this server won't answer for the zone at all (round 4 #62):
+	 * REFUSED and NOTAUTH (a lame server). SERVFAIL, NOTIMP and FORMERR can be about one
+	 * name or type, and must not put the zone's servers on hold-off.
+	 */
 	static boolean isRefusal(int rcode) {
-		return rcode == DNS.SERVER_ERROR || rcode == DNS.REFUSED || rcode == DNS.NOT_IMPLEMENTED
-				|| rcode == DNS.FORMAT_ERROR || rcode == 9;	//  9: NOTAUTH
+		return rcode == DNS.REFUSED || rcode == 9;	//  9: NOTAUTH
 	}
 
 	/** Count an answer that turned out useless (e.g. a referral that isn't closer) as a failure. */

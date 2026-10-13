@@ -76,12 +76,14 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
     settings and methods.
 - Round 4 #65: answers to TSIG-signed recursive queries are signed (the resolver thread used to
   send them unsigned, so the client rejected them).
-- Round 4 #62: upstream servers that answer REFUSED, SERVFAIL, NOTAUTH, NOTIMP or FORMERR, or refer
-  upwards or sideways (lame), count as failing for ranking; when only such referrals come back the
+- Round 4 #62: upstream servers that answer REFUSED or NOTAUTH, or refer upwards or sideways (lame),
+  count as failing for ranking (SERVFAIL, NOTIMP and FORMERR can be about one name and don't); when only such referrals come back the
   client gets SERVFAIL instead of NOERROR without data.
 - Round 4 #64: records an upstream server gives for names outside its zone are dropped (a server
   for evil.example can no longer add an address for www.bank.example after a CNAME to it); a CNAME
-  chain that ends without the data is followed by asking the target's own servers.
+  chain that ends without the data is followed by asking the target's own servers. Records from the
+  root hints' servers (which may be a recursive upstream) are not filtered; out-of-zone glue is
+  dropped, so such name servers are looked up separately.
 - Round 4 #69: UDP requests up to 64 KB are read whole (larger than 2 KB were cut off); upstream
   answers already were.
 - Packaging: the POM takes plugin versions and `distributionManagement` from parley-parent (the old

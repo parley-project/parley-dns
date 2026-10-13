@@ -782,10 +782,11 @@ public class Resolver  extends DnsBaseClass
 			svr = slist.get(idx);
 			{
 				if( (ret = svr.resolve(question,maxTime)) != null) {
-					if( !ret.isRecursive() ) {
-						//  Round 4 #64: only what the asked zone may say about
-						ret = scrub(ret, svr.getName());
-					}
+					//  Round 4 #64: only what the asked zone may say about. Also when the
+					//  server says it recursed (RA): a server can set that bit itself.
+					//  (Root hints have no zone: a recursive upstream configured as one is
+					//  not scrubbed.)
+					ret = scrub(ret, svr.getName());
 					if( ret.isRecursive() ) {
 						//The server did the work so we're done
 						break;
@@ -819,7 +820,7 @@ public class Resolver  extends DnsBaseClass
 			}
 		}
 
-		if( ret != null && !ret.isRecursive() && ret.getResponseCode() == DNS.NOERROR && ret.getAnswerCount() == 0 && !isNoData(ret) ) {
+		if( ret != null && ret.getResponseCode() == DNS.NOERROR && ret.getAnswerCount() == 0 && !isNoData(ret) && !ret.getHeader().getAA() ) {
 			//  Round 4 #62: only a referral that leads nowhere closer is left: no answer
 			//  (the client used to get NOERROR without data), SERVFAIL instead
 			return null;
@@ -873,7 +874,17 @@ public class Resolver  extends DnsBaseClass
 				}
 			}
 			if( next == null ) {
-				return followed ? name : null;
+				if( !followed ) {
+					return null;
+				}
+				//  A negative answer for the end of the chain from its own zone (an SOA at or
+				//  above it) is complete: the name has no such data
+				for(RR rr : m.getAuthority()) {
+					if( rr.getType() == DNS.SOA && us.bringardner.parley.dns.dnssec.Canonical.isBelow(name, rr.getName(), true) ) {
+						return null;
+					}
+				}
+				return name;
 			}
 			followed = true;
 			name = us.bringardner.parley.dns.dnssec.Canonical.key(next);
