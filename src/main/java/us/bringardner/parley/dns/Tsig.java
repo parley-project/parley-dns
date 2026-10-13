@@ -486,6 +486,63 @@ public final class Tsig {
 		return System.currentTimeMillis()/1000;
 	}
 
+	/**
+	 * Round 5 #85: the MACs of requests already accepted, kept until they are
+	 * too old to be accepted again (RFC 8945 5.2.3). Without it, a signed
+	 * UPDATE captured on the wire could be sent again within the fudge window
+	 * (for example to undo a later change), and a signed AXFR request let
+	 * anyone who saw it download the zone.
+	 */
+	public static final class ReplayCache {
+		/** Default number of MACs kept; past it the oldest are dropped */
+		public static final int DEFAULT_MAX = 100000;
+		private final int max;
+		//  key name + MAC -> the time (s) after which the request can't be accepted anyway
+		private final java.util.LinkedHashMap<String, Long> seen = new java.util.LinkedHashMap<String, Long>();
+		private final java.util.concurrent.atomic.AtomicLong replays = new java.util.concurrent.atomic.AtomicLong();
+
+		public ReplayCache() {
+			this(DEFAULT_MAX);
+		}
+
+		public ReplayCache(int max) {
+			this.max = Math.max(1, max);
+		}
+
+		/** @return true the first time this request is seen, false for a replay */
+		synchronized boolean firstUse(Record r, long now, int window) {
+			java.util.Iterator<Long> it = seen.values().iterator();
+			while( it.hasNext() ) {
+				//  roughly in expiry order: stop at the first one still live
+				if( it.next() >= now ) {
+					break;
+				}
+				it.remove();
+			}
+			String k = r.keyName+"|"+java.util.Base64.getEncoder().encodeToString(r.mac);
+			if( seen.containsKey(k) ) {
+				replays.incrementAndGet();
+				return false;
+			}
+			while( seen.size() >= max ) {
+				it = seen.values().iterator();
+				it.next();
+				it.remove();
+			}
+			seen.put(k, r.timeSigned+window);
+			return true;
+		}
+
+		/** @return requests refused as replays */
+		public long getReplays() {
+			return replays.get();
+		}
+
+		public synchronized int size() {
+			return seen.size();
+		}
+	}
+
 	/** A TSIG check that failed; error is BADSIG, BADKEY, BADTIME or BADTRUNC. */
 	public static final class TsigException extends Exception {
 		private static final long serialVersionUID = 1L;
@@ -560,6 +617,18 @@ public final class Tsig {
 		}
 
 		static Session verifyRequest(KeyRing keys, byte [] msg, long now, int maxFudge) {
+			return verifyRequest(keys, msg, now, maxFudge, null);
+		}
+
+		/**
+		 * @param replays when not null, a request whose MAC was already accepted
+		 *   gets BADTIME (RFC 8945 5.2.3), as an old Time Signed would
+		 */
+		public static Session verifyRequest(KeyRing keys, byte [] msg, int maxFudge, ReplayCache replays) {
+			return verifyRequest(keys, msg, now(), maxFudge, replays);
+		}
+
+		static Session verifyRequest(KeyRing keys, byte [] msg, long now, int maxFudge, ReplayCache replays) {
 			Record r = find(msg);
 			if( r == null ) {
 				return null;
@@ -582,6 +651,9 @@ public final class Tsig {
 			}
 			if( Math.abs(now - r.timeSigned) > Math.min(r.fudge, maxFudge) ) {
 				//  Signed with a good key, but our clocks disagree: the response is signed
+				return new Session(key, r.keyName, r.algorithm, r.fudge, r.mac, BADTIME, r.timeSigned);
+			}
+			if( replays != null && !replays.firstUse(r, now, Math.min(r.fudge, maxFudge)) ) {
 				return new Session(key, r.keyName, r.algorithm, r.fudge, r.mac, BADTIME, r.timeSigned);
 			}
 			return new Session(key, r.keyName, r.algorithm, r.fudge, r.mac, NOERROR, r.timeSigned);

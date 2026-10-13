@@ -222,4 +222,52 @@ public class TestTsig {
 			assertThrows(IllegalArgumentException.class, () -> Tsig.Session.client(KEYS.get("k256"), bad), ""+bad);
 		}
 	}
+
+	// ------------------------------------------------------------ round 5 #85: replays
+
+	@Test
+	public void theSameRequestIsAcceptedOnce() throws Exception {
+		Tsig.ReplayCache cache = new Tsig.ReplayCache();
+		byte [] req = Tsig.Session.client(KEYS.get("k256")).signRequest(query(71));
+		long t = Tsig.find(req).timeSigned;
+		assertEquals(Tsig.NOERROR, Tsig.Session.verifyRequest(KEYS, req, t, 300, cache).getError());
+		assertEquals(Tsig.BADTIME, Tsig.Session.verifyRequest(KEYS, req, t+1, 300, cache).getError());
+		assertEquals(1, cache.getReplays());
+		//  a new request (new MAC) is fine
+		byte [] other = Tsig.Session.client(KEYS.get("k256")).signRequest(query(72));
+		assertEquals(Tsig.NOERROR, Tsig.Session.verifyRequest(KEYS, other, t+1, 300, cache).getError());
+	}
+
+	@Test
+	public void entriesAreDroppedWhenTheRequestIsTooOldAnyway() throws Exception {
+		Tsig.ReplayCache cache = new Tsig.ReplayCache();
+		byte [] req = Tsig.Session.client(KEYS.get("k256")).signRequest(query(73));
+		long t = Tsig.find(req).timeSigned;
+		assertEquals(Tsig.NOERROR, Tsig.Session.verifyRequest(KEYS, req, t, 300, cache).getError());
+		assertEquals(1, cache.size());
+		byte [] later = Tsig.Session.client(KEYS.get("k256")).signRequest(query(74));
+		//  past the window: the first entry goes (that request would get BADTIME for its time)
+		Tsig.Session.verifyRequest(KEYS, later, t+301, 300, cache);
+		assertEquals(1, cache.size());
+		assertEquals(Tsig.BADTIME, Tsig.Session.verifyRequest(KEYS, req, t+302, 300, cache).getError());
+	}
+
+	@Test
+	public void theCacheIsBounded() throws Exception {
+		Tsig.ReplayCache cache = new Tsig.ReplayCache(3);
+		Tsig.Session c = Tsig.Session.client(KEYS.get("k256"));
+		for(int i=0; i < 10; i++ ) {
+			byte [] req = c.signRequest(query(100+i));
+			Tsig.Session.verifyRequest(KEYS, req, Tsig.find(req).timeSigned, 300, cache);
+		}
+		assertEquals(3, cache.size());
+	}
+
+	@Test
+	public void withoutACacheRepeatsAreAccepted() throws Exception {
+		byte [] req = Tsig.Session.client(KEYS.get("k256")).signRequest(query(75));
+		long t = Tsig.find(req).timeSigned;
+		assertEquals(Tsig.NOERROR, Tsig.Session.verifyRequest(KEYS, req, t, 300, null).getError());
+		assertEquals(Tsig.NOERROR, Tsig.Session.verifyRequest(KEYS, req, t, 300, null).getError());
+	}
 }

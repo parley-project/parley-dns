@@ -227,6 +227,32 @@ public class TestTsigServer {
 	}
 
 	@Test
+	public void aReplayedTransferRequestIsRefused() throws Exception {
+		//  Round 5 #85: anyone who saw a signed AXFR request could send it again
+		//  (within the fudge window) and download the zone
+		Tsig.Session c = Tsig.Session.client(KEYS.get("xfr"));
+		byte [] req = c.signRequest(query("tsig.test", DNS.AXFR, 9));
+		List<byte[]> first = tcp(req, TestTsigServer::ended);
+		assertEquals(DNS.NOERROR, new Message(new ByteBuffer(first.get(0))).getResponseCode());
+		long before = server.getTsigReplays().getReplays();
+		byte [] again = tcp(req, l -> l.size() == 1).get(0);
+		Message m = new Message(new ByteBuffer(again));
+		assertEquals(Tsig.NOTAUTH, m.getResponseCode());
+		assertEquals(0, m.getAnswerCount(), "no zone data");
+		assertEquals(Tsig.BADTIME, Tsig.find(again).error);
+		assertEquals(before+1, server.getTsigReplays().getReplays());
+	}
+
+	@Test
+	public void aRepeatedSignedQueryIsStillAnswered() throws Exception {
+		//  Clients resend a query unchanged after a timeout; queries are read-only
+		Tsig.Session c = Tsig.Session.client(KEYS.get("other"));
+		byte [] req = c.signRequest(query("www.tsig.test", DNS.A, 10));
+		assertEquals(1, new Message(new ByteBuffer(udp(req))).getAnswerCount());
+		assertEquals(1, new Message(new ByteBuffer(udp(req))).getAnswerCount());
+	}
+
+	@Test
 	public void transferRefusedWithoutAnAllowedKey() throws Exception {
 		List<byte[]> unsigned = tcp(query("tsig.test", DNS.AXFR, 7), l -> l.size() == 1);
 		assertEquals(DNS.REFUSED, new Message(new ByteBuffer(unsigned.get(0))).getResponseCode());

@@ -54,7 +54,10 @@ public abstract class DnsRequestProcessor  extends DnsBaseClass implements DNS
 	currentTsig = null;
 	Tsig.Session tsig;
 	try {
-		tsig = Tsig.Session.verifyRequest(server.getTsigKeys(), query.getWire(), server.getTsigFudge());
+		//  Round 5 #85: a signed UPDATE or zone transfer is accepted once. Other
+		//  requests are read-only and clients resend them unchanged on a timeout.
+		tsig = Tsig.Session.verifyRequest(server.getTsigKeys(), query.getWire(), server.getTsigFudge(),
+				needsReplayCheck(query.getMessage()) ? server.getTsigReplays() : null);
 	} catch(DnsFormatException ex) {
 		//  A TSIG that is not the last record, or a malformed one
 		sendResponse(Edns.formatError(query.getMessage()));
@@ -79,6 +82,15 @@ public abstract class DnsRequestProcessor  extends DnsBaseClass implements DNS
 		currentTsig = null;
 	}
 	setState("Processing Message Complete");
+ }
+
+ /** UPDATEs and zone transfers change or reveal a whole zone: their signed requests are used once. */
+ static boolean needsReplayCheck(Message req) {
+	if( req.getHeader().getOPCODE() == DNS.UPDATE ) {
+		return true;
+	}
+	Section q = req.getFirstQuestion();
+	return q != null && (q.getType() == DNS.AXFR || q.getType() == DNS.IXFR);
  }
 
  /** A NOTAUTH response to a request (its question, no records). */

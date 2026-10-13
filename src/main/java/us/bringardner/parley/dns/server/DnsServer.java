@@ -811,6 +811,14 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 	}
 
+	//  Round 5 #85: MACs of signed UPDATE / transfer requests already accepted
+	private final Tsig.ReplayCache tsigReplays = new Tsig.ReplayCache();
+
+	/** The MACs of accepted signed UPDATE and zone transfer requests (each is accepted once). */
+	public Tsig.ReplayCache getTsigReplays() {
+		return tsigReplays;
+	}
+
 	/** Largest clock difference (seconds) for TSIG, 1-65535 (initServer reads JDns.tsigFudge). */
 	public int getTsigFudge() {
 		return tsigFudge;
