@@ -26,15 +26,12 @@
 package us.bringardner.parley.dns.server;
 
 import java.io.IOException;
-import java.net.Socket;
 import java.util.Scanner;
 
 import javax.net.SocketFactory;
 
-import us.bringardner.parley.io.CRLFLineReader;
-import us.bringardner.parley.io.CRLFLineWriter;
 import us.bringardner.parley.dns.util.NsLookup;
-import us.bringardner.parley.io.IoUtils;
+import us.bringardner.parley.net.client.Client;
 
 /**
  * 
@@ -43,9 +40,8 @@ import us.bringardner.parley.io.IoUtils;
  */
 public class DnsAdminClient implements DnsAdminConstants {
 	private static SocketFactory socketFactory = SocketFactory.getDefault();
-	private Socket sock;
-	private CRLFLineReader in;
-	private CRLFLineWriter out;
+	//  parley-net's client: connect timeout, line length limit, TLS
+	private Client client;
 	private String adminHost;
 	private int adminPort;
 	private int timeout = 2000;
@@ -162,11 +158,20 @@ public class DnsAdminClient implements DnsAdminConstants {
 					&& Boolean.parseBoolean(System.getProperty(DnsServer.PROP_ADMIN_TLS, "false").trim()) ) {
 				factory = javax.net.ssl.SSLSocketFactory.getDefault();
 			}
-			sock = factory.createSocket(adminHost,adminPort);
-			sock.setSoTimeout(getTimeout());
-			in = new CRLFLineReader(sock.getInputStream());
-			out = new CRLFLineWriter(sock.getOutputStream());
-			String tmp = in.readLine();
+			//  no host: this machine, as java.net.Socket takes it
+			String host = adminHost == null ? java.net.InetAddress.getLoopbackAddress().getHostAddress() : adminHost;
+			Client c = new Client(host, adminPort, true);
+			c.setSocketFactory(factory);
+			//  as before: the admin certificate is checked against the trust store, not the host name
+			c.setVerifyHostname(false);
+			c.setConnectTimeout(Math.max(getTimeout(), 2000));
+			if( !c.connect() ) {
+				System.out.println(c.getLastConnectError());
+				return false;
+			}
+			client = c;
+			c.setTimeout(getTimeout());
+			String tmp = c.readLine();
 			if( tmp != null && tmp.startsWith("+")) {
 				String challenge = AdminAuth.challengeFrom(tmp);
 				if( challenge == null ) {
@@ -174,9 +179,9 @@ public class DnsAdminClient implements DnsAdminConstants {
 				} else if( secret == null || secret.trim().isEmpty() ) {
 					System.out.println("Server requires authentication: set the secret ("+DnsServer.PROP_ADMIN_SECRET+")");
 				} else {
-					out.writeLine("auth "+AdminAuth.response(secret.trim(), challenge));
-					out.flush();
-					tmp = in.readLine();
+					c.writeLine("auth "+AdminAuth.response(secret.trim(), challenge));
+					c.flush();
+					tmp = c.readLine();
 					if( tmp != null && tmp.startsWith("+") ) {
 						ret = true;
 					} else {
@@ -189,25 +194,32 @@ public class DnsAdminClient implements DnsAdminConstants {
 		} catch (Exception e) {
 			System.out.println(e);
 		}
+		if( !ret ) {
+			closeQuietly();
+		}
 		return  ret;
 	}
 
 	public void close() {
-		if( out != null ) {
+		if( client != null ) {
 			try {
 				sendCommand(QUIT);
 			} catch(Exception ex){}
 		}
-
-		if( in != null ) { IoUtils.closeQuietly(in); }
-		if( out != null ) { IoUtils.closeQuietly(out); }
-		if( sock != null ) { IoUtils.closeQuietly(sock); }
-		in = null;
-		out = null;
-		sock = null;
-
+		closeQuietly();
 	}
 
+	private void closeQuietly() {
+		Client c = client;
+		client = null;
+		if( c != null ) {
+			try {
+				c.close();
+			} catch(IOException ex) {
+				// gone already
+			}
+		}
+	}
 
 	private String executePreDefined(String cmd,String ... args ) throws IOException {
 		if( args == null || args.length == 0 ) {
@@ -289,14 +301,18 @@ public class DnsAdminClient implements DnsAdminConstants {
 
 	private String sendCommand(String cmd) throws IOException {
 
+		Client c = client;
+		if( c == null ) {
+			throw new IOException("Not connected");
+		}
 		StringBuilder ret = new StringBuilder();
-		out.writeLine(cmd);
-		out.flush();
+		c.writeLine(cmd);
+		c.flush();
 
 		String tmp = null;
 		boolean done = false;
 
-		while ( !done && (tmp=in.readLine())!=null) {
+		while ( !done && (tmp=c.readLine())!=null) {
 			ret.append(tmp+"\n");
 			if( tmp.startsWith("+") || tmp.startsWith("-") ) {
 				done = true;

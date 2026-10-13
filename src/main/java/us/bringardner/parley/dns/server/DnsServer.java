@@ -198,6 +198,12 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public static final String PROP_TCP_PROC_COUNT = "JDns.tcpProcCount";
 	/** Host DnsAdminClient connects to (was the system property "name", still read). */
 	public static final String PROP_ADMIN_HOST = "JDns.adminHost";
+	/**
+	 * "false": a JVM error (OutOfMemoryError...) in any thread is logged but doesn't stop the
+	 * process. By default main() halts it so a supervisor can start a clean one (parley-net's
+	 * FatalErrorHandler).
+	 */
+	public static final String PROP_EXIT_ON_FATAL_ERROR = "JDns.exitOnFatalError";
 	public static final String DEFAULT_DNS_DIR = "/data/services/dns/config";
 
 
@@ -205,8 +211,13 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	private static volatile int adminPort = 9999;
 	//  Where the admin port listens (set in initServer, default loopback)
 	private volatile InetAddress adminBindAddress = InetAddress.getLoopbackAddress();
-	//  Limits concurrent admin sessions (each had its own unbounded thread)
-	private volatile java.util.concurrent.Semaphore adminSlots = new java.util.concurrent.Semaphore(8);
+	//  The most admin sessions at once (JDns.adminMaxConnections)
+	private volatile int adminMaxConnections = 8;
+	//  The admin port (parley-net Server), while the server runs
+	private volatile DnsAdminServer adminServer;
+	//  Zone reloads, dynamic records and re-signing (they used to run in the admin accept loop)
+	private volatile java.util.concurrent.ScheduledExecutorService maintenance;
+	private long lastDynamicRefresh;
 	private volatile int adminIdleTimeout = 10*60*1000;
 	private volatile int adminMaxLine = DnsAdminProcessor.DEFAULT_MAX_LINE;
 	private volatile int adminAuthTimeout = DnsAdminProcessor.DEFAULT_AUTH_TIMEOUT;
@@ -710,10 +721,11 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		if( (tmp=stringProperty(PROP_ADMIN_BIND_ADDRESS)) != null) {
 			adminBindAddress = createBindAddress(tmp);
 		}
-		adminSlots = new java.util.concurrent.Semaphore(Math.max(1, intProperty(PROP_ADMIN_MAX_CONNECTIONS, 8)));
+		adminMaxConnections = Math.max(1, intProperty(PROP_ADMIN_MAX_CONNECTIONS, 8));
 		adminIdleTimeout = intProperty(PROP_ADMIN_IDLE_TIMEOUT, adminIdleTimeout);
 		adminMaxLine = intProperty(PROP_ADMIN_MAX_LINE, adminMaxLine);
-		adminAuthTimeout = intProperty(PROP_ADMIN_AUTH_TIMEOUT, adminAuthTimeout);
+		//  0 or less would turn the time limit off (8 slow clients could lock out the admin port)
+		adminAuthTimeout = Math.max(1, intProperty(PROP_ADMIN_AUTH_TIMEOUT, adminAuthTimeout));
 		if( stringProperty(PROP_ADMIN_SECRET) == null && !adminBindAddress.isLoopbackAddress() ) {
 			logError("Admin port listens on "+adminBindAddress+" but "+PROP_ADMIN_SECRET
 					+" is not set: only clients on this machine will be accepted");
@@ -754,46 +766,86 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		return adminBindAddress;
 	}
 
+	/** Where the next admin server listens (initServer reads JDns.adminBindAddress). */
+	void setAdminBindAddress(InetAddress bind) {
+		adminBindAddress = bind;
+	}
+
 	/**
-	 * Start an admin session for an accepted connection, or turn it away if
-	 * JDns.adminMaxConnections sessions are already open.
-	 * @return true if a session was started
+	 * The admin server for this DNS server, set up from the JDns.admin* settings
+	 * (port, bind address, TLS, session limit, idle time, line length, time to log in).
+	 * Not started.
+	 * @param port the port, 0 for any free port
 	 */
-	boolean handleAdminConnection(Socket clientSocket) {
-		final java.util.concurrent.Semaphore slots = adminSlots;
-		if( !slots.tryAcquire() ) {
-			log("Refused admin connection from "+clientSocket.getInetAddress()+": too many admin sessions");
-			try {
-				clientSocket.getOutputStream().write("-Too many admin connections\r\n".getBytes());
-				clientSocket.close();
-			} catch(IOException ex) {
-			}
-			return false;
-		}
+	public DnsAdminServer createAdminServer(int port) throws IOException {
+		DnsAdminServer a = new DnsAdminServer(this, port, adminBindAddress);
+		a.setServerSocketFactory(getServerSocketFactory());
+		a.setMaxClients(adminMaxConnections);
+		a.setMaxLine(adminMaxLine);
+		a.setLoginTimeLimit(Math.max(1, adminAuthTimeout));
+		a.setMaxIdleConnection(adminIdleTimeout);
+		//  The idle check runs every few minutes by default: often enough to close
+		//  idle sessions about on time (they used to time out on the socket)
+		a.setAdminFrequency(Math.max(1000, Math.min(adminIdleTimeout/2, 60000)));
+		return a;
+	}
+
+	/**
+	 * Start the admin server (see {@link #createAdminServer(int)}); run() does this on
+	 * JDns.adminPort.
+	 * @throws IOException if it can't listen (port in use, a TLS key store problem...)
+	 */
+	public DnsAdminServer startAdminServer(int port) throws IOException {
+		DnsAdminServer a = createAdminServer(port);
 		try {
-			DnsAdminProcessor admin = new DnsAdminProcessor(this,clientSocket);
-			admin.setTimeout(adminIdleTimeout);
-			admin.setMaxLine(adminMaxLine);
-			admin.setAuthTimeout(adminAuthTimeout);
-			admin.setOnFinish(slots::release);
-			admin.start();
-			return true;
+			a.startAndWait(10000);
 		} catch(IOException | RuntimeException ex) {
-			slots.release();
-			log("Can't start admin session",ex);
-			IoUtils.closeQuietly(clientSocket);
-			return false;
+			//  e.g. timed out: it must not bind later with nothing referring to it
+			a.stop();
+			throw ex;
+		}
+		DnsAdminServer old = adminServer;
+		adminServer = a;
+		if( old != null ) {
+			old.stop();
+		}
+		return a;
+	}
+
+	/** @return the running admin server, or null */
+	public DnsAdminServer getAdminServer() {
+		return adminServer;
+	}
+
+	private void stopAdminServer() {
+		DnsAdminServer a = adminServer;
+		adminServer = null;
+		if( a != null ) {
+			a.stop();
 		}
 	}
 
 	/** Longest admin line in bytes (initServer reads JDns.adminMaxLine). */
 	void setAdminMaxLine(int maxLine) {
 		adminMaxLine = maxLine;
+		DnsAdminServer a = adminServer;
+		if( a != null ) {
+			a.setMaxLine(maxLine);
+		}
+	}
+
+	/** ms an idle admin session stays open (initServer reads JDns.adminIdleTimeout); for the next admin server. */
+	void setAdminIdleTimeout(int ms) {
+		adminIdleTimeout = ms;
 	}
 
 	/** ms an admin client has to authenticate (initServer reads JDns.adminAuthTimeout). */
 	void setAdminAuthTimeout(int ms) {
-		adminAuthTimeout = ms;
+		adminAuthTimeout = Math.max(1, ms);
+		DnsAdminServer a = adminServer;
+		if( a != null ) {
+			a.setLoginTimeLimit(adminAuthTimeout);
+		}
 	}
 
 	//  JDns.notifyKey (applied by setNotifyTargets)
@@ -897,20 +949,17 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 	/** Set the most admin sessions at once (initServer reads JDns.adminMaxConnections). */
 	void setAdminMaxConnections(int max) {
-		adminSlots = new java.util.concurrent.Semaphore(Math.max(1, max));
+		adminMaxConnections = Math.max(1, max);
+		DnsAdminServer a = adminServer;
+		if( a != null ) {
+			a.setMaxClients(adminMaxConnections);
+		}
 	}
 
 	/** Admin sessions that can still be opened. */
 	public int getAvailableAdminSlots() {
-		return adminSlots.availablePermits();
-	}
-
-	/**
-	 * Open the admin listener on adminPort / adminBindAddress.It used to
-	 * listen on every interface regardless of the DNS bind address.
-	 */
-	ServerSocket createAdminSocket() throws IOException {
-		return getServerSocketFactory().createServerSocket(getAdminPort(), 50, adminBindAddress);
+		DnsAdminServer a = adminServer;
+		return a == null ? adminMaxConnections : a.getAvailableSlots();
 	}
 
 	private InetAddress createBindAddress(String tmp) throws UnknownHostException {
@@ -1535,8 +1584,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public static void main(String[] args) {
 		//  Log dead threads; on a JVM error (e.g. OutOfMemoryError) stop the
 		//  process so a supervisor restarts it (see FatalErrorHandler)
-		FatalErrorHandler.install(!"false".equalsIgnoreCase(
-				System.getProperty(FatalErrorHandler.PROP_EXIT_ON_FATAL_ERROR,"true").trim()));
+		us.bringardner.parley.net.FatalErrorHandler.install(!"false".equalsIgnoreCase(
+				System.getProperty(PROP_EXIT_ON_FATAL_ERROR,"true").trim()));
 
 		us.bringardner.parley.dns.server.DnsServer svr = new DnsServer();
 		svr.start(true);
@@ -1687,25 +1736,114 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 
 		running = true;
-		ServerSocket svrSock = null;
 		setState("Running Enter");
 
+		if( !running || isShutdown() ) {
+			//  stopped while starting
+			failedToStart(new StartupException("Stopped while starting", null, -2));
+			return;
+		}
 		try {
-			int port = getAdminPort();
-			svrSock = createAdminSocket();
-			svrSock.setSoTimeout((int)acceptTimeout);
-			log("Started dnsAdmin on "+adminBindAddress+":"+port);
+			DnsAdminServer a = startAdminServer(getAdminPort());
+			log("Started dnsAdmin on "+adminBindAddress+":"+a.getLocalPort());
 			setState("Running got socket");
-		} catch(IOException ex) {
+		} catch(IOException | RuntimeException ex) {
 			failedToStart(new StartupException("Can't create admin socket on "+adminBindAddress+":"+getAdminPort()+": "+ex, ex, -2));
 			return;
 		}
 		startLatch.countDown();
-		try {
-			serve(svrSock);
-		} finally {
-			IoUtils.closeQuietly(svrSock);
+		if( running && !isShutdown() ) {
+			startMaintenance();
 		}
+		try {
+			while( running && !isShutdown() ) {
+				setState("Running");
+				try {
+					Thread.sleep(1000);
+				} catch(InterruptedException ex) {
+					//  stop()
+				}
+			}
+		} finally {
+			stopMaintenance();
+			stopAdminServer();
+			running = false;
+			setState("Running Exit");
+		}
+	}
+
+	/** How often (ms) zone files, dynamic records and signatures are looked after */
+	private volatile long maintenancePeriod = acceptTimeout;
+
+	/** @param ms how often maintenance runs (applies when the server starts) */
+	void setMaintenancePeriod(long ms) {
+		maintenancePeriod = ms;
+	}
+
+	/**
+	 * Zone file reloads, dynamic records and re-signing run on their own thread
+	 * now. They used to run in the admin accept loop, which caught only
+	 * IOException from a reload: one RuntimeException ended the loop, and with
+	 * it all reloading and re-signing, so signed zones went bogus when their
+	 * signatures expired (round 4 #60, round 5 #87). Each step is now guarded.
+	 */
+	private void startMaintenance() {
+		lastDynamicRefresh = System.currentTimeMillis();
+		java.util.concurrent.ScheduledExecutorService m = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(
+				new us.bringardner.parley.core.NamedThreadFactory("DnsMaintenance"));
+		maintenance = m;
+		m.scheduleWithFixedDelay(this::maintain, 0, Math.max(100, maintenancePeriod), java.util.concurrent.TimeUnit.MILLISECONDS);
+	}
+
+	private void stopMaintenance() {
+		java.util.concurrent.ScheduledExecutorService m = maintenance;
+		maintenance = null;
+		if( m != null ) {
+			m.shutdownNow();
+		}
+	}
+
+	private interface MaintenanceStep {
+		void run() throws Exception;
+	}
+
+	/** One maintenance step: an error is logged and the next step (and run) goes ahead. */
+	private void guarded(String what, MaintenanceStep step) {
+		try {
+			step.run();
+		} catch(VirtualMachineError e) {
+			//  The scheduler would swallow it: report it like a dying thread (may halt the process)
+			us.bringardner.parley.net.FatalErrorHandler.getInstance().uncaughtException(Thread.currentThread(), e);
+		} catch(Throwable e) {
+			logError("Error "+what, e);
+		}
+	}
+
+	/** One round of maintenance (run on the maintenance thread). */
+	void maintain() {
+		guarded("refreshing dynamic records", () -> {
+			if( (System.currentTimeMillis()-lastDynamicRefresh) >= dynamicConfigRefreash) {
+				lastDynamicRefresh = System.currentTimeMillis();
+				loadDynamicFromDb();
+				if( dynamicFile != null && dynamicFile.exists()) {
+					dynamicLoaded = dynamicFile.lastModified();
+				}
+			} else if( dynamicFile != null && dynamicFile.lastModified() > dynamicLoaded) {
+				dynamicFile = loadDynamicFromFile(true);
+				if( dynamicFile != null && dynamicFile.exists()) {
+					dynamicLoaded = dynamicFile.lastModified();
+				}
+			}
+		});
+		guarded("reloading zones", () -> {
+			if( shouldReloadZones() ) {
+				loadZones();
+			}
+		});
+		guarded("signing zones", () -> {
+			flushDynamicSigning();
+			resignDue(System.currentTimeMillis()/1000);
+		});
 	}
 
 	/**
@@ -1750,69 +1888,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 	}
 
-	/** The admin loop: serve admin connections and periodic reloads until stopped. */
-	private void serve(ServerSocket svrSock) {
-
-
-
-		//boolean outOfMemory = false;
-
-		long dynUpdate = System.currentTimeMillis();
-
-		while( running && !isShutdown()) {
-
-			if( (System.currentTimeMillis()-dynUpdate) >= dynamicConfigRefreash) {
-				try {
-					loadDynamicFromDb();
-					if( dynamicFile != null && dynamicFile.exists()) {
-						dynamicLoaded = dynamicFile.lastModified();
-					}
-				} catch (Throwable e) {
-					logError("Can't refreash dynamic dns",e);
-				}
-				dynUpdate = System.currentTimeMillis();
-			} else if( dynamicFile != null && dynamicFile.lastModified()>dynamicLoaded) {
-				try {
-					dynamicFile =  loadDynamicFromFile(true);
-				} catch (IOException e) {
-				}
-				if( dynamicFile != null && dynamicFile.exists()) {
-					dynamicLoaded = dynamicFile.lastModified();
-				}				
-			}
-			if( shouldReloadZones()) {
-				try {
-					loadZones();
-				} catch (IOException e) {
-					logError("Error reloading zones", e);
-				}
-			}
-			try {
-				flushDynamicSigning();
-				resignDue(System.currentTimeMillis()/1000);
-			} catch(RuntimeException e) {
-				logError("Error signing zones", e);
-			}
-
-			try {
-				setState("Waiting for admin connection");
-				Socket clientSocket = svrSock.accept();
-				if( clientSocket != null ) {
-					handleAdminConnection(clientSocket);
-					setState("Processing conneciton");
-				}
-
-			} catch(Exception ex) {
-				//Ignore exceptions
-			}
-
-		}
-		System.out.println("JDNS Server After loop");
-		running = false;
-		setState("Running Exit");
-
-
-	}
 	/**
 	 * 
 	 * Creation date: (6/16/2003 9:29:24 AM)
@@ -3192,6 +3267,13 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public boolean stopAndWait(long timeoutMs) throws InterruptedException {
 		long deadline = System.currentTimeMillis()+timeoutMs;
 		stop();
+		java.util.concurrent.ScheduledExecutorService m = maintenance;
+		stopMaintenance();
+		stopAdminServer();
+		if( m != null ) {
+			//  a reload or re-sign in progress finishes before the database closes
+			m.awaitTermination(Math.max(1, deadline-System.currentTimeMillis()), java.util.concurrent.TimeUnit.MILLISECONDS);
+		}
 		closeDbConnection();
 		closeListeners();
 		ZoneNotifier n = notifier;
@@ -3209,6 +3291,17 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 		long left = deadline - System.currentTimeMillis();
 		ret &= Resolver.awaitShutdown(Math.max(1, left));
+		Thread t = thread;
+		if( t != null && t != Thread.currentThread() ) {
+			left = deadline - System.currentTimeMillis();
+			if( left > 0 ) {
+				t.join(left);
+			}
+			ret &= !t.isAlive();
+		}
+		java.util.concurrent.ScheduledExecutorService still = maintenance;
+		ret &= m == null || m.isTerminated();
+		ret &= still == null;
 		return ret;
 	}
 
