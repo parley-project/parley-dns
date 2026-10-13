@@ -26,8 +26,6 @@
 package us.bringardner.parley.dns.resolve;
 
 import java.net.InetAddress;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
 
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.DNS;
@@ -35,9 +33,13 @@ import us.bringardner.parley.dns.DnsBaseClass;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Section;
+import us.bringardner.parley.net.client.UpstreamHealth;
 
 /**
  * One address of a remote (upstream) name server.
+ * <p>
+ * Its response time, failures, hold-off and probes are kept by parley-net's
+ * {@link UpstreamHealth}, with the limits below ({@link #POLICY}).
  * <p>
  * Thread-safe: one ServerA is shared by all ResolverThreads (through the
  * Resolver's server map), so every query builds its own Message and all
@@ -65,15 +67,18 @@ public class ServerA  extends DnsBaseClass
 	public static int QUERY_TIMEOUT = 2000;
 	public static int QUERY_RETRY = 1;
 
-	private final AtomicInteger msgSent = new AtomicInteger();
-	private final AtomicInteger msgRec  = new AtomicInteger();
-	private final AtomicLong totResp = new AtomicLong();
-	private final AtomicInteger consecutiveFailures = new AtomicInteger();
-	private volatile long lastReq = 0;
-	//  Inactive until this time (ms). 0 == active
-	private volatile long inactiveUntil = 0;
-	//  No probe (query while inactive) before this time (ms)
-	private final AtomicLong nextProbe = new AtomicLong();
+	/** The limits above, as parley-net's UpstreamHealth reads them (changes apply at once). */
+	static final UpstreamHealth.Policy POLICY = new UpstreamHealth.Policy() {
+		@Override public long minHoldOff() { return HOLD_OFF_MIN; }
+		@Override public long maxHoldOff() { return DEACTIVATE; }
+		@Override public int maxTries() { return MAX_TRIES; }
+		@Override public long probeInterval() { return PROBE_INTERVAL; }
+		@Override public int queryTimeout() { return QUERY_TIMEOUT; }
+		@Override public int minQueryTimeout() { return MIN_QUERY_TIMEOUT; }
+	};
+
+	//  Response time, failures, hold-off and probes (parley-net)
+	private final UpstreamHealth health = new UpstreamHealth(POLICY);
 
 	private volatile String name;
 	private volatile String addrStr;
@@ -152,28 +157,32 @@ public class ServerA  extends DnsBaseClass
 		setAddress(rr.getAddressString());
 	}
 
+	/** @return this address's response time, failures and hold-off */
+	public UpstreamHealth getHealth() {
+		return health;
+	}
+
 	/** Average response time (ms) over all queries sent, 0 if none sent. */
 	public int aveResponseTime() { 
-		int sent = msgSent.get();
-		return sent == 0 ? 0 : (int)(totResp.get()/sent); 
+		return health.getAverageResponseTime();
 	}
 	
 	/** Queries sent per response received (1 == every query answered), 0 if none answered. */
 	public int battingAve() { 
-		int rec = msgRec.get();
-		return rec == 0 ? 0 : msgSent.get() / rec; 
+		int rec = health.getAnswered();
+		return rec == 0 ? 0 : health.getSent() / rec; 
 	}
 
 	public int getMsgSent() {
-		return msgSent.get();
+		return health.getSent();
 	}
 
 	public int getMsgRec() {
-		return msgRec.get();
+		return health.getAnswered();
 	}
 
 	public long getLastReq() {
-		return lastReq;
+		return health.getLastRequest();
 	}
 	
 	/**
@@ -181,7 +190,7 @@ public class ServerA  extends DnsBaseClass
 	 * the deactivation period has passed).
 	 */
 	public boolean isActive() {
-		return System.currentTimeMillis() >= inactiveUntil;
+		return health.isActive();
 	}
 
 	/**
@@ -192,17 +201,10 @@ public class ServerA  extends DnsBaseClass
 	 */
 	/** Shortest timeout used for a server whose response time is known (ms). */
 	public static int MIN_QUERY_TIMEOUT = 300;
-	/** Smoothed response time in ms (EWMA, 1/8 weight), 0 if never answered. */
-	private volatile double srtt = 0;
 
 	/** Smoothed response time (ms); 0 if this server has never answered. */
 	public long getSrtt() {
-		return Math.round(srtt);
-	}
-
-	/** Record a response time (or a failure penalty) in the smoothed average. */
-	private synchronized void recordRtt(long ms) {
-		srtt = srtt == 0 ? ms : (7*srtt + ms) / 8;
+		return health.getSrtt();
 	}
 
 	/**
@@ -211,8 +213,7 @@ public class ServerA  extends DnsBaseClass
 	 * before that, never more than 'remaining'.
 	 */
 	public int timeoutFor(long remaining) {
-		long t = srtt > 0 ? Math.max(MIN_QUERY_TIMEOUT, Math.min(QUERY_TIMEOUT, Math.round(srtt*2)+100)) : QUERY_TIMEOUT;
-		return (int)Math.max(1, Math.min(t, remaining));
+		return health.timeoutFor(remaining);
 	}
 
 	public Message query(Section q) {
@@ -238,7 +239,7 @@ public class ServerA  extends DnsBaseClass
 	 * @return the response, or null (inactive, no address, no answer)
 	 */
 	public Message query(Section q, int timeoutMs, long deadline, boolean probe) {
-		if( !isActive() && !(probe && tryProbe()) ) {
+		if( !isActive() && !(probe && health.tryProbe()) ) {
 			return null;
 		}
 
@@ -248,7 +249,7 @@ public class ServerA  extends DnsBaseClass
 		}
 		if ( server == null ) {
 			//  Unknown address counts as a failure (deactivates after MAX_TRIES)
-			failed();
+			health.failed();
 			return null;
 		}
 
@@ -270,9 +271,7 @@ public class ServerA  extends DnsBaseClass
 			qm.getHeader().setCD(true);
 		}
 
-		long start = System.currentTimeMillis();
-		lastReq = start;
-		msgSent.incrementAndGet();
+		long start = health.started();
 
 		Message ret = null;
 		try {
@@ -281,43 +280,24 @@ public class ServerA  extends DnsBaseClass
 			//  Timeout or I/O error, counted as a failure below
 		}
 
-		long rtt = System.currentTimeMillis()-start;
-		totResp.addAndGet(rtt);
 		if( ret != null ) {
-			msgRec.incrementAndGet();
-			recordRtt(Math.max(1, rtt));
-			consecutiveFailures.set(0);
-			inactiveUntil = 0;
+			health.succeeded(start);
 		} else {
 			//  A timeout counts as a slow answer so the server sorts behind responsive ones
-			recordRtt(Math.max(rtt, QUERY_TIMEOUT) * 2L);
-			failed();
+			health.failed(start);
 		}
 
 		return ret;
 	}
 
-	/** Count a failure; past MAX_TRIES in a row, hold the server off (doubling, up to DEACTIVATE). */
-	private void failed() {
-		int n = consecutiveFailures.incrementAndGet();
-		if( n > MAX_TRIES ) {
-			inactiveUntil = System.currentTimeMillis()+holdOff(n - MAX_TRIES);
-		}
-	}
-
 	/** Hold-off (ms) after the k-th failure past MAX_TRIES (k >= 1): HOLD_OFF_MIN doubled k-1 times, at most DEACTIVATE. */
 	static long holdOff(int k) {
-		long max = DEACTIVATE;
-		long ret = HOLD_OFF_MIN;
-		for(int i=1; i < k && ret < max; i++ ) {
-			ret *= 2;
-		}
-		return Math.max(1, Math.min(ret, max));
+		return UpstreamHealth.holdOff(POLICY, k);
 	}
 
 	/** When this server may be queried again (ms); 0 or a past time if it is active. */
 	public long getInactiveUntil() {
-		return inactiveUntil;
+		return health.getInactiveUntil();
 	}
 
 	/**
@@ -326,21 +306,14 @@ public class ServerA  extends DnsBaseClass
 	 * one query a second from all threads together.
 	 */
 	boolean tryProbe() {
-		long now = System.currentTimeMillis();
-		long next = nextProbe.get();
-		return now >= next && nextProbe.compareAndSet(next, now + PROBE_INTERVAL);
+		return health.tryProbe();
 	}
 
 	/**
 	 * Force this server active (clears the failure count) or inactive for DEACTIVATE ms.
 	 */
 	public void setActive(boolean newActive) {
-		if( newActive ) {
-			consecutiveFailures.set(0);
-			inactiveUntil = 0;
-		} else {
-			inactiveUntil = System.currentTimeMillis()+DEACTIVATE;
-		}
+		health.setActive(newActive);
 	}
 
 	public final void setAddress(String ip) {
