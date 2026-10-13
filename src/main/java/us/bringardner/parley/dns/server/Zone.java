@@ -1511,6 +1511,12 @@ public class Zone implements DNS {
 		}
 		case HINFO:
 			return quote(((us.bringardner.parley.dns.Hinfo)rr).getCpu())+" "+quote(((us.bringardner.parley.dns.Hinfo)rr).getOs());
+		case PTR: {
+			//  Absolute: without the dot the reader took the target as relative to
+			//  the zone (a journal replay turned host.example. into host.example.<zone>)
+			String t = rr.getRdataAsString();
+			return t.endsWith(".") ? t : t+".";
+		}
 		default:
 			return rr.getRdataAsString();
 		}
