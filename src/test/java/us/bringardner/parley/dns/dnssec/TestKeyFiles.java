@@ -129,4 +129,19 @@ public class TestKeyFiles {
 		}
 		assertArrayEquals(alg.publicKeyField(kp.getPublic()), alg.publicKeyField(kp.getPublic()));
 	}
+
+	@Test
+	public void aSymlinkWhereTheKeyFileGoesIsRefused() throws Exception {
+		DnssecKey k = DnssecKey.generate("files.test", Algorithm.of(Algorithm.ECDSAP256SHA256), true, 0);
+		File target = new File(dir, "elsewhere");
+		File key = new File(dir, k.baseName()+".key");
+		try {
+			Files.createSymbolicLink(key.toPath(), target.toPath());
+		} catch(UnsupportedOperationException | IOException ex) {
+			Assumptions.assumeTrue(false, "no symlinks: "+ex);
+		}
+		assertThrows(IOException.class, () -> k.save(dir));
+		assertFalse(target.exists(), "nothing written through the link");
+		assertFalse(new File(dir, k.baseName()+".private").exists(), "no .private left behind");
+	}
 }

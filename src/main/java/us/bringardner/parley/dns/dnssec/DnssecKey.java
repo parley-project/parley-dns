@@ -232,8 +232,10 @@ public final class DnssecKey {
 		}
 		File key = new File(dir, baseName()+".key");
 		File priv = new File(dir, baseName()+".private");
-		if( key.exists() || priv.exists() ) {
-			throw new IOException(key+" already exists");
+		for(File f : new File[] {key, priv}) {
+			if( Files.exists(f.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS) ) {
+				throw new IOException(f+" already exists");
+			}
 		}
 		StringBuilder p = new StringBuilder();
 		p.append("Private-key-format: v1.3\n");
@@ -259,7 +261,15 @@ public final class DnssecKey {
 			}
 		}
 		k.append(zone).append(". ").append(dnskey.getTTL()).append(" IN DNSKEY ").append(dnskey.getRdataAsString()).append('\n');
-		Files.write(key.toPath(), k.toString().getBytes(StandardCharsets.US_ASCII));
+		try {
+			//  a new file only: never through a link planted where it goes
+			Files.write(key.toPath(), k.toString().getBytes(StandardCharsets.US_ASCII), java.nio.file.StandardOpenOption.CREATE_NEW,
+					java.nio.file.StandardOpenOption.WRITE);
+		} catch(IOException | RuntimeException ex) {
+			//  no .private without its .key (a retry would find it in the way)
+			Files.deleteIfExists(priv.toPath());
+			throw ex;
+		}
 		return key;
 	}
 
@@ -278,9 +288,14 @@ public final class DnssecKey {
 		if( priv.isFile() ) {
 			String exposed = us.bringardner.parley.core.util.PrivateKeys.exposure(priv);
 			if( exposed != null ) {
-				//  Round 5 #94: the key may already be in other hands
-				LOG.logWarn(priv+" is "+exposed+": anyone who can read it can sign for "+k.getName()
-						+". Make it readable by its owner only (chmod 600) and consider a key rollover.");
+				//  Round 5 #94: the key may already be in other hands. A group-readable key is
+				//  a common setup (root:named 0640), so that is only noted.
+				String msg = priv+" is "+exposed+": whoever can read it can sign for "+k.getName()+".";
+				if( exposed.contains("everyone") ) {
+					LOG.logWarn(msg+" Make it readable by its owner only (chmod 600) and consider a key rollover.");
+				} else {
+					LOG.logInfo(msg);
+				}
 			}
 			Map<String, String> fields = readFields(priv);
 			String alg = fields.get("Algorithm");
