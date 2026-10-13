@@ -280,5 +280,6 @@ public class TestValidatingResolver {
 		assertEquals(SshfpVerifier.Result.NO_RECORDS, SshfpVerifier.verify("www.sec.test", TestSshfp.ED25519), "signed NODATA");
 		assertEquals(SshfpVerifier.Result.NO_RECORDS, SshfpVerifier.verify("nothing.sec.test", TestSshfp.ED25519), "signed NXDOMAIN");
 		assertEquals(SshfpVerifier.Result.INSECURE, SshfpVerifier.verify("ssh.insecure.test", TestSshfp.ED25519), "unsigned zone");
+		assertEquals(SshfpVerifier.Result.INSECURE, SshfpVerifier.verify("sshout.sec.test", TestSshfp.ED25519), "a CNAME into an unsigned zone");
 	}
 }

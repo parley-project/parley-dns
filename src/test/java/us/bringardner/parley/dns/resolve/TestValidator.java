@@ -97,7 +97,7 @@ public class TestValidator {
 				+"insecure NS ns1.insecure\n");
 		zone(dir, "sec.test", "ns1 A 10.0.0.2\nwww A 10.0.0.80\nwww AAAA 2001:db8::80\n*.wild A 10.0.0.99\na.b.c A 10.0.0.1\n"
 				+"alias CNAME www\nout CNAME www.insecure.test.\nsub NS ns.sub\nns.sub A 10.0.0.9\n"
-				+"ssh SSHFP 4 2 "+TestSshfp.ED25519_SHA256+"\n");
+				+"ssh SSHFP 4 2 "+TestSshfp.ED25519_SHA256+"\nsshout CNAME ssh.insecure.test.\n");
 		zone(dir, "n3.test", "ns1 A 10.0.0.3\nwww A 10.0.1.80\n*.wild TXT \"w\"\nx.y A 10.0.1.1\n");
 		zone(dir, "insecure.test", "ns1 A 10.0.0.4\nwww A 10.0.2.80\nssh SSHFP 4 2 "+TestSshfp.ED25519_SHA256+"\n");
 		zone(dir, "bogus.test", "ns1 A 10.0.0.5\nwww A 10.0.3.80\n");

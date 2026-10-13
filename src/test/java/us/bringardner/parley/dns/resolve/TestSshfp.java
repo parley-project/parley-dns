@@ -224,4 +224,67 @@ public class TestSshfp {
 			f.delete();
 		}
 	}
+
+	private static byte [] sshString(byte [] b) {
+		byte [] r = new byte[4+b.length];
+		r[0] = (byte)(b.length >> 24);
+		r[1] = (byte)(b.length >> 16);
+		r[2] = (byte)(b.length >> 8);
+		r[3] = (byte)b.length;
+		System.arraycopy(b, 0, r, 4, b.length);
+		return r;
+	}
+
+	@Test
+	public void aCertificateIsCheckedByItsKey() throws Exception {
+		byte [] plain = Sshfp.keyBlob(ED25519);
+		byte [] pk = java.util.Arrays.copyOfRange(plain, plain.length-36, plain.length);	//  the pk string
+		ByteArrayOutputStream cert = new ByteArrayOutputStream();
+		cert.write(sshString("ssh-ed25519-cert-v01@openssh.com".getBytes()));
+		cert.write(sshString(new byte[32]));		//  nonce
+		cert.write(pk);
+		cert.write(new byte[] {0, 0, 0, 0, 0, 0, 0, 1});	//  serial, and the rest of a certificate
+		cert.write(sshString("host.example".getBytes()));
+		byte [] c = cert.toByteArray();
+		assertArrayEquals(plain, Sshfp.plainKey(c));
+		Message m = answer("host.example", Sshfp.forPublicKeyLine("host.example", ED25519, Sshfp.SHA256));
+		answers(m, secure(m));
+		assertEquals(SshfpVerifier.Result.MATCH, SshfpVerifier.verify("host.example", c));
+		assertThrows(IllegalArgumentException.class, () -> Sshfp.plainKey(java.util.Arrays.copyOf(c, 50)), "truncated");
+		assertArrayEquals(plain, Sshfp.plainKey(plain), "a plain key as it is");
+	}
+
+	@Test
+	public void recordsOfUnknownFingerprintTypesAreIgnored() {
+		Sshfp future = new Sshfp("host.example");
+		future.setAlgorithm(Sshfp.ED25519);
+		future.setFingerprintType(3);
+		future.setFingerprint(new byte[48]);
+		Sshfp shortOne = new Sshfp("host.example");
+		shortOne.setAlgorithm(Sshfp.ED25519);
+		shortOne.setFingerprintType(Sshfp.SHA256);
+		shortOne.setFingerprint(new byte[8]);
+		assertFalse(future.isUsable());
+		assertFalse(shortOne.isUsable());
+		Message m = answer("host.example", future, shortOne);
+		answers(m, secure(m));
+		assertEquals(SshfpVerifier.Result.NO_RECORDS, SshfpVerifier.verify("host.example", ED25519), "not a mismatch");
+	}
+
+	@Test
+	public void theToolReportsBadInput() throws Exception {
+		ByteArrayOutputStream out = new ByteArrayOutputStream();
+		ByteArrayOutputStream err = new ByteArrayOutputStream();
+		PrintStream o = new PrintStream(out);
+		PrintStream e = new PrintStream(err);
+		assertEquals(2, us.bringardner.parley.dns.util.SshfpToolAccess.run(new String[] {"-sha256", "h"}, o, e));
+		assertEquals(1, us.bringardner.parley.dns.util.SshfpToolAccess.run(new String[] {"h", "/nonexistent/key.pub"}, o, e));
+		File f = File.createTempFile("host", ".pub");
+		try {
+			Files.write(f.toPath(), (ED25519.replace("test@host", "root@h\u00f6st")+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			assertEquals(0, us.bringardner.parley.dns.util.SshfpToolAccess.run(new String[] {"h", f.getPath()}, o, e), "a non-ASCII comment");
+		} finally {
+			f.delete();
+		}
+	}
 }

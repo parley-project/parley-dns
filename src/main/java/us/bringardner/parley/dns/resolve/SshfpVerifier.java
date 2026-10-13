@@ -59,9 +59,9 @@ public final class SshfpVerifier {
 	public enum Result {
 		/** A validated record for the key's algorithm has its fingerprint. */
 		MATCH,
-		/** Validated records for the key's algorithm exist, but none has its fingerprint. */
+		/** Validated records for the key's algorithm (of a usable fingerprint type) exist, but none has its fingerprint. */
 		MISMATCH,
-		/** Validated: no SSHFP records for the host, or none for the key's algorithm. */
+		/** Validated: no SSHFP records for the host, or none for the key's algorithm and a usable fingerprint type. */
 		NO_RECORDS,
 		/** The answer couldn't be validated (unsigned zone, or validation is off): proves nothing. */
 		INSECURE,
@@ -84,9 +84,10 @@ public final class SshfpVerifier {
 	public static Result verify(String host, byte [] keyBlob) {
 		int alg;
 		try {
-			alg = Sshfp.algorithmOf(Sshfp.keyType(keyBlob));
+			//  a host certificate is checked by the key inside it, as OpenSSH does
+			alg = Sshfp.algorithmOf(Sshfp.keyType(Sshfp.plainKey(keyBlob)));
 		} catch(IllegalArgumentException ex) {
-			//  a key type SSHFP can't describe
+			//  a key type SSHFP can't describe (sk-* keys...)
 			return Result.NO_RECORDS;
 		}
 		Resolver.Answer a;
@@ -114,7 +115,8 @@ public final class SshfpVerifier {
 		for(RR rr : a.msg.getAnswer()) {
 			if( rr.getType() == DNS.SSHFP ) {
 				Sshfp fp = rr instanceof Sshfp ? (Sshfp)rr : new Sshfp(rr);
-				if( fp.getAlgorithm() == alg ) {
+				//  records of a fingerprint type this code can't compute are ignored
+				if( fp.getAlgorithm() == alg && fp.isUsable() ) {
 					same.add(fp);
 				}
 			}
@@ -130,7 +132,10 @@ public final class SshfpVerifier {
 		return Result.MISMATCH;
 	}
 
-	/** Like {@link #verify(String, byte[])} for an OpenSSH public key line. */
+	/**
+	 * Like {@link #verify(String, byte[])} for an OpenSSH public key line.
+	 * @throws IllegalArgumentException if the line isn't an SSH public key
+	 */
 	public static Result verify(String host, String publicKeyLine) {
 		return verify(host, Sshfp.keyBlob(publicKeyLine));
 	}

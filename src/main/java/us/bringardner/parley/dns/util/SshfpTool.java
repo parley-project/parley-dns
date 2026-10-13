@@ -47,17 +47,21 @@ public final class SshfpTool {
 	private SshfpTool() {
 	}
 
-	public static void main(String [] args) throws IOException {
+	public static void main(String [] args) {
 		System.exit(run(args, System.out, System.err));
 	}
 
 	/** @return the exit code */
-	static int run(String [] args, PrintStream out, PrintStream err) throws IOException {
+	static int run(String [] args, PrintStream out, PrintStream err) {
 		boolean sha1 = false;
 		List<String> rest = new ArrayList<String>();
 		for(String a : args) {
 			if( a.equals("-sha1") ) {
 				sha1 = true;
+			} else if( a.startsWith("-") ) {
+				err.println("Unknown option "+a);
+				err.println("Usage: SshfpTool [-sha1] host [key.pub ...]");
+				return 2;
 			} else {
 				rest.add(a);
 			}
@@ -85,7 +89,16 @@ public final class SshfpTool {
 		String owner = host.endsWith(".") ? host : host+".";
 		int errors = 0;
 		for(File f : files) {
-			for(String line : Files.readAllLines(f.toPath(), StandardCharsets.US_ASCII)) {
+			List<String> lines;
+			try {
+				//  ISO-8859-1 reads any bytes (a comment may not be ASCII)
+				lines = Files.readAllLines(f.toPath(), StandardCharsets.ISO_8859_1);
+			} catch(IOException ex) {
+				err.println(f+": "+ex);
+				errors++;
+				continue;
+			}
+			for(String line : lines) {
 				if( line.trim().isEmpty() || line.trim().startsWith("#") ) {
 					continue;
 				}

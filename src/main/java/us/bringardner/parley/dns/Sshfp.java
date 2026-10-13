@@ -175,13 +175,78 @@ public class Sshfp extends RR {
 	 */
 	public boolean matches(byte [] keyBlob) {
 		try {
-			if( algorithmOf(keyType(keyBlob)) != algorithm ) {
+			byte [] key = plainKey(keyBlob);
+			if( !isUsable() || algorithmOf(keyType(key)) != algorithm ) {
 				return false;
 			}
-			return MessageDigest.isEqual(fingerprint(keyBlob, fingerprintType), fingerprint);
+			return MessageDigest.isEqual(fingerprint(key, fingerprintType), fingerprint);
 		} catch(IllegalArgumentException ex) {
 			return false;
 		}
+	}
+
+	/**
+	 * @return true if this record can be checked: a fingerprint type this code knows,
+	 *  with a fingerprint of that type's length (a record of another type is ignored,
+	 *  as OpenSSH does)
+	 */
+	public boolean isUsable() {
+		return (fingerprintType == SHA1 && fingerprint.length == 20) || (fingerprintType == SHA256 && fingerprint.length == 32);
+	}
+
+	/**
+	 * The key a fingerprint is made of: for an OpenSSH host certificate
+	 * (ssh-ed25519-cert-v01@openssh.com...) the plain key inside it, as OpenSSH checks
+	 * it; any other key as it is.
+	 *
+	 * @throws IllegalArgumentException for a malformed certificate
+	 */
+	public static byte [] plainKey(byte [] keyBlob) {
+		String type = keyType(keyBlob);
+		String suffix = "-cert-v01@openssh.com";
+		if( !type.endsWith(suffix) ) {
+			return keyBlob;
+		}
+		String plain = type.substring(0, type.length()-suffix.length());
+		int fields;
+		switch(plain) {
+		case "ssh-rsa": fields = 2; break;		//  e, n
+		case "ssh-dss": fields = 4; break;		//  p, q, g, y
+		case "ecdsa-sha2-nistp256":
+		case "ecdsa-sha2-nistp384":
+		case "ecdsa-sha2-nistp521": fields = 2; break;	//  curve, Q
+		case "ssh-ed25519": fields = 1; break;	//  pk
+		case "ssh-ed448": fields = 1; break;
+		default: return keyBlob;
+		}
+		//  type, nonce, then the key's own fields (each an SSH string or mpint)
+		int pos = 0;
+		pos = skipString(keyBlob, pos);
+		pos = skipString(keyBlob, pos);
+		int start = pos;
+		for(int i=0; i < fields; i++ ) {
+			pos = skipString(keyBlob, pos);
+		}
+		byte [] t = plain.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+		byte [] ret = new byte[4+t.length+(pos-start)];
+		ret[0] = (byte)(t.length >> 24);
+		ret[1] = (byte)(t.length >> 16);
+		ret[2] = (byte)(t.length >> 8);
+		ret[3] = (byte)t.length;
+		System.arraycopy(t, 0, ret, 4, t.length);
+		System.arraycopy(keyBlob, start, ret, 4+t.length, pos-start);
+		return ret;
+	}
+
+	private static int skipString(byte [] b, int pos) {
+		if( pos+4 > b.length ) {
+			throw new IllegalArgumentException("Malformed SSH certificate");
+		}
+		long len = ((b[pos]&0xffL) << 24) | ((b[pos+1]&0xff) << 16) | ((b[pos+2]&0xff) << 8) | (b[pos+3]&0xff);
+		if( len > b.length-pos-4 ) {
+			throw new IllegalArgumentException("Malformed SSH certificate");
+		}
+		return pos+4+(int)len;
 	}
 
 	@Override
