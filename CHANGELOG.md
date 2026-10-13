@@ -80,6 +80,8 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
 - Round 5 #88: a signed zone that can't be signed again keeps serving its last signed version while
   the signatures are valid (also after its zone file changed), instead of going unsigned; an UPDATE
   or re-sign that can't be signed is not made (nothing journaled).
+- Round 5 #89: SHA-1 DS records are ignored when a SHA-256 or SHA-384 one is there (RFC 4509 3).
+- Round 5 #90: DNSKEYs with the REVOKE bit (RFC 5011) are not used to validate.
 - Round 5 #97: an OPT record in the answer or authority section is FORMERR (RFC 6891 6.1.1).
 - Round 5 #98: an UPDATE with a newer SOA replaces the whole SOA (names, timers, TTL), not only its
   serial (RFC 2136 3.4.2.2); the journal has a new `soa` entry for it.

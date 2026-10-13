@@ -954,6 +954,14 @@ public final class Validator extends DnsBaseClass {
 		if( usable.isEmpty() ) {
 			return new ZoneKeys(zone, Status.INSECURE, null, maxExpires, "no DS of "+zone+" uses a supported algorithm");
 		}
+		//  Round 5 #89: RFC 4509 3, SHA-1 DS records are ignored when stronger ones are there
+		boolean stronger = false;
+		for(Ds ds : usable) {
+			stronger |= ds.getDigestType() != 1;
+		}
+		if( stronger ) {
+			usable.removeIf(ds -> ds.getDigestType() == 1);
+		}
 		Message m = fetch.apply(new Section(zone, DNS.DNSKEY, DNS.IN));
 		if( m == null ) {
 			return bogus(zone, "no answer for the DNSKEY of "+zone, now);
@@ -970,7 +978,8 @@ public final class Validator extends DnsBaseClass {
 		List<Dnskey> keys = new ArrayList<Dnskey>();
 		for(RR rr : set) {
 			Dnskey k = (Dnskey)rr;
-			if( (k.getFlags() & Dnskey.FLAG_ZONE) != 0 && k.getProtocol() == 3 ) {
+			//  Round 5 #90: a revoked key (RFC 5011) validates nothing
+			if( (k.getFlags() & Dnskey.FLAG_ZONE) != 0 && k.getProtocol() == 3 && (k.getFlags() & Dnskey.FLAG_REVOKE) == 0 ) {
 				keys.add(k);
 			}
 		}
