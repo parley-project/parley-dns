@@ -27,11 +27,11 @@ import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Dnskey;
+import us.bringardner.parley.dns.Name;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Rrsig;
 
@@ -44,15 +44,36 @@ public final class Canonical {
 	private Canonical() {
 	}
 
-	/** A name without the trailing dot, lower case. */
+	/**
+	 * A name without the trailing dot, lower case. Only A-Z are lower cased
+	 * (RFC 4034 6.2, round 5 #93): other octets are not letters to DNS.
+	 */
 	public static String key(String name) {
-		String n = name.endsWith(".") ? name.substring(0, name.length()-1) : name;
-		return n.toLowerCase(Locale.ROOT);
+		return asciiLower(Name.stripRootDot(name));
 	}
 
+	/** @return s with A-Z lower cased, everything else unchanged */
+	public static String asciiLower(String s) {
+		int i = 0;
+		int n = s.length();
+		while( i < n && !(s.charAt(i) >= 'A' && s.charAt(i) <= 'Z') ) {
+			i++;
+		}
+		if( i == n ) {
+			return s;
+		}
+		char [] c = s.toCharArray();
+		for(; i < n; i++ ) {
+			if( c[i] >= 'A' && c[i] <= 'Z' ) {
+				c[i] = (char)(c[i]+('a'-'A'));
+			}
+		}
+		return new String(c);
+	}
+
+	/** The labels (unescaped, see Name.wireLabels), lower case. */
 	private static String [] labels(String name) {
-		String n = key(name);
-		return n.isEmpty() ? new String[0] : n.split("\\.", -1);
+		return Name.labelStrings(key(name)).toArray(new String[0]);
 	}
 
 	/**
@@ -108,12 +129,18 @@ public final class Canonical {
 
 	/** @return true if name is ancestor or a descendant of it (or equal, when orEqual) */
 	public static boolean isBelow(String name, String ancestor, boolean orEqual) {
-		String n = key(name);
-		String a = key(ancestor);
-		if( n.equals(a) ) {
-			return orEqual;
+		String [] n = labels(name);
+		String [] a = labels(ancestor);
+		if( n.length < a.length || (n.length == a.length && !orEqual) ) {
+			return false;
 		}
-		return a.isEmpty() || n.endsWith("."+a);
+		//  compared label by label: "x\\.example" (one label) is not below "example"
+		for(int i=1; i <= a.length; i++ ) {
+			if( !n[n.length-i].equals(a[a.length-i]) ) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	/** Labels of the owner for the RRSIG labels field: the root and a leading '*' not counted. */

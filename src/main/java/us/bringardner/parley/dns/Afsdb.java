@@ -47,26 +47,26 @@ public class Afsdb extends RR
 
 		public Afsdb() {
 				super();
-				setType(MX);
+				setType(AFSDB);
 				setDnsClass(IN);
 				isBase = false;
 				dirty = true;
 		}
 public Afsdb(String name) 
 {
-	super(name,MX,IN);
+	super(name,AFSDB,IN);
 	isBase = false;
 	dirty = true;
 }
 public Afsdb(String name, int dnsClass) 
 {
-	super(name,MX,dnsClass);
+	super(name,AFSDB,dnsClass);
 	isBase = false;
 	dirty = true;
 }
 public Afsdb(String name, short dnsClass) 
 {
-	super(name,MX,dnsClass);
+	super(name,AFSDB,dnsClass);
 	isBase = false;
 	dirty = true;
 }
@@ -108,12 +108,10 @@ public void setExchange(String c)
 }
 public void setFromRdata() 
 {
-	ByteBuffer in = new ByteBuffer(rdata);
-	if( source != null ) {
-		in = new ByteBuffer(source.getBuf(),sourcePos);
-	}
+	ByteBuffer in = rdataReader();
 	subType = in.nextShort();
-	hostName = new Name(in); 
+	hostName = new Name(in);
+	endOfRdata(in);
 	dirty = false;
 }
 /**
@@ -125,13 +123,14 @@ public void setSubType(short c)
 	dirty = true;
 }
 /**
-	Add this MX resource record to the byte buffer as described in RFC 1035.
+	Add this AFSDB resource record to the byte buffer as described in RFC 1035.
 **/
 public void toByteArray(ByteBuffer in) 
 {
 	super.toByteArray(in);	
 	in.setShort(subType);
-	in.setName(hostName);
+	//  RFC 3597 4: only the RFC 1035 types compress names in their rdata (round 5 #96)
+	in.setName(hostName.toString(), false);
 	in.setRdLength();
 }
 /**

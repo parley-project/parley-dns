@@ -83,12 +83,10 @@ public  String getRdataAsString()
 				dirty = true;
 		}
 		public void setFromRdata() {
-				ByteBuffer in = new ByteBuffer(getRdata());
-				if( source != null ) {
-						in = new ByteBuffer(source.getBuf(),sourcePos);
-				}
+				ByteBuffer in = rdataReader();
 				cpu = new DnsString(in);
 				os  = new DnsString(in);
+				endOfRdata(in);
 		}
 		public void setOs(String c) { 
 				os  = new DnsString(c);

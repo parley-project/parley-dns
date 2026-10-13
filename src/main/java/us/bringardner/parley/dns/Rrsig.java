@@ -118,7 +118,7 @@ public class Rrsig extends RR {
 	public byte [] rdataWithoutSignature() {
 		ByteBuffer b = new ByteBuffer();
 		b.setCanonical(true);
-		writeFixed(b, signer.toLowerCase(java.util.Locale.ROOT));
+		writeFixed(b, us.bringardner.parley.dns.dnssec.Canonical.asciiLower(signer));
 		return b.getByteArray();
 	}
 
@@ -164,7 +164,7 @@ public class Rrsig extends RR {
 			if( n.length() > 0 ) {
 				n.append('.');
 			}
-			n.append(new String(r, pos, len, java.nio.charset.StandardCharsets.ISO_8859_1));
+			n.append(Name.escapeLabel(new String(r, pos, len, java.nio.charset.StandardCharsets.ISO_8859_1)));
 			pos += len;
 		}
 		signer = n.toString();
@@ -175,7 +175,7 @@ public class Rrsig extends RR {
 	@Override
 	public void toByteArray(ByteBuffer out) {
 		super.toByteArray(out);
-		writeFixed(out, out.isCanonical() ? signer.toLowerCase(java.util.Locale.ROOT) : signer);
+		writeFixed(out, out.isCanonical() ? us.bringardner.parley.dns.dnssec.Canonical.asciiLower(signer) : signer);
 		out.setBytes(signature);
 		out.setRdLength();
 	}

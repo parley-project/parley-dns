@@ -195,6 +195,33 @@ public  class RR extends Section
 	}
 	
 	/**
+	 * A reader for this record's rdata. For a record read from a message it reads
+	 * the message (so compression pointers in the rdata can be followed), limited to
+	 * the RDLENGTH bytes of the rdata: a type can't read into the next record
+	 * (round 5 #79). Otherwise it reads the rdata array.
+	 */
+	protected ByteBuffer rdataReader() {
+		ByteBuffer src = source;
+		if( src != null ) {
+			ByteBuffer in = new ByteBuffer(src.getBuf(), sourcePos);
+			in.pushLimit(rdlength);
+			return in;
+		}
+		return new ByteBuffer(rdata == null ? new byte[0] : rdata);
+	}
+
+	/**
+	 * Every byte of the rdata must have been used (round 5 #79).
+	 * @throws DnsFormatException if any are left
+	 */
+	protected static void endOfRdata(ByteBuffer in) {
+		int left = in.remaining();
+		if( left != 0 ) {
+			throw new DnsFormatException(left+" bytes left over at the end of the rdata");
+		}
+	}
+
+	/**
  		Set the TYPE Specific data elements from the RDATA array, this method is intended to be implemented by a subclass,  It has no value a this level, however, we can't make it abstract becouse parseRR needs to be able to create an RR without knowing what type it is (I'm sure there is a better way to do this, but, it works).
 	 **/
 	public  void setFromRdata() {
@@ -213,7 +240,9 @@ public  class RR extends Section
 	
 	public  void setRdata(byte [] b) {
 		rdata = b;
-		rdlength = (short)b.length;
+		rdlength = b.length;
+		//  the rdata no longer comes from a message
+		source = null;
 	}
 	
 	public void setTTL(int t) { 

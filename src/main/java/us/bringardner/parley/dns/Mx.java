@@ -111,12 +111,10 @@ public class Mx extends RR {
 	public void setFromRdata() 
 	{
 
-		ByteBuffer in = new ByteBuffer(rdata);
-		if( source != null ) {
-			in = new ByteBuffer(source.getBuf(),sourcePos);
-		}
+		ByteBuffer in = rdataReader();
 		pref = in.nextShort();
-		exch = new Name(in); 
+		exch = new Name(in);
+		endOfRdata(in);
 		dirty = false;
 
 	}

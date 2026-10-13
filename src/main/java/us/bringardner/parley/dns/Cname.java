@@ -103,11 +103,9 @@ public void setCname(String cName)
 	dirty = true;
 }
 		public void setFromRdata() {
-				ByteBuffer in = new ByteBuffer(getRdata());
-				if( source != null) {
-						in = new ByteBuffer(source.getBuf(),sourcePos);
-				}
+				ByteBuffer in = rdataReader();
 				cname = new Name(in);
+				endOfRdata(in);
 		}
 /**	
 Add this CNAME resource record to the byte buffer as described in RFC 1035.

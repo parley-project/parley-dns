@@ -4,18 +4,13 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import us.bringardner.parley.dns.dnssec.Canonical;
 
 /**
- * Round 5 findings in the wire format code that a later chunk of the
- * framework plan fixes (claude/parley-framework-plan.md). They fail today and
- * are disabled; the chunk that fixes one removes its @Disabled.
- * <p>
- * To run them anyway: mvn test -Dtest=TestRound5Pending
- * -Djunit.jupiter.conditions.deactivate=org.junit.*DisabledCondition
+ * Round 5 findings in the wire format code (#79-#82, #93, #95, #96), fixed in
+ * chunk 4 of the framework plan (claude/parley-framework-plan.md).
  */
 public class TestRound5Pending {
 
@@ -35,7 +30,7 @@ public class TestRound5Pending {
 	private static final String MX_HEADER = "12348180000100020000000003777777076578616d706c6503636f6d00000f0001";
 
 	@Test
-	@Disabled("Round 5 #79: chunk 4 (rdata bounded by RDLENGTH)")
+
 	public void rdataShorterThanItsTypeIsAFormatError() {
 		//  MX with RDLENGTH 2 (the preference only): the exchange used to be read
 		//  from the next record's owner name (mail.example.com)
@@ -45,7 +40,7 @@ public class TestRound5Pending {
 	}
 
 	@Test
-	@Disabled("Round 5 #79: chunk 4 (rdata must use exactly RDLENGTH bytes)")
+
 	public void rdataLongerThanItsContentIsAFormatError() {
 		//  MX 10 mail.example.com (RDLENGTH 9) declared as 12 bytes, 3 bytes of junk after
 		String mx = "c00c000f00010000012c000c000a046d61696cc010ffffff";
@@ -54,14 +49,14 @@ public class TestRound5Pending {
 	}
 
 	@Test
-	@Disabled("Round 5 #95: chunk 4 (A and AAAA check their RDLENGTH)")
+
 	public void anARecordWithOneByteIsAFormatError() {
 		String one = "12348180000100010000000003777777076578616d706c6503636f6d0000010001c00c000100010000012c000101";
 		assertThrows(DnsFormatException.class, () -> parse(h(one)));
 	}
 
 	@Test
-	@Disabled("Round 5 #95: chunk 4 (Section.toString range checks)")
+
 	public void unusualTypesAndClassesCanBePrinted() {
 		//  class NONE (254) comes with every UPDATE that deletes a record
 		new Section("x.example.com", DNS.A, 254).toString();
@@ -69,7 +64,7 @@ public class TestRound5Pending {
 	}
 
 	@Test
-	@Disabled("Round 5 #81: chunk 4 (names written as Latin-1, as they are read)")
+
 	public void aLabelWithAHighByteIsEchoedUnchanged() {
 		byte [] q = h("123401000001000000000000"+"01e9076578616d706c6503636f6d0000010001");
 		byte [] out = parse(q).toByteArray();
@@ -77,14 +72,14 @@ public class TestRound5Pending {
 	}
 
 	@Test
-	@Disabled("Round 5 #82: chunk 4 (a '.' inside a label is not a separator)")
+
 	public void aDotInsideALabelIsKept() {
 		byte [] q = h("123401000001000000000000"+"03612e6203636f6d0000010001");
 		assertArrayEquals(q, parse(q).toByteArray(), "the label a.b went out as two labels a and b");
 	}
 
 	@Test
-	@Disabled("Round 5 #82: chunk 4 (labels over 63 bytes are not written)")
+
 	public void aLabelOver63BytesCantBeWritten() {
 		StringBuilder label = new StringBuilder();
 		for(int i=0; i < 70; i++ ) {
@@ -97,7 +92,7 @@ public class TestRound5Pending {
 	}
 
 	@Test
-	@Disabled("Round 5 #80: chunk 4 (no compression pointers past offset 0x3FFF)")
+
 	public void namesPast16KiBAreWrittenCorrectly() {
 		Message m = new Message();
 		m.setQuestion("example.com", DNS.MX, DNS.IN);
@@ -120,9 +115,9 @@ public class TestRound5Pending {
 	}
 
 	@Test
-	@Disabled("Round 5 #96: chunk 4 (RP and AFSDB names not compressed, RFC 3597 4)")
+
 	public void rpNamesAreNotCompressed() {
-		Message m = parse(h("12348180000100010000000003777777076578616d706c6503636f6d0000110001c00c001100010000012c0018"
+		Message m = parse(h("12348180000100010000000003777777076578616d706c6503636f6d0000110001c00c001100010000012c0019"
 				+"0561646d696e076578616d706c6503636f6d00"+"03747874c010"));
 		RR rp = parse(m.toByteArray()).getAnswer().get(0);
 		//  admin.example.com. (19 bytes) + txt.example.com. (17 bytes), no pointers
@@ -130,7 +125,7 @@ public class TestRound5Pending {
 	}
 
 	@Test
-	@Disabled("Round 5 #93: chunk 4 (canonical form lower-cases A-Z only, RFC 4034 6.2)")
+
 	public void onlyAsciiLettersAreLowerCased() {
 		assertEquals("aÀ.test", Canonical.key("AÀ.Test"));
 	}

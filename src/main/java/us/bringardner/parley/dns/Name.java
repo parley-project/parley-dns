@@ -41,6 +41,147 @@ public class Name implements DNS
 
 	public Name() {
 	}
+
+	/** RFC 1035 2.3.4: a label is at most 63 octets. */
+	public static final int MAX_LABEL_LENGTH = 63;
+
+	/**
+	 * The labels of a name in text form, as the octets that go on the wire.
+	 * <p>
+	 * Labels are separated by '.'; a trailing '.' (the root) is optional. As in a
+	 * master file (RFC 1035 5.1), "\." is a '.' inside a label, "\\" a backslash and
+	 * "\DDD" the octet with decimal value DDD. Other characters up to U+00FF are one
+	 * octet each (ISO-8859-1, which is how names are read from the wire); characters
+	 * above that are written as UTF-8.
+	 *
+	 * @return the labels, none for the root ("" or ".")
+	 * @throws IllegalArgumentException if a label is empty or longer than 63 octets,
+	 *  or the name is longer than 255 octets on the wire
+	 */
+	public static List<byte[]> wireLabels(String name) {
+		return wireLabels(name, true);
+	}
+
+	/**
+	 * @return name without its trailing '.' (the root), if it has one: a '.' after an
+	 *  odd number of backslashes is part of the last label and stays
+	 */
+	public static String stripRootDot(String name) {
+		if( !name.endsWith(".") ) {
+			return name;
+		}
+		int slashes = 0;
+		for(int i=name.length()-2; i >= 0 && name.charAt(i) == '\\'; i-- ) {
+			slashes++;
+		}
+		return slashes % 2 == 0 ? name.substring(0, name.length()-1) : name;
+	}
+
+	/**
+	 * @param check refuse empty labels, labels over 63 octets and names over 255
+	 *  (false: skip empty labels, allow any length, for names that are only kept in
+	 *  memory; they are checked when written)
+	 */
+	private static List<byte[]> wireLabels(String name, boolean check) {
+		List<byte[]> ret = new ArrayList<byte[]>();
+		if( name == null || name.isEmpty() || name.equals(".") ) {
+			return ret;
+		}
+		java.io.ByteArrayOutputStream label = new java.io.ByteArrayOutputStream();
+		int wire = 1;
+		int n = name.length();
+		boolean last = false;
+		for(int i=0; i < n; i++ ) {
+			char c = name.charAt(i);
+			if( c == '.' ) {
+				wire += endLabel(ret, label, name, check);
+				last = i == n-1;
+				continue;
+			}
+			if( c == '\\' && i+1 < n ) {
+				char e = name.charAt(i+1);
+				if( Character.isDigit(e) && i+3 < n && Character.isDigit(name.charAt(i+2)) && Character.isDigit(name.charAt(i+3)) ) {
+					int v = Integer.parseInt(name.substring(i+1, i+4));
+					if( v > 255 ) {
+						throw new IllegalArgumentException("Bad escape \\"+name.substring(i+1, i+4)+" in "+name);
+					}
+					label.write(v);
+					i += 3;
+				} else {
+					label.write(e <= 0xff ? e : '?');
+					i++;
+				}
+				continue;
+			}
+			if( c <= 0xff ) {
+				label.write(c);
+			} else {
+				int cp = name.codePointAt(i);
+				byte [] b = new String(Character.toChars(cp)).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+				label.write(b, 0, b.length);
+				if( Character.isSupplementaryCodePoint(cp) ) {
+					i++;
+				}
+			}
+		}
+		if( !last ) {
+			wire += endLabel(ret, label, name, check);
+		}
+		if( check && wire > MAX_WIRE_LENGTH ) {
+			throw new IllegalArgumentException("Name longer than "+MAX_WIRE_LENGTH+" octets: "+name);
+		}
+		return ret;
+	}
+
+	private static int endLabel(List<byte[]> labels, java.io.ByteArrayOutputStream label, String name, boolean check) {
+		byte [] b = label.toByteArray();
+		label.reset();
+		if( !check ) {
+			if( b.length > 0 ) {
+				labels.add(b);
+			}
+			return b.length+1;
+		}
+		if( b.length == 0 ) {
+			throw new IllegalArgumentException("Empty label in "+name);
+		}
+		if( b.length > MAX_LABEL_LENGTH ) {
+			throw new IllegalArgumentException("Label longer than "+MAX_LABEL_LENGTH+" octets in "+name);
+		}
+		labels.add(b);
+		return b.length+1;
+	}
+
+	/**
+	 * A label (octets as ISO-8859-1 chars) in text form: '.' and '\\' escaped with a
+	 * backslash, so {@link #wireLabels(String)} reads it back as one label.
+	 */
+	public static String escapeLabel(String label) {
+		if( label.indexOf('.') < 0 && label.indexOf('\\') < 0 ) {
+			return label;
+		}
+		StringBuilder b = new StringBuilder(label.length()+4);
+		for(int i=0; i < label.length(); i++ ) {
+			char c = label.charAt(i);
+			if( c == '.' || c == '\\' ) {
+				b.append('\\');
+			}
+			b.append(c);
+		}
+		return b.toString();
+	}
+
+	/**
+	 * @return the labels as ISO-8859-1 strings (the form labels read from the wire
+	 *  have); empty labels are skipped and lengths aren't checked
+	 */
+	public static List<String> labelStrings(String name) {
+		List<String> ret = new ArrayList<String>();
+		for(byte [] b : wireLabels(name, false)) {
+			ret.add(new String(b, java.nio.charset.StandardCharsets.ISO_8859_1));
+		}
+		return ret;
+	}
 	
 	public Name(String name) { 
 		setName(name);
@@ -103,9 +244,9 @@ public class Name implements DNS
 	public String getParent() {
 		StringBuilder buf = new StringBuilder();
 		if( myLables.size() > 1 ) {
-			buf.append(myLables.get(1));
+			buf.append(escapeLabel(myLables.get(1).toString()));
 			for(int i=2,sz=myLables.size(); i< sz; i++ ) {
-				buf.append("."+myLables.get(i));
+				buf.append("."+escapeLabel(myLables.get(i).toString()));
 			}
 		}
 		return buf.toString();
@@ -303,26 +444,18 @@ public class Name implements DNS
 		myLables = new ArrayList<Label>();
 		chrCount = 0;
 		String tmp = null;
-		if( n.endsWith(".") ) {
-			n = n.substring(0,n.length()-1);
-		}
+		n = stripRootDot(n);
 		if( n.isEmpty() ) {
 			//  "" or "." is the root: no labels, one zero octet on the wire
 			//  (it used to become one empty label, i.e. two zero octets)
 			return;
 		}
-		int idx = n.indexOf(".");
-
-		while(idx > 0 && idx < n.length()) {
-			tmp = n.substring(0,idx);
-			chrCount += tmp.length();
-			n = n.substring(idx+1);
-			addLabel(new Label(tmp));
-			idx = n.indexOf(".");
+		//  Round 5 #81, #82: escapes ("\\." inside a label), octets as ISO-8859-1
+		for(String label : labelStrings(n)) {
+			addLabel(new Label(label));
+			chrCount += label.length();
 		}
-
-		addLabel(new Label(n));
-		chrCount += n.length();
+		n = myLables.isEmpty() ? "" : myLables.get(myLables.size()-1).toString();
 
 		/*
 		  If the name is in %d.%d.%d.%d form, make it an 
@@ -373,9 +506,9 @@ public class Name implements DNS
 	public String toString() {
 		StringBuilder buf = new StringBuilder();
 		if( myLables.size() > 0 ) {
-			buf.append(myLables.get(0).toString());
+			buf.append(escapeLabel(myLables.get(0).toString()));
 			for(int i=1,sz=myLables.size(); i< sz; i++ ) {
-				buf.append("."+myLables.get(i));
+				buf.append("."+escapeLabel(myLables.get(i).toString()));
 			}
 		}
 		return buf.toString();

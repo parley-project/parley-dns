@@ -114,12 +114,10 @@ private void init(RR rr)
 }
 public void setFromRdata() 
 {
-	ByteBuffer in = new ByteBuffer(rdata);
-	if( source != null ) {
-		in = new ByteBuffer(source.getBuf(),sourcePos);
-	}
+	ByteBuffer in = rdataReader();
 	mboxDname = new Name(in);
-	txtDname = new Name(in); 	
+	txtDname = new Name(in);
+	endOfRdata(in);
 	dirty = false;
 }
 /**
@@ -144,8 +142,9 @@ public void setTxtDname(String c)
 public void toByteArray(ByteBuffer in) 
 {
 	super.toByteArray(in);	
-	in.setName(mboxDname);
-	in.setName(txtDname);
+	//  RFC 3597 4: only the RFC 1035 types compress names in their rdata (round 5 #96)
+	in.setName(mboxDname.toString(), false);
+	in.setName(txtDname.toString(), false);
 	in.setRdLength();
 }
 /**

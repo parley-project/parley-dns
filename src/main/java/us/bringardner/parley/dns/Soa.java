@@ -127,10 +127,7 @@ public  String getRdataAsString()
 				dirty = true;
 		}
 		public void setFromRdata()  {
-				ByteBuffer in = new ByteBuffer(getRdata());
-				if( source != null) {
-						in = new ByteBuffer(source.getBuf(),sourcePos);
-				}
+				ByteBuffer in = rdataReader();
 
 				mname = new Name(in);
 				rname = new Name(in);
@@ -139,6 +136,7 @@ public  String getRdataAsString()
 				retry = in.nextInt();
 				expire = in.nextInt();
 				minimum = in.nextInt();
+				endOfRdata(in);
 		}
 		public void setMinimum(int c)   { 
 				minimum = c; 
