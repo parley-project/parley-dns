@@ -102,7 +102,7 @@ Dependencies:
 SSHFP records (RFC 4255, RFC 6594) publish the fingerprints of a host's SSH keys, so an SSH client can check a server's key without asking the user. They prove something only when the answer is DNSSEC validated.
 
 +  `us.bringardner.parley.dns.util.SshfpTool [-sha1] host [key.pub ...]` prints the records for a host's public keys (by default `/etc/ssh/ssh_host_*_key.pub`), like `ssh-keygen -r`. Put them in a signed zone; zone files and dynamic UPDATE accept `SSHFP`.
-+  `us.bringardner.parley.dns.resolve.SshfpVerifier.verify(host, keyBlob)` checks a host key (SSH wire form, or an OpenSSH public key line) through the resolver with validation on (`JDns.dnssecValidation=true`): `MATCH`, `MISMATCH`, `NO_RECORDS`, `INSECURE` (unsigned, or validation off), `BOGUS` or `TEMPFAIL`. Only `MATCH` should let a client accept a key it hasn't seen before.
++  `us.bringardner.parley.dns.resolve.SshfpVerifier.verify(host, keyBlob)` checks a host key (SSH wire form, or an OpenSSH public key line) through the resolver with validation on (`JDns.dnssecValidation=true`): `MATCH`, `MISMATCH`, `NO_RECORDS`, `INSECURE` (unsigned, or validation off), `BOGUS` or `TEMPFAIL`. Only `MATCH` should let a client accept a key it hasn't seen before. With parley-ssh, `HostKeyVerifiers.withLookup` takes it as the lookup in front of known_hosts (parley-ssh doesn't depend on parley-dns).
 
 # Typed lookups (client API)
 
