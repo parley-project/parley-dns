@@ -112,6 +112,31 @@ public final class Validator extends DnsBaseClass {
 	static final long BAD_TTL = 60;
 	/** Longest time anything is cached (seconds). */
 	static final long MAX_TTL = 3600;
+	/**
+	 * Round 5 #76 (KeyTrap, CVE-2023-50387): signature checks one validation may
+	 * make, and how many of them may fail. Each RRSIG used to be tried against
+	 * every key with its tag and algorithm, for every RRset, DS and denial proof,
+	 * with no limit: a zone with many colliding keys and signatures cost minutes
+	 * of CPU per query. A legitimate answer needs a handful (about two per zone
+	 * on the way down, one per RRset). Over either limit the answer is BOGUS.
+	 */
+	static final int MAX_VERIFICATIONS = 64;
+	static final int MAX_FAILED_VERIFICATIONS = 16;
+
+	/** The signature checks spent by the validation running on this thread. */
+	private static final class Budget {
+		int verifications;
+		int failures;
+		boolean exhausted;
+	}
+
+	private final ThreadLocal<Budget> budget = new ThreadLocal<Budget>();
+	private static final java.util.concurrent.atomic.AtomicLong budgetExhausted = new java.util.concurrent.atomic.AtomicLong();
+
+	/** @return validations stopped because they needed too many signature checks (round 5 #76) */
+	public static long getBudgetExhausted() {
+		return budgetExhausted.get();
+	}
 
 	/** The keys of a zone, or why there are none we trust. */
 	static final class ZoneKeys {
@@ -239,6 +264,26 @@ public final class Validator extends DnsBaseClass {
 	 *         REFUSED...) are INSECURE: there is nothing to check
 	 */
 	public Result validate(Message m, Section question) {
+		Budget saved = budget.get();
+		Budget b = new Budget();
+		budget.set(b);
+		try {
+			Result r = validate0(m, question);
+			if( b.exhausted ) {
+				budgetExhausted.incrementAndGet();
+				return new Result(Status.BOGUS, "too many signature checks ("+b.verifications+", "+b.failures+" failed)");
+			}
+			return r;
+		} finally {
+			if( saved == null ) {
+				budget.remove();
+			} else {
+				budget.set(saved);
+			}
+		}
+	}
+
+	private Result validate0(Message m, Section question) {
 		String qname = Canonical.key(question.getName());
 		int qtype = question.getType();
 		int rcode = m.getResponseCode();
@@ -359,9 +404,21 @@ public final class Validator extends DnsBaseClass {
 			}
 			String signed = s.getLabels() < labels ? "*."+lastLabels(owner, s.getLabels()) : owner;
 			for(Dnskey k : zk.keys) {
-				if( k.getKeyTag() == s.getKeyTag() && k.getAlgorithm() == s.getAlgorithm()
-						&& Canonical.verify(s, signed, set, k) ) {
-					return s;
+				if( k.getKeyTag() == s.getKeyTag() && k.getAlgorithm() == s.getAlgorithm() ) {
+					Budget b = budget.get();
+					if( b != null ) {
+						if( b.exhausted || ++b.verifications > MAX_VERIFICATIONS ) {
+							b.exhausted = true;
+							return null;
+						}
+					}
+					if( Canonical.verify(s, signed, set, k) ) {
+						return s;
+					}
+					if( b != null && ++b.failures > MAX_FAILED_VERIFICATIONS ) {
+						b.exhausted = true;
+						return null;
+					}
 				}
 			}
 		}
@@ -645,6 +702,11 @@ public final class Validator extends DnsBaseClass {
 	ZoneKeys walk(String name) {
 		String n = Canonical.key(name);
 		long now = clock.getAsLong();
+		Budget spent = budget.get();
+		if( spent != null && spent.exhausted ) {
+			//  No more upstream queries for a validation that is already over budget
+			return new ZoneKeys(n, Status.BOGUS, null, now, "too many signature checks");
+		}
 		ZoneKeys cached = walks.get(n);
 		if( cached != null && cached.expires > now ) {
 			return cached;
@@ -659,7 +721,13 @@ public final class Validator extends DnsBaseClass {
 			ZoneKeys above = walk(parent(n));
 			ret = above.status == Status.SECURE && !above.zone.equals(n) ? step(above, n) : above;
 		}
-		walks.put(n, ret);
+		Budget b = budget.get();
+		if( b == null || !b.exhausted ) {
+			//  A result cut short by this validation's budget says nothing about the
+			//  zone: caching it would let one hostile answer (say, a CNAME into
+			//  another zone) make that zone BOGUS for everyone
+			walks.put(n, ret);
+		}
 		return ret;
 	}
 
