@@ -49,8 +49,7 @@ public final class Canonical {
 	 * (RFC 4034 6.2, round 5 #93): other octets are not letters to DNS.
 	 */
 	public static String key(String name) {
-		String n = name.endsWith(".") && !name.endsWith("\\.") ? name.substring(0, name.length()-1) : name;
-		return asciiLower(n);
+		return asciiLower(Name.stripRootDot(name));
 	}
 
 	/** @return s with A-Z lower cased, everything else unchanged */

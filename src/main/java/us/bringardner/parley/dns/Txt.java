@@ -119,19 +119,11 @@ public class Txt extends RR {
 			if( data == null && source == null ) {
 				return;
 			}
-			ByteBuffer in = data != null ? new ByteBuffer(data) : new ByteBuffer(source.getBuf(),sourcePos);
-			int sz = rdlength;
-			int pos = 0;
+			//  Round 5 #79: a string whose length runs past the rdata is a format error
+			ByteBuffer in = data != null ? new ByteBuffer(data) : rdataReader();
 			List<String> ret = new ArrayList<String>();
-			while(pos<sz) {
-				pos++;
-				int chunkLen = in.next() & 0xff;
-				byte [] b = new byte[Math.max(0, Math.min(chunkLen, sz-pos))];
-				for(int cnt=0; cnt < b.length; cnt ++) {
-					b[cnt] = (byte)in.next();
-				}
-				pos += chunkLen;
-				ret.add(new String(b, StandardCharsets.UTF_8));
+			while( in.remaining() > 0 ) {
+				ret.add(new String(in.getBytes8(), StandardCharsets.UTF_8));
 			}
 			strings = ret;
 			dirty = false;

@@ -63,6 +63,21 @@ public class Name implements DNS
 	}
 
 	/**
+	 * @return name without its trailing '.' (the root), if it has one: a '.' after an
+	 *  odd number of backslashes is part of the last label and stays
+	 */
+	public static String stripRootDot(String name) {
+		if( !name.endsWith(".") ) {
+			return name;
+		}
+		int slashes = 0;
+		for(int i=name.length()-2; i >= 0 && name.charAt(i) == '\\'; i-- ) {
+			slashes++;
+		}
+		return slashes % 2 == 0 ? name.substring(0, name.length()-1) : name;
+	}
+
+	/**
 	 * @param check refuse empty labels, labels over 63 octets and names over 255
 	 *  (false: skip empty labels, allow any length, for names that are only kept in
 	 *  memory; they are checked when written)
@@ -429,9 +444,7 @@ public class Name implements DNS
 		myLables = new ArrayList<Label>();
 		chrCount = 0;
 		String tmp = null;
-		if( n.endsWith(".") ) {
-			n = n.substring(0,n.length()-1);
-		}
+		n = stripRootDot(n);
 		if( n.isEmpty() ) {
 			//  "" or "." is the root: no labels, one zero octet on the wire
 			//  (it used to become one empty label, i.e. two zero octets)

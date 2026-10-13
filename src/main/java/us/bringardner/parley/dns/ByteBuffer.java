@@ -79,7 +79,7 @@ public  class ByteBuffer extends WireBuffer {
 	 * write into a given array).
 	 **/
 	public ByteBuffer(byte [] b, int i) {
-		super(b, Math.max(0, Math.min(i, b.length)), 0, b.length);
+		super(b, Math.max(0, Math.min(i, b.length)), 0, TO_ARRAY_END);
 		if( i < 0 || i > b.length ) {
 			//  reading starts outside the array: every read is a format error
 			pushLimit(0);
@@ -606,11 +606,14 @@ ARCOUNT         an unsigned 16 bit integer specifying the number of
 		putU8(0);
 	}
 
-	/** The labels from i on, as a compression key (case is kept, as before). */
+	/**
+	 * The labels from i on, as a compression key: each label with its length in
+	 * front, as on the wire (case is kept, as before).
+	 */
 	private static String suffixKey(List<byte[]> labels, int i) {
 		StringBuilder b = new StringBuilder();
 		for(int j=i; j < labels.size(); j++ ) {
-			b.append(new String(labels.get(j), java.nio.charset.StandardCharsets.ISO_8859_1)).append('\0');
+			b.append((char)labels.get(j).length).append(new String(labels.get(j), java.nio.charset.StandardCharsets.ISO_8859_1));
 		}
 		return b.toString();
 	}

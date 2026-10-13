@@ -47,26 +47,26 @@ public class Afsdb extends RR
 
 		public Afsdb() {
 				super();
-				setType(MX);
+				setType(AFSDB);
 				setDnsClass(IN);
 				isBase = false;
 				dirty = true;
 		}
 public Afsdb(String name) 
 {
-	super(name,MX,IN);
+	super(name,AFSDB,IN);
 	isBase = false;
 	dirty = true;
 }
 public Afsdb(String name, int dnsClass) 
 {
-	super(name,MX,dnsClass);
+	super(name,AFSDB,dnsClass);
 	isBase = false;
 	dirty = true;
 }
 public Afsdb(String name, short dnsClass) 
 {
-	super(name,MX,dnsClass);
+	super(name,AFSDB,dnsClass);
 	isBase = false;
 	dirty = true;
 }
@@ -123,7 +123,7 @@ public void setSubType(short c)
 	dirty = true;
 }
 /**
-	Add this MX resource record to the byte buffer as described in RFC 1035.
+	Add this AFSDB resource record to the byte buffer as described in RFC 1035.
 **/
 public void toByteArray(ByteBuffer in) 
 {

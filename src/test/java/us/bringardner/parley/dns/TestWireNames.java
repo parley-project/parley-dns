@@ -124,4 +124,56 @@ public class TestWireNames {
 		}
 		assertThrows(DnsFormatException.class, () -> new Message(new ByteBuffer(b)));
 	}
+
+	@Test
+	public void aTrailingEscapedDotIsPartOfTheLabel() {
+		Name n = new Name(new ByteBuffer(new byte[] {2, 'a', '.', 0}));
+		assertEquals("a\\.", n.toString());
+		assertEquals(n, new Name(n.toString()));
+		assertArrayEquals(new byte[] {2, 'a', '.', 0}, wire(n.toString()));
+		assertEquals("a\\.", Name.stripRootDot("a\\."));
+		assertEquals("a\\\\", Name.stripRootDot("a\\\\."));
+		assertEquals("a\\\\", Canonical.key("a\\\\."));
+		assertEquals("a\\.", Canonical.key("A\\."));
+	}
+
+	@Test
+	public void compressionKeysDontConfuseLabelsWithNames() {
+		ByteBuffer b = new ByteBuffer();
+		b.setName("a\\000b");
+		b.setName("a.b");
+		ByteBuffer r = new ByteBuffer(b.getByteArray());
+		assertEquals("a\u0000b", new Name(r).toString());
+		assertEquals("a.b", new Name(r).toString());
+	}
+
+	@Test
+	public void aTxtStringRunningPastTheRdataIsAFormatError() {
+		//  TXT with RDLENGTH 3: a string of 5 bytes
+		String hdr = "12348180000100010000000003777777076578616d706c6503636f6d0000100001";
+		String rr = "c00c001000010000012c0003056162";
+		String h = hdr+rr;
+		byte [] b = new byte[h.length()/2];
+		for(int i=0; i < b.length; i++ ) {
+			b[i] = (byte)Integer.parseInt(h.substring(2*i, 2*i+2), 16);
+		}
+		assertThrows(DnsFormatException.class, () -> new Message(new ByteBuffer(b)));
+	}
+
+	@Test
+	public void anAfsdbIsSentAsAnAfsdb() {
+		Afsdb a = new Afsdb("example.com");
+		assertEquals(DNS.AFSDB, a.getType());
+	}
+
+	@Test
+	public void aWrittenBufferCanBeReadBackPastItsFirstSize() {
+		ByteBuffer b = new ByteBuffer(new byte[4], 0);
+		for(int i=0; i < 10; i++ ) {
+			b.setShort(i);
+		}
+		for(int i=0; i < 10; i++ ) {
+			assertEquals(i, b.nextShort());
+		}
+	}
 }
