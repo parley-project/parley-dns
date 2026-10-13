@@ -224,4 +224,29 @@ public class TestAdminLimits {
 			assertTrue(l.server.isCommon(new Name("www.late.example")));
 		}
 	}
+
+	@Test
+	public void idleSessionsAreClosedAboutOnTime() throws Exception {
+		//  parley-net checks idle sessions every few minutes by default; the admin
+		//  server checks often enough to close them about on time
+		String saved = System.getProperty(DnsServer.PROP_ADMIN_SECRET);
+		System.clearProperty(DnsServer.PROP_ADMIN_SECRET);
+		DnsServer server = new DnsServer();
+		server.setAdminIdleTimeout(1000);
+		DnsAdminServer admin = server.startAdminServer(0);
+		try(Socket s = new Socket(InetAddress.getLoopbackAddress(), admin.getLocalPort())) {
+			s.setSoTimeout(8000);
+			BufferedReader in = reader(s);
+			assertEquals("+JDns admin ready", in.readLine());
+			long start = System.currentTimeMillis();
+			assertEquals(null, in.readLine(), "closed when idle");
+			long took = System.currentTimeMillis()-start;
+			assertTrue(took < 5000, "closed after "+took+" ms (idle time 1000 ms)");
+		} finally {
+			admin.stop();
+			if( saved != null ) {
+				System.setProperty(DnsServer.PROP_ADMIN_SECRET, saved);
+			}
+		}
+	}
 }

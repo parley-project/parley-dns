@@ -724,7 +724,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		adminMaxConnections = Math.max(1, intProperty(PROP_ADMIN_MAX_CONNECTIONS, 8));
 		adminIdleTimeout = intProperty(PROP_ADMIN_IDLE_TIMEOUT, adminIdleTimeout);
 		adminMaxLine = intProperty(PROP_ADMIN_MAX_LINE, adminMaxLine);
-		adminAuthTimeout = intProperty(PROP_ADMIN_AUTH_TIMEOUT, adminAuthTimeout);
+		//  0 or less would turn the time limit off (8 slow clients could lock out the admin port)
+		adminAuthTimeout = Math.max(1, intProperty(PROP_ADMIN_AUTH_TIMEOUT, adminAuthTimeout));
 		if( stringProperty(PROP_ADMIN_SECRET) == null && !adminBindAddress.isLoopbackAddress() ) {
 			logError("Admin port listens on "+adminBindAddress+" but "+PROP_ADMIN_SECRET
 					+" is not set: only clients on this machine will be accepted");
@@ -781,8 +782,11 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		a.setServerSocketFactory(getServerSocketFactory());
 		a.setMaxClients(adminMaxConnections);
 		a.setMaxLine(adminMaxLine);
-		a.setLoginTimeLimit(adminAuthTimeout);
+		a.setLoginTimeLimit(Math.max(1, adminAuthTimeout));
 		a.setMaxIdleConnection(adminIdleTimeout);
+		//  The idle check runs every few minutes by default: often enough to close
+		//  idle sessions about on time (they used to time out on the socket)
+		a.setAdminFrequency(Math.max(1000, Math.min(adminIdleTimeout/2, 60000)));
 		return a;
 	}
 
@@ -793,7 +797,13 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 */
 	public DnsAdminServer startAdminServer(int port) throws IOException {
 		DnsAdminServer a = createAdminServer(port);
-		a.startAndWait(10000);
+		try {
+			a.startAndWait(10000);
+		} catch(IOException | RuntimeException ex) {
+			//  e.g. timed out: it must not bind later with nothing referring to it
+			a.stop();
+			throw ex;
+		}
 		DnsAdminServer old = adminServer;
 		adminServer = a;
 		if( old != null ) {
@@ -824,12 +834,17 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 	}
 
+	/** ms an idle admin session stays open (initServer reads JDns.adminIdleTimeout); for the next admin server. */
+	void setAdminIdleTimeout(int ms) {
+		adminIdleTimeout = ms;
+	}
+
 	/** ms an admin client has to authenticate (initServer reads JDns.adminAuthTimeout). */
 	void setAdminAuthTimeout(int ms) {
-		adminAuthTimeout = ms;
+		adminAuthTimeout = Math.max(1, ms);
 		DnsAdminServer a = adminServer;
 		if( a != null ) {
-			a.setLoginTimeLimit(ms);
+			a.setLoginTimeLimit(adminAuthTimeout);
 		}
 	}
 
@@ -1723,6 +1738,11 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		running = true;
 		setState("Running Enter");
 
+		if( !running || isShutdown() ) {
+			//  stopped while starting
+			failedToStart(new StartupException("Stopped while starting", null, -2));
+			return;
+		}
 		try {
 			DnsAdminServer a = startAdminServer(getAdminPort());
 			log("Started dnsAdmin on "+adminBindAddress+":"+a.getLocalPort());
@@ -1732,7 +1752,9 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			return;
 		}
 		startLatch.countDown();
-		startMaintenance();
+		if( running && !isShutdown() ) {
+			startMaintenance();
+		}
 		try {
 			while( running && !isShutdown() ) {
 				setState("Running");
@@ -3245,8 +3267,13 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public boolean stopAndWait(long timeoutMs) throws InterruptedException {
 		long deadline = System.currentTimeMillis()+timeoutMs;
 		stop();
+		java.util.concurrent.ScheduledExecutorService m = maintenance;
 		stopMaintenance();
 		stopAdminServer();
+		if( m != null ) {
+			//  a reload or re-sign in progress finishes before the database closes
+			m.awaitTermination(Math.max(1, deadline-System.currentTimeMillis()), java.util.concurrent.TimeUnit.MILLISECONDS);
+		}
 		closeDbConnection();
 		closeListeners();
 		ZoneNotifier n = notifier;
@@ -3264,6 +3291,17 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 		long left = deadline - System.currentTimeMillis();
 		ret &= Resolver.awaitShutdown(Math.max(1, left));
+		Thread t = thread;
+		if( t != null && t != Thread.currentThread() ) {
+			left = deadline - System.currentTimeMillis();
+			if( left > 0 ) {
+				t.join(left);
+			}
+			ret &= !t.isAlive();
+		}
+		java.util.concurrent.ScheduledExecutorService still = maintenance;
+		ret &= m == null || m.isTerminated();
+		ret &= still == null;
 		return ret;
 	}
 
