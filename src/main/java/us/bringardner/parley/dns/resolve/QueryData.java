@@ -47,6 +47,8 @@ public class QueryData
 	//  The request as received (for TSIG), and the TSIG key it was signed with
 	private byte [] wire;
 	private volatile String tsigKey;
+	//  Arrived as a UDP datagram, whose source address anyone can forge (round 5 #86)
+	private volatile boolean udp;
 	
 /**
  * QueryData constructor comment.
@@ -117,6 +119,15 @@ public void setTsigKey(String tsigKey) {
  */
 public int getPort() {
 	return port;
+}
+
+/** @return true if the request arrived over UDP, where the source address can be forged */
+public boolean isUdp() {
+	return udp;
+}
+
+public void setUdp(boolean udp) {
+	this.udp = udp;
 }
 /**
  * Insert the method's description here.

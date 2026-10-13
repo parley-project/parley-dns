@@ -45,7 +45,7 @@ Each `<zone>.txt` file in `JDns.zone.dir` is one zone, in the RFC 1035 master fi
 
 # Dynamic update (RFC 2136)
 
-Allowed for requests signed with a key in `JDns.updateKeys` (or from `JDns.updateAllow`); everyone else gets REFUSED. Prerequisites, adds and all three kinds of delete are supported, with the RFC's rules (the apex SOA and NS RRset can't be deleted, never the last NS, no other data next to a CNAME). An update is all or nothing.
+Allowed for requests signed with a key in `JDns.updateKeys`, or unsigned from an address in `JDns.updateAllow` (over TCP, or over UDP from this machine); everyone else gets REFUSED. Prerequisites, adds and all three kinds of delete are supported, with the RFC's rules (the apex SOA and NS RRset can't be deleted, never the last NS, no other data next to a CNAME). An update is all or nothing.
 
 The zone file is never rewritten. Changes are appended to a journal next to it, `<zone file>.jnl`, before they are served, and replayed on top of the zone file when it is loaded. Each change raises the SOA serial by one and sends NOTIFY to the secondaries. To edit a zone by hand after updates, edit the zone file (it keeps the updates as long as the serial stays the same) or raise its serial to start over: the journal is then renamed `.jnl.old` and not used. Updates can add A, AAAA, NS, CNAME, PTR, MX, TXT, SPF, HINFO, SRV, CAA, HTTPS, SVCB and DS records; other types are REFUSED. An update is also REFUSED, as a whole, when one of its changes can't be written to the journal and read back unchanged, for example a name containing a space or a line break. A signed zone is signed again after each update. Send updates with `nsupdate` or [NsUpdate](#nsupdate).
 
@@ -293,7 +293,7 @@ A bind address of `localhost` means this host's own name (its network address), 
 | `JDns.tsigKeyFile` | none | A file of TSIG keys, one `name algorithm secret` per line (`#` comments); relative to `JDns.dnsDir`. Keeps the secrets out of the properties file |
 | `JDns.tsigFudge` | 300 | Largest clock difference (seconds, 1-65535) accepted in a signed request; also the fudge used when signing NOTIFY. The window is the smaller of this and the fudge in the request, so a client can't widen it |
 | `JDns.updateKeys` | none | TSIG key names whose signed dynamic UPDATE requests (RFC 2136, e.g. `nsupdate -k`) may change zones |
-| `JDns.updateAllow` | none | Addresses / networks allowed to send unsigned UPDATE requests. Prefer `JDns.updateKeys` |
+| `JDns.updateAllow` | none | Addresses / networks allowed to send unsigned UPDATE requests. Over UDP this applies to this machine (loopback) only, because a UDP source address can be forged: other addresses must send over TCP (`nsupdate -v`) or sign with a key. Prefer `JDns.updateKeys` |
 
 ### DNSSEC
 
