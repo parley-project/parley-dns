@@ -174,8 +174,13 @@ public class TestDynamicUpdate {
 	}
 
 	private int send(Update u, InetAddress from, String key) {
+		return send(u, from, key, false);
+	}
+
+	private int send(Update u, InetAddress from, String key, boolean udp) {
 		QueryData q = new QueryData(from, 5353, new Message(new ByteBuffer(u.m.toByteArray())));
 		q.setTsigKey(key);
+		q.setUdp(udp);
 		Message r = server.query(q).get(0);
 		Message back = new Message(new ByteBuffer(r.toByteArray()));
 		assertEquals(DNS.UPDATE, back.getHeader().getOPCODE());
@@ -433,6 +438,33 @@ public class TestDynamicUpdate {
 		} catch(IOException e) {
 			throw new AssertionError(e);
 		}
+	}
+
+	// ------------------------------------------------------------ round 5 #86: address over UDP
+
+	@Test
+	public void anAllowedAddressOverUdpIsRefused() throws Exception {
+		server.setUpdateAllow("127.0.0.1 192.0.2.0/24");
+		InetAddress far = InetAddress.getByName("192.0.2.7");
+		//  anyone can send a UDP packet claiming to be from 192.0.2.7
+		assertEquals(DNS.REFUSED, send(new Update().add(a("udp.up.test", "10.2.2.1")), far, null, true));
+		assertTrue(zone().exactRecords("udp.up.test").isEmpty());
+		//  over TCP the address is real
+		assertEquals(DNS.NOERROR, send(new Update().add(a("tcp.up.test", "10.2.2.2")), far, null, false));
+	}
+
+	@Test
+	public void loopbackOverUdpIsStillAllowed() throws Exception {
+		assertEquals(DNS.NOERROR, send(new Update().add(a("local.up.test", "10.2.2.3")), InetAddress.getLoopbackAddress(), null, true));
+	}
+
+	@Test
+	public void aKeyOverUdpIsStillAllowed() throws Exception {
+		server.setUpdateAllow(null);
+		server.setTsigKeys(Tsig.KeyRing.parse("upd:hmac-sha256:"+Base64.getEncoder().encodeToString(new byte[32])));
+		server.setUpdateKeys("upd");
+		InetAddress far = InetAddress.getByName("192.0.2.8");
+		assertEquals(DNS.NOERROR, send(new Update().add(a("signed.up.test", "10.2.2.4")), far, "upd", true));
 	}
 
 	// ------------------------------------------------------------ round 5 #74: journal text

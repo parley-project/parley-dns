@@ -2557,7 +2557,17 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			return ret;
 		}
 		String key = req.getTsigKey();
-		boolean allowed = (key != null && updateKeys.contains(key)) || updateAllow.matches(req.getClient());
+		boolean signed = key != null && updateKeys.contains(key);
+		if( !signed && req.isUdp() && !req.getClient().isLoopbackAddress() && updateAllow.matches(req.getClient()) ) {
+			//  Round 5 #86: a UDP source address can be forged, so an address alone
+			//  authorizes an UPDATE only over TCP (whose handshake proves it). A
+			//  loopback address can't come from another host (the kernel drops such
+			//  packets), so local tools such as nsupdate keep working over UDP
+			log(() -> "UPDATE of "+zs.getName()+" from "+req.getClient()+" over UDP refused: "+PROP_UPDATE_ALLOW+" applies over TCP only; use TCP or a key in "+PROP_UPDATE_KEYS);
+			ret.setResponseCodeRefused();
+			return ret;
+		}
+		boolean allowed = signed || updateAllow.matches(req.getClient());
 		if( !allowed ) {
 			log(() -> "UPDATE of "+zs.getName()+" from "+req.getClient()+" refused: not signed with a key in "+PROP_UPDATE_KEYS+" and not in "+PROP_UPDATE_ALLOW);
 			ret.setResponseCodeRefused();

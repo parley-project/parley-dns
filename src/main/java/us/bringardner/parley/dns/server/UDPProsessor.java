@@ -201,6 +201,7 @@ public void run ()
 				Message msg = new Message(buf);
 				setState("Running before process");
 				QueryData query = new QueryData(client,port,msg);
+				query.setUdp(true);
 				query.setWire(wire);
 				//  (a request without exactly one question gets FORMERR from the server)
 				process(query);
