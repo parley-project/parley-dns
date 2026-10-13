@@ -494,11 +494,31 @@ public final class Tsig {
 	 * anyone who saw it download the zone.
 	 */
 	public static final class ReplayCache {
-		/** Default number of MACs kept; past it the oldest are dropped */
+		/** Default number of requests kept; past it the oldest are dropped */
 		public static final int DEFAULT_MAX = 100000;
+
+		/** One accepted request, and the response code it got once it was processed. */
+		public static final class Entry {
+			final long expires;
+			private volatile int result = -1;
+
+			Entry(long expires) {
+				this.expires = expires;
+			}
+
+			/** @return the RCODE the request was answered with, or -1 while it is being processed */
+			public int getResult() {
+				return result;
+			}
+
+			public void setResult(int rcode) {
+				result = rcode;
+			}
+		}
+
 		private final int max;
-		//  key name + MAC -> the time (s) after which the request can't be accepted anyway
-		private final java.util.LinkedHashMap<String, Long> seen = new java.util.LinkedHashMap<String, Long>();
+		//  key name + the full MAC of the request -> entry
+		private final java.util.LinkedHashMap<String, Entry> seen = new java.util.LinkedHashMap<String, Entry>();
 		private final java.util.concurrent.atomic.AtomicLong replays = new java.util.concurrent.atomic.AtomicLong();
 
 		public ReplayCache() {
@@ -509,31 +529,38 @@ public final class Tsig {
 			this.max = Math.max(1, max);
 		}
 
-		/** @return true the first time this request is seen, false for a replay */
-		synchronized boolean firstUse(Record r, long now, int window) {
-			java.util.Iterator<Long> it = seen.values().iterator();
+		/**
+		 * @param fullMac the MAC computed over the request, not the one it carries:
+		 *   a request may carry a truncated MAC, and each truncation of a captured
+		 *   MAC would otherwise count as a new request
+		 * @return [0] the entry, [1] non-null if the request was seen before
+		 */
+		synchronized Entry [] use(String keyName, byte [] fullMac, long timeSigned, long now, int window) {
+			java.util.Iterator<Entry> it = seen.values().iterator();
 			while( it.hasNext() ) {
 				//  roughly in expiry order: stop at the first one still live
-				if( it.next() >= now ) {
+				if( it.next().expires >= now ) {
 					break;
 				}
 				it.remove();
 			}
-			String k = r.keyName+"|"+java.util.Base64.getEncoder().encodeToString(r.mac);
-			if( seen.containsKey(k) ) {
+			String k = keyName+"|"+java.util.Base64.getEncoder().encodeToString(fullMac);
+			Entry old = seen.get(k);
+			if( old != null ) {
 				replays.incrementAndGet();
-				return false;
+				return new Entry[] {old, old};
 			}
 			while( seen.size() >= max ) {
 				it = seen.values().iterator();
 				it.next();
 				it.remove();
 			}
-			seen.put(k, r.timeSigned+window);
-			return true;
+			Entry e = new Entry(timeSigned+window);
+			seen.put(k, e);
+			return new Entry[] {e, null};
 		}
 
-		/** @return requests refused as replays */
+		/** @return requests that were seen before (replays or retransmissions) */
 		public long getReplays() {
 			return replays.get();
 		}
@@ -573,6 +600,9 @@ public final class Tsig {
 		private final int error;		//  server: the error to report (0 = none)
 		private final long requestTime;
 		private boolean signed;
+		//  Replay cache entry of this request; repeat is true if it was seen before
+		private ReplayCache.Entry replay;
+		private boolean repeat;
 
 		private Session(Key key, String keyName, String algorithm, int fudge, byte [] priorMac, int error, long requestTime) {
 			this.key = key;
@@ -589,6 +619,22 @@ public final class Tsig {
 
 		/** The TSIG error this session reports (0 when the request was good). */
 		public int getError() { return error; }
+
+		/** The request's entry in the replay cache, or null when none was used. */
+		public ReplayCache.Entry getReplay() { return replay; }
+
+		/** true if this exact request was accepted before (getError() is then BADTIME). */
+		public boolean isRepeat() { return repeat; }
+
+		/**
+		 * For a repeated request: a session that signs the response as the
+		 * first one's was signed (no error), to send the same answer again.
+		 */
+		public Session asFirst() {
+			Session s = new Session(key, keyName, algorithm, fudge, priorMac, NOERROR, requestTime);
+			s.replay = replay;
+			return s;
+		}
 
 		// -------------------------------------------------------- server
 
@@ -645,7 +691,8 @@ public final class Tsig {
 			Mac mac = key.mac();
 			mac.update(strip(msg, r));
 			mac.update(variables(r.keyName, r.algorithm, r.timeSigned, r.fudge, r.error, r.other, false));
-			byte [] expect = java.util.Arrays.copyOf(mac.doFinal(), r.mac.length);
+			byte [] fullMac = mac.doFinal();
+			byte [] expect = java.util.Arrays.copyOf(fullMac, r.mac.length);
 			if( !MessageDigest.isEqual(expect, r.mac) ) {
 				return new Session(null, r.keyName, r.algorithm, r.fudge, new byte[0], BADSIG, r.timeSigned);
 			}
@@ -653,8 +700,12 @@ public final class Tsig {
 				//  Signed with a good key, but our clocks disagree: the response is signed
 				return new Session(key, r.keyName, r.algorithm, r.fudge, r.mac, BADTIME, r.timeSigned);
 			}
-			if( replays != null && !replays.firstUse(r, now, Math.min(r.fudge, maxFudge)) ) {
-				return new Session(key, r.keyName, r.algorithm, r.fudge, r.mac, BADTIME, r.timeSigned);
+			if( replays != null ) {
+				ReplayCache.Entry [] e = replays.use(r.keyName, fullMac, r.timeSigned, now, Math.min(r.fudge, maxFudge));
+				Session s = new Session(key, r.keyName, r.algorithm, r.fudge, r.mac, e[1] == null ? NOERROR : BADTIME, r.timeSigned);
+				s.replay = e[0];
+				s.repeat = e[1] != null;
+				return s;
 			}
 			return new Session(key, r.keyName, r.algorithm, r.fudge, r.mac, NOERROR, r.timeSigned);
 		}

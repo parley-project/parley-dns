@@ -65,6 +65,15 @@ public abstract class DnsRequestProcessor  extends DnsBaseClass implements DNS
 	}
 	if( tsig != null ) {
 		currentTsig = tsig;
+		if( tsig.isRepeat() && query.getMessage().getHeader().getOPCODE() == DNS.UPDATE && tsig.getReplay().getResult() >= 0 ) {
+			//  Round 5 #85: the same signed UPDATE again, e.g. resent because the
+			//  response was lost. It gets the first answer again; nothing is applied
+			//  a second time, so a replay can't change the zone either.
+			currentTsig = tsig.asFirst();
+			sendResponse(repeatedAnswer(query.getMessage(), tsig.getReplay().getResult()));
+			currentTsig = null;
+			return;
+		}
 		if( tsig.getError() != Tsig.NOERROR ) {
 			//  RFC 8945 5.2: NOTAUTH, with the TSIG error in the (unsigned or,
 			//  for BADTIME, signed) TSIG of the response
@@ -93,6 +102,13 @@ public abstract class DnsRequestProcessor  extends DnsBaseClass implements DNS
 	return q != null && (q.getType() == DNS.AXFR || q.getType() == DNS.IXFR);
  }
 
+ /** The answer to a repeated UPDATE: its zone section and the first answer's RCODE. */
+ static Message repeatedAnswer(Message req, int rcode) {
+	Message ret = notAuth(req);
+	ret.getHeader().setRCODE(rcode);
+	return ret;
+ }
+
  /** A NOTAUTH response to a request (its question, no records). */
  static Message notAuth(Message req) {
 	Message ret = new Message();
@@ -115,6 +131,11 @@ public abstract class DnsRequestProcessor  extends DnsBaseClass implements DNS
 	} else {
 		List<Message> reply = server.query(query);
 		if( reply != null ) {
+			Tsig.Session t = currentTsig;
+			if( t != null && t.getReplay() != null && !reply.isEmpty() ) {
+				//  remembered for a repeat of this request (see process)
+				t.getReplay().setResult(reply.get(0).getResponseCode());
+			}
 			for(Message m : reply) {
 				Edns.applyToResponse(m, edns);
 				sendResponse(m);

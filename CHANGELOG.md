@@ -20,8 +20,8 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
 - Unsigned dynamic updates allowed by address (`JDns.updateAllow`) are accepted over UDP only from
   this machine (loopback). From other addresses, send them over TCP (`nsupdate -v`) or sign them
   with a key in `JDns.updateKeys`: a UDP source address can be forged.
-- A signed UPDATE or zone transfer request is accepted once; the same request again gets NOTAUTH
-  (BADTIME).
+- A signed UPDATE or zone transfer request is acted on once. The same UPDATE again gets the first
+  answer without being applied again; the same transfer request again gets NOTAUTH (BADTIME).
 - An UPDATE is REFUSED when one of its changes can't be written to the journal and read back
   unchanged (e.g. a name containing a space).
 - A DNSSEC-validated (SECURE) answer carries only the records that were validated.
