@@ -186,10 +186,7 @@ public class Resolver  extends DnsBaseClass
 
 	/** A cached response that is only a CNAME: resolveChain still follows it to the target. */
 	private static boolean isUnchasedCname(Message m, Section question) {
-		if( m.getAnswerCount() != 1 || question.getType() == DNS.CNAME ) {
-			return false;
-		}
-		return m.getAnswer().get(0).getType() == DNS.CNAME;
+		return question.getType() != DNS.CNAME && unansweredChainEnd(m, question) != null;
 	}
 
 	/** A zone's name servers learned from a referral. */
@@ -711,13 +708,12 @@ public class Resolver  extends DnsBaseClass
 			}
 		}
 
-		//  If this is the first time for a CNAME, AnswerCount should be 1
-		//  If it's grater than that, it's already been combined
-		if( ret != null && ret.getAnswerCount() == 1 ) {
-			//  Check for CNAME
-			RR rr = (RR)ret.getAnswer().get(0);
-			if( rr.getType() == DNS.CNAME && question.getType() != DNS.CNAME ) {
-				String target = ((Cname)rr).getCname();
+		//  A CNAME chain that ends without the data asked for (its target is in another
+		//  zone, whose records the server asked may not give, round 4 #64): follow it
+		String end = ret == null || question.getType() == DNS.CNAME ? null : unansweredChainEnd(ret, question);
+		if( end != null ) {
+			{
+				String target = end;
 				if( depth >= QueryData.MAX_CNAME_CHAIN || seen.contains(target.toLowerCase()) ) {
 					new Resolver().logError("CNAME loop or chain too long at "+question.getName()+" -> "+target
 							+" (followed "+depth+"), returning the chain so far");
@@ -786,6 +782,10 @@ public class Resolver  extends DnsBaseClass
 			svr = slist.get(idx);
 			{
 				if( (ret = svr.resolve(question,maxTime)) != null) {
+					if( !ret.isRecursive() ) {
+						//  Round 4 #64: only what the asked zone may say about
+						ret = scrub(ret, svr.getName());
+					}
 					if( ret.isRecursive() ) {
 						//The server did the work so we're done
 						break;
@@ -827,6 +827,60 @@ public class Resolver  extends DnsBaseClass
 		return ret;
 	}
 	
+	/**
+	 * Round 4 #64: remove from an answer the records the server's zone can't speak
+	 * for (owner not at or below the zone): a server for evil.example could otherwise
+	 * add "www.bank.example A 6.6.6.6" after a CNAME to it. A CNAME into another zone
+	 * is then followed by asking that zone.
+	 *
+	 * @param zone the zone of the servers that answered ("" or "." for the root)
+	 */
+	static Message scrub(Message m, String zone) {
+		String z = us.bringardner.parley.dns.dnssec.Canonical.key(zone == null ? "" : zone);
+		if( z.isEmpty() ) {
+			return m;
+		}
+		java.util.function.Predicate<RR> outside = rr -> rr.getType() != DNS.OPT
+				&& !us.bringardner.parley.dns.dnssec.Canonical.isBelow(rr.getName(), z, true);
+		m.getAnswer().removeIf(outside);
+		m.getAuthority().removeIf(outside);
+		m.getAdditional().removeIf(outside);
+		return m;
+	}
+
+	/**
+	 * @return the last name of the CNAME chain in the answer that starts at the question,
+	 *  if the answer has no record of the type asked for at it (and the chain had a CNAME);
+	 *  null if the answer is complete
+	 */
+	static String unansweredChainEnd(Message m, Section question) {
+		if( m.getResponseCode() != DNS.NOERROR ) {
+			return null;
+		}
+		String name = us.bringardner.parley.dns.dnssec.Canonical.key(question.getName());
+		boolean followed = false;
+		for(int hop=0; hop <= QueryData.MAX_CNAME_CHAIN; hop++ ) {
+			String next = null;
+			for(RR rr : m.getAnswer()) {
+				if( !us.bringardner.parley.dns.dnssec.Canonical.key(rr.getName()).equals(name) ) {
+					continue;
+				}
+				if( rr.getType() == question.getType() || question.getType() == 255 ) {
+					return null;
+				}
+				if( rr.getType() == DNS.CNAME ) {
+					next = ((Cname)rr).getCname();
+				}
+			}
+			if( next == null ) {
+				return followed ? name : null;
+			}
+			followed = true;
+			name = us.bringardner.parley.dns.dnssec.Canonical.key(next);
+		}
+		return null;
+	}
+
 	/** An answer that the name has no data of the type: no answers, an SOA in the authority section (RFC 2308 2.2). */
 	static boolean isNoData(Message m) {
 		if( m.getAnswerCount() > 0 ) {

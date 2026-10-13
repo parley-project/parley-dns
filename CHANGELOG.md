@@ -79,6 +79,9 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
 - Round 4 #62: upstream servers that answer REFUSED, SERVFAIL, NOTAUTH, NOTIMP or FORMERR, or refer
   upwards or sideways (lame), count as failing for ranking; when only such referrals come back the
   client gets SERVFAIL instead of NOERROR without data.
+- Round 4 #64: records an upstream server gives for names outside its zone are dropped (a server
+  for evil.example can no longer add an address for www.bank.example after a CNAME to it); a CNAME
+  chain that ends without the data is followed by asking the target's own servers.
 - Round 5 #84: the UPDATE journal is crash safe: the header is written into an empty journal too,
   each update is framed by `begin`/`end` lines (a torn last update is left out on replay), and a
   failed write is cut off again. Older journals without the framing still replay.
