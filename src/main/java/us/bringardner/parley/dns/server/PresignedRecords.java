@@ -31,7 +31,7 @@ import java.util.List;
 import java.util.TimeZone;
 import java.util.function.UnaryOperator;
 
-import us.bringardner.parley.dns.Base32Hex;
+import us.bringardner.parley.core.util.Base32Hex;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Dnskey;
 import us.bringardner.parley.dns.Nsec;

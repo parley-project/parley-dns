@@ -344,7 +344,7 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 	private static void initResolverThread() {
 		int maxBacklog = DEFAULT_MAX_BACKLOG;
 
-		String tmp = us.bringardner.parley.dns.RenamedProperty.get(PROP_RESOLVER_BACKLOG, "Resolver.maxBacklog");
+		String tmp = us.bringardner.parley.core.util.RenamedProperty.get(PROP_RESOLVER_BACKLOG, "Resolver.maxBacklog");
 
 		if( tmp != null ) {
 			try {

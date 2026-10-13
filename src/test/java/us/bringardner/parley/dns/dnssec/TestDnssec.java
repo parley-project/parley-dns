@@ -155,10 +155,10 @@ public class TestDnssec {
 		String [][] v = {{"", ""}, {"f", "co"}, {"fo", "cpng"}, {"foo", "cpnmu"}, {"foob", "cpnmuog"},
 				{"fooba", "cpnmuoj1"}, {"foobar", "cpnmuoj1e8"}};
 		for(String [] x : v) {
-			assertEquals(x[1], us.bringardner.parley.dns.Base32Hex.encode(x[0].getBytes(StandardCharsets.US_ASCII)));
-			assertEquals(x[0], new String(us.bringardner.parley.dns.Base32Hex.decode(x[1].toUpperCase()+"=="), StandardCharsets.US_ASCII));
+			assertEquals(x[1], us.bringardner.parley.core.util.Base32Hex.encode(x[0].getBytes(StandardCharsets.US_ASCII)));
+			assertEquals(x[0], new String(us.bringardner.parley.core.util.Base32Hex.decode(x[1].toUpperCase()+"=="), StandardCharsets.US_ASCII));
 		}
-		assertThrows(IllegalArgumentException.class, () -> us.bringardner.parley.dns.Base32Hex.decode("xyz"));
+		assertThrows(IllegalArgumentException.class, () -> us.bringardner.parley.core.util.Base32Hex.decode("xyz"));
 	}
 
 	@Test
@@ -166,7 +166,7 @@ public class TestDnssec {
 		us.bringardner.parley.dns.Nsec3 n = new us.bringardner.parley.dns.Nsec3("0p9mhaveqvm6t7vbl5lop2u3t2rp3tom.example", DNS.IN);
 		n.setIterations(12);
 		n.setSalt(hex("aabbccdd"));
-		n.setNextHashed(us.bringardner.parley.dns.Base32Hex.decode("2t7b4g4vsa5smi47k61mv5bv1a22bojr"));
+		n.setNextHashed(us.bringardner.parley.core.util.Base32Hex.decode("2t7b4g4vsa5smi47k61mv5bv1a22bojr"));
 		n.setTypes(Arrays.asList(DNS.MX, DNS.DNSKEY, DNS.NS, DNS.SOA, DNS.NSEC3PARAM, DNS.RRSIG));
 		//  As RFC 5155 Appendix A shows it
 		assertEquals("1 0 12 AABBCCDD 2T7B4G4VSA5SMI47K61MV5BV1A22BOJR NS SOA MX RRSIG DNSKEY NSEC3PARAM", n.getRdataAsString());

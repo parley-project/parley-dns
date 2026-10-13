@@ -1032,12 +1032,12 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 		dnsDir=new File(getProperty(PROP_DNS_DIR,DEFAULT_DNS_DIR));
 
-		if( (tmp=us.bringardner.parley.dns.RenamedProperty.get(PROP_UDP_PROC_COUNT, "UDPProcCount")) != null)  {
+		if( (tmp=us.bringardner.parley.core.util.RenamedProperty.get(PROP_UDP_PROC_COUNT, "UDPProcCount")) != null)  {
 			try { UDPProcCount =Integer.parseInt(tmp.trim()); } catch(Exception ex) {
 				logError("Invalid number for "+PROP_UDP_PROC_COUNT+": '"+tmp+"', using "+UDPProcCount);
 			}
 		}
-		if( (tmp=us.bringardner.parley.dns.RenamedProperty.get(PROP_TCP_PROC_COUNT, "TCPProcCount")) != null)  {
+		if( (tmp=us.bringardner.parley.core.util.RenamedProperty.get(PROP_TCP_PROC_COUNT, "TCPProcCount")) != null)  {
 			try { TCPProcCount =Integer.parseInt(tmp.trim()); } catch(Exception ex) {
 				logError("Invalid number for "+PROP_TCP_PROC_COUNT+": '"+tmp+"', using "+TCPProcCount);
 			}

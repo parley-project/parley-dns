@@ -43,7 +43,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import us.bringardner.parley.dns.A;
-import us.bringardner.parley.dns.Base32Hex;
+import us.bringardner.parley.core.util.Base32Hex;
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Dnskey;

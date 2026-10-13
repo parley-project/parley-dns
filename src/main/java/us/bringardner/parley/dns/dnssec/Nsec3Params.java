@@ -26,7 +26,7 @@ package us.bringardner.parley.dns.dnssec;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
-import us.bringardner.parley.dns.Base32Hex;
+import us.bringardner.parley.core.util.Base32Hex;
 import us.bringardner.parley.dns.Nsec3;
 
 /**

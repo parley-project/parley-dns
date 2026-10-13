@@ -37,7 +37,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.function.LongSupplier;
 
-import us.bringardner.parley.dns.Base32Hex;
+import us.bringardner.parley.core.util.Base32Hex;
 import us.bringardner.parley.dns.Cname;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.DnsBaseClass;

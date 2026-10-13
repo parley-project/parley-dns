@@ -74,6 +74,8 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
   - Resolver threads are virtual threads on Java 21+ (`JDns.resolverVirtualThreads`, default true).
   - Upstream address ranking and hold-off moved to parley-net's `UpstreamHealth`; `ServerA` keeps its
     settings and methods.
+- `Base32Hex` and `RenamedProperty` moved to parley-core (`us.bringardner.parley.core.util`); a
+  deprecated property name is now logged as a warning rather than an error.
 
 ### Changed (behaviour)
 

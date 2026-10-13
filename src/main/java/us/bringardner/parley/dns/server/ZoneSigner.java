@@ -34,7 +34,7 @@ import java.util.TreeMap;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Dnskey;
 import us.bringardner.parley.dns.Name;
-import us.bringardner.parley.dns.Base32Hex;
+import us.bringardner.parley.core.util.Base32Hex;
 import us.bringardner.parley.dns.Nsec;
 import us.bringardner.parley.dns.Nsec3;
 import us.bringardner.parley.dns.Nsec3param;
