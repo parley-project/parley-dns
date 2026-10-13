@@ -26,45 +26,55 @@
 package us.bringardner.parley.dns.server;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InterruptedIOException;
 import java.io.OutputStream;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
-import java.net.Socket;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
+import java.net.SocketAddress;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+import us.bringardner.parley.core.NamedThreadFactory;
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DnsFormatException;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.Tsig;
 import us.bringardner.parley.dns.Utility;
 import us.bringardner.parley.dns.resolve.QueryData;
-import us.bringardner.parley.core.NamedThreadFactory;
 import us.bringardner.parley.io.IoUtils;
+import us.bringardner.parley.net.nio.INioConnection;
+import us.bringardner.parley.net.nio.INioHandler;
+import us.bringardner.parley.net.nio.LengthFieldFrameDecoder;
+import us.bringardner.parley.net.nio.NioServer;
 
 /**
- * DNS over TCP.
+ * DNS over TCP (RFC 1035 4.2.2, RFC 7766), served by parley-net's {@link NioServer}.
  * <p>
- * A TCPProsessor is an acceptor: it accepts connections on the shared
- * listen socket and hands each one to a bounded pool, where a
- * {@link Connection} serves it (any number of length-prefixed messages,
- * RFC 1035 4.2.2 / RFC 7766) until the client closes it, it is idle for
- * the idle timeout, or an error occurs.
+ * The framework accepts connections, reads them without a thread per connection,
+ * splits the input into messages (a {@link LengthFieldFrameDecoder} with the 2 byte
+ * length) and applies the limits:
+ * <ul>
+ * <li>at most maxConnections connections; one more is closed at once (the client
+ *     can retry) rather than queued behind idle ones;</li>
+ * <li>at most maxConnectionsPerClient from one address (round 5 #72), so one host
+ *     can't take every slot;</li>
+ * <li>a connection with no traffic for the idle timeout is closed;</li>
+ * <li>a message must arrive within the idle timeout once it has started (round 5
+ *     #78): a client that sends a byte now and then is never idle, but it can no
+ *     longer hold a slot that way.</li>
+ * </ul>
+ * Each connection has a {@link Connection} handler. Its messages are answered one at a
+ * time, in order, on a pool of handler threads (recursion, UPDATE and zone transfers
+ * may take a while), never on the threads that read the sockets.
  * <p>
- * The old design served each connection in the acceptor thread itself
- * with a 2 minute read timeout, so 4 idle clients (TCPProcCount) blocked
- * all TCP service for 2 minutes.
- * <p>
- * When maxConnections connections are open, a new connection is closed at
- * once (the client can retry) rather than queued behind idle ones.
+ * The static methods are the API DnsServer and the tests used before (initTCPProsessor,
+ * getServerSocket, shutdownConnections...). One TCPProsessor runs the server's accept
+ * loop in its own thread; JDns.tcpProcCount is now the number of reactor threads.
  * 
  * Creation date: (8/26/2001 10:41:48 AM)
  * @author: Tony Bringardner
@@ -75,24 +85,21 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 	public static final int DEFAULT_IDLE_TIMEOUT = 10_000;
 	/** Default maximum number of connections served at once. */
 	public static final int DEFAULT_MAX_CONNECTIONS = 64;
+	/** Default maximum number of connections from one client address (round 5 #72). */
+	public static final int DEFAULT_MAX_CONNECTIONS_PER_CLIENT = 8;
 	/** Largest message a 16 bit TCP length prefix can describe. */
 	static final int MAX_TCP_MESSAGE = 0xFFFF;
+	/** Bytes queued for one client before a sender (e.g. a zone transfer) waits for it to read. */
+	static final int MAX_PENDING_WRITE = 256*1024;
 
-	private static final Object syncLok = new Object();
-	//  The shared listen socket
-	private static volatile ServerSocket serverSocket;
-	//  Serves accepted connections
+	//  The server of the last initTCPProsessor (null after shutdownConnections)
+	private static volatile TcpServer nio;
+	//  The listening channel, bound by initTCPProsessor
+	private static volatile ServerSocketChannel channel;
+	//  Runs the handlers
 	private static volatile ThreadPoolExecutor connectionPool;
-	//  Open client connections (closed on shutdown)
-	private static final Set<Socket> openConnections = ConcurrentHashMap.newKeySet();
 	private static volatile int idleTimeout = DEFAULT_IDLE_TIMEOUT;
 	private static final AtomicLong rejected = new AtomicLong();
-	//  Connection slots. A slot is taken by the acceptor and given back as
-	//  the last thing a Connection does, so a freed slot can be used at once
-	//  (the pool thread may still be finishing; the new connection then waits
-	//  in the pool queue for a moment instead of being rejected).
-	private static volatile Semaphore slots = new Semaphore(DEFAULT_MAX_CONNECTIONS);
-	private static volatile int maxSlots = DEFAULT_MAX_CONNECTIONS;
 
 	public static volatile boolean debug = false;
 
@@ -107,44 +114,80 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 
 	/** The shared TCP listen socket (null before initTCPProsessor). */
 	public static ServerSocket getServerSocket() {
-		return serverSocket;
+		ServerSocketChannel ch = channel;
+		return ch == null ? null : ch.socket();
 	}
 
 	public static void initTCPProsessor(int bindPort,int backlog,InetAddress bindAddress, int timeout) throws IOException {
 		initTCPProsessor(bindPort, backlog, bindAddress, timeout, DEFAULT_MAX_CONNECTIONS, DEFAULT_IDLE_TIMEOUT);
 	}
 
+	public static void initTCPProsessor(int bindPort,int backlog,InetAddress bindAddress, int timeout,
+			int maxConnections, int idleTimeoutMs) throws IOException {
+		initTCPProsessor(bindPort, backlog, bindAddress, timeout, maxConnections, idleTimeoutMs,
+				DEFAULT_MAX_CONNECTIONS_PER_CLIENT, 1);
+	}
+
 	/**
-	 * @param timeout accept() timeout (ms), how often acceptors check for shutdown
+	 * Bind the TCP port. The server runs once a TCPProsessor is run.
+	 * 
+	 * @param timeout not used any more (the accept timeout of the blocking acceptors);
+	 *  kept as the listen socket's SO_TIMEOUT so it can still be read back
 	 * @param maxConnections most connections served at once
-	 * @param idleTimeoutMs a connection with no request for this long is closed
+	 * @param idleTimeoutMs a connection with no traffic for this long is closed, and
+	 *  a message that has started must be complete within it
+	 * @param maxPerClient most connections from one client address, 0 for no limit
+	 * @param reactors threads reading and writing the connections
 	 */
 	public synchronized static void initTCPProsessor(int bindPort,int backlog,InetAddress bindAddress, int timeout,
-			int maxConnections, int idleTimeoutMs) throws IOException {
-		//  A previous pool (re-initialization) is shut down first
+			int maxConnections, int idleTimeoutMs, int maxPerClient, int reactors) throws IOException {
+		//  A previous server (re-initialization) is shut down first
 		shutdownConnections(1000);
 
-		serverSocket = new ServerSocket(bindPort,backlog,bindAddress);
-		serverSocket.setSoTimeout(timeout);
+		ServerSocketChannel ch = ServerSocketChannel.open();
+		try {
+			ch.bind(new InetSocketAddress(bindAddress, bindPort), backlog);
+			if( timeout > 0 ) {
+				ch.socket().setSoTimeout(timeout);
+			}
+		} catch(IOException | RuntimeException ex) {
+			IoUtils.closeQuietly(ch);
+			throw ex;
+		}
 		idleTimeout = idleTimeoutMs > 0 ? idleTimeoutMs : DEFAULT_IDLE_TIMEOUT;
-
 		int max = maxConnections > 0 ? maxConnections : DEFAULT_MAX_CONNECTIONS;
-		//  Admission is limited by the slots semaphore, so the queue never
-		//  holds more than a connection or two waiting for a thread to finish.
+
+		//  Admission is limited by the server, so there are never more than max
+		//  connections with work queued.
 		ThreadPoolExecutor pool = new ThreadPoolExecutor(max, max, 30, TimeUnit.SECONDS,
 				new LinkedBlockingQueue<Runnable>(), NamedThreadFactory.numbered("TCPConn"));
 		pool.allowCoreThreadTimeOut(true);
-		slots = new Semaphore(max);
-		maxSlots = max;
+
+		TcpServer s = new TcpServer();
+		s.setServerChannel(ch);
+		s.setHandlerExecutor(pool);
+		s.setReactorCount(Math.max(1, reactors));
+		s.setMaxConnections(max);
+		s.setMaxConnectionsPerClient(Math.max(0, maxPerClient));
+		s.setMaxIdleTime(idleTimeout);
+		s.setFrameTimeout(idleTimeout);
+		s.setTcpNoDelay(true);
+		s.setMaxInputBuffer(4*(MAX_TCP_MESSAGE+2));
+		s.setDecoderFactory(() -> new LengthFieldFrameDecoder(2, MAX_TCP_MESSAGE, true));
+		s.setServerBusyMessage(null);
+
+		channel = ch;
 		connectionPool = pool;
+		nio = s;
 	}
 
 	/** Number of TCP connections being served now. */
 	public static int getActiveConnections() {
-		return maxSlots - slots.availablePermits();
+		TcpServer s = nio;
+		return s == null ? 0 : s.getActiveConnections();
 	}
 
-	/** Connections closed at once because maxConnections were already open. */
+	/** Connections closed at once because maxConnections (or maxConnectionsPerClient) were already open. */
 	public static long getRejected() {
 		return rejected.get();
 	}
@@ -153,97 +196,87 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 		return idleTimeout;
 	}
 
-	/**
-	 * Close every open client connection and stop the connection pool.
-	 * @return true if the pool finished within ms
-	 */
-	public static boolean shutdownConnections(long ms) {
-		ThreadPoolExecutor pool = connectionPool;
-		connectionPool = null;
-		for(Socket s : openConnections) {
-			IoUtils.closeQuietly(s);
-		}
-		if( pool == null ) {
-			return true;
-		}
-		pool.shutdownNow();
-		try {
-			return pool.awaitTermination(Math.max(1, ms), TimeUnit.MILLISECONDS);
-		} catch(InterruptedException ex) {
-			Thread.currentThread().interrupt();
-			return false;
-		}
+	/** @return the most connections from one client address, 0 for no limit */
+	public static int getMaxConnectionsPerClient() {
+		TcpServer s = nio;
+		return s == null ? DEFAULT_MAX_CONNECTIONS_PER_CLIENT : s.getMaxConnectionsPerClient();
 	}
 
 	/**
-	 * Accept connections and hand them to the pool until shutdown.
+	 * Stop accepting connections, close every open one and stop the handler threads.
+	 * @return true if everything stopped within ms
+	 */
+	public static boolean shutdownConnections(long ms) {
+		long deadline = System.currentTimeMillis()+Math.max(1, ms);
+		TcpServer s = nio;
+		ThreadPoolExecutor pool = connectionPool;
+		ServerSocketChannel ch = channel;
+		nio = null;
+		connectionPool = null;
+		channel = null;
+		boolean ret = true;
+		if( s != null ) {
+			s.stop();
+			//  The server closes the channel when it stops; it may never have run
+			IoUtils.closeQuietly(ch);
+			try {
+				while( s.isRunning() && System.currentTimeMillis() < deadline ) {
+					Thread.sleep(5);
+				}
+			} catch(InterruptedException ex) {
+				Thread.currentThread().interrupt();
+				return false;
+			}
+			ret = !s.isRunning();
+		}
+		if( pool != null ) {
+			pool.shutdownNow();
+			try {
+				ret &= pool.awaitTermination(Math.max(1, deadline-System.currentTimeMillis()), TimeUnit.MILLISECONDS);
+			} catch(InterruptedException ex) {
+				Thread.currentThread().interrupt();
+				return false;
+			}
+		}
+		return ret;
+	}
+
+	/**
+	 * Stop accepting connections (DnsServer's closeListeners). Open connections are
+	 * closed too; {@link #shutdownConnections(long)} waits for that.
+	 */
+	public static void closeListener() {
+		TcpServer s = nio;
+		if( s != null ) {
+			s.stop();
+		}
+		IoUtils.closeQuietly(channel);
+	}
+
+	/**
+	 * Run the server initTCPProsessor made, until it is stopped. Only one TCPProsessor
+	 * runs a given server; another one returns at once.
 	 **/
 	public void run ()
 	{
-		if( serverSocket == null ) {
+		TcpServer s = nio;
+		if( s == null ) {
 			log("Can't run without init");
 			setState("No socket, can't run");
 			return;
 		}
-
-		setState("Running Enter");
-		//  This thread serves the socket it started with (see UDPProsessor.run)
-		final ServerSocket ss = serverSocket;
-
-		while( !DnsServer.isShutdown() && !ss.isClosed() )  {
-			Socket sock = null;
-			try {
-				setState("Running before sync");
-				synchronized (syncLok) {
-					setState("Waiting for connection");
-					if( !DnsServer.isShutdown() ) {
-						sock = ss.accept();
-					}
-				}
-			} catch(InterruptedIOException ex) {
-				// accept() timed out: check for shutdown
-				continue;
-			} catch(Exception ex) {
-				if( !DnsServer.isShutdown() && !(ss != null && ss.isClosed()) ) {
-					//  (the socket is closed on shutdown or after a failed start; that is not an error)
-					log("Exception in TCP sock.accept()",ex);
-				}
-				if( ss == null || ss.isClosed() ) {
-					break;
-				}
-				continue;
-			}
-			if( sock == null ) {
-				continue;
-			}
-
-			ThreadPoolExecutor pool = connectionPool;
-			Semaphore free = slots;
-			boolean taken = false;
-			try {
-				if( pool == null ) {
-					throw new RejectedExecutionException("no connection pool");
-				}
-				if( !free.tryAcquire() ) {
-					throw new RejectedExecutionException("all connection slots busy");
-				}
-				taken = true;
-				pool.execute(new Connection(server, sock, free));
-				setState("Handed off connection from", sock.getInetAddress());
-			} catch(RejectedExecutionException ex) {
-				//  All connection slots busy: close now, the client can retry
-				if( taken ) {
-					free.release();
-				}
-				rejected.incrementAndGet();
-				if( DnsServer.isDebug() ) {
-					final InetAddress from = sock.getInetAddress();
-					log(() -> "TCP connection from "+from+" rejected, "+getActiveConnections()+" connections open");
-				}
-				IoUtils.closeQuietly(sock);
-			}
+		if( !s.claim() ) {
+			setState("Not needed, the server runs in another TCPProsessor");
+			return;
 		}
-		setState("Running Exit");
+		final DnsServer dns = server;
+		s.setHandlerFactory(() -> new Connection(dns));
+		setState("Running Enter");
+		try {
+			s.run();
+		} finally {
+			setState("Running Exit");
+		}
 	}
 
 	/** Acceptors never answer queries themselves (see Connection). */
@@ -252,9 +285,7 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 	}
 
 	/**
-	 * Write one length-prefixed DNS message (RFC 1035 4.2.2).
-	 * Messages over 65535 bytes are sent truncated (TC) instead of with a
-	 * corrupt 16 bit length.
+	 * Write one length-prefixed DNS message (RFC 1035 4.2.2) to a stream (clients, tests).
 	 */
 	static void writeMessage(OutputStream out, byte [] data) throws IOException {
 		byte [] sz = new byte[2];
@@ -264,84 +295,140 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 		out.flush();
 	}
 
-	/**
-	 * Serves one accepted TCP connection.
-	 */
-	static final class Connection extends DnsRequestProcessor implements Runnable {
-		private final Socket sock;
-		private final InetAddress client;
-		private final Semaphore slot;
+	/** The NIO server: counts rejected connections and sends them nothing. */
+	static final class TcpServer extends NioServer {
+		private final AtomicBoolean claimed = new AtomicBoolean();
 
-		Connection(DnsServer svr, Socket sock, Semaphore slot) {
-			this.server = svr;
-			this.sock = sock;
-			this.slot = slot;
-			this.client = sock.getInetAddress();
+		TcpServer() {
+			super(0, "DnsTcp");
 		}
 
-		public void run() {
-			openConnections.add(sock);
-			byte [] sz = new byte[2];
-			byte [] data = null;
-			ByteBuffer buf = null;
+		boolean claim() {
+			return claimed.compareAndSet(false, true);
+		}
+
+		@Override
+		protected void rejectBusy(SocketChannel sc) {
+			//  No busy message on the DNS port: the connection is just closed
+			rejected.incrementAndGet();
+		}
+	}
+
+	/**
+	 * Serves one TCP connection: its messages arrive one at a time, in order, on a
+	 * handler thread.
+	 */
+	static final class Connection extends DnsRequestProcessor implements INioHandler {
+		private volatile INioConnection conn;
+		private volatile InetAddress client;
+		//  Set after a malformed message: frames already read are not processed
+		private volatile boolean closing;
+		//  When a request was last answered: the reactor's idle check only sees socket I/O
+		private volatile long lastActivity = System.currentTimeMillis();
+
+		Connection(DnsServer svr) {
+			this.server = svr;
+		}
+
+		@Override
+		public void onConnect(INioConnection connection) {
+			conn = connection;
+			SocketAddress a = connection.getRemoteAddress();
+			client = a instanceof InetSocketAddress ? ((InetSocketAddress)a).getAddress() : null;
+			if( DnsServer.isDebug() ) {
+				log(() -> "New TCP Connection from "+client);
+			}
+			setState("Connected", client);
+		}
+
+		@Override
+		public void onMessage(INioConnection connection, java.nio.ByteBuffer frame) {
+			conn = connection;
+			if( closing ) {
+				return;
+			}
+			if( DnsServer.isShutdown() ) {
+				connection.close();
+				return;
+			}
+			if( frame.remaining() < 12 ) {
+				//  Smaller than a DNS header: framing is broken
+				connection.close();
+				return;
+			}
+			byte [] data = new byte[frame.remaining()];
+			frame.get(data);
+			ByteBuffer buf = new ByteBuffer(data);
 			try {
-				sock.setSoTimeout(idleTimeout);
-				sock.setTcpNoDelay(true);
-				InputStream in = sock.getInputStream();
+				if ( debug ) {
+					buf.dump();
+				}
+				Message msg = new Message(buf);
+				QueryData query = new QueryData(client,-1,msg);
+				query.setWire(data);
+				process(query);
+				lastActivity = System.currentTimeMillis();
+			} catch(DnsFormatException ex) {
+				// Malformed message: answer FORMERR and drop the connection
+				// (framing can't be trusted after a bad message).
 				if( DnsServer.isDebug() ) {
-					log(() -> "New TCP Connection from "+client);
+					log(() -> "Malformed TCP message from "+client+" "+ex.getMessage());
 				}
-
-				// Client may send multiple requests
-				boolean done = false;
-				while( !done && !DnsServer.isShutdown() ) {
-					try {
-						// 16bit size comes in first
-						Message.readArray(in,sz);
-						int len = Utility.makeShort(sz[0], sz[1]);
-						if( len < 12 ) {
-							//  Smaller than a DNS header: framing is broken
-							done = true;
-							continue;
-						}
-						data = new byte[len];
-						Message.readArray(in,data);
-						buf = new ByteBuffer(data);
-
-						if ( debug ) {
-							buf.dump();
-						}
-						Message msg = new Message(buf);
-						QueryData query = new QueryData(client,-1,msg);
-						query.setWire(data);
-						process(query);
-					} catch(DnsFormatException ex) {
-						// Malformed message: answer FORMERR and drop the connection
-						// (framing can't be trusted after a bad message).
-						if( DnsServer.isDebug() ) {
-							log(() -> "Malformed TCP message from "+client+" "+ex.getMessage());
-						}
-						sendFormatError(data);
-						done = true;
-					} catch(IOException ex) {
-						//  EOF, idle timeout or closed on shutdown
-						done=true;
-					}
-				}
+				closing = true;
+				connection.pauseReading();
+				sendFormatError(data);
+				connection.closeAfterFlush();
 			} catch(StackOverflowError ex) {
 				log(() -> "StackOverflowError processing TCP message from "+client);
-			} catch(Exception ex) {
+				connection.close();
+			} catch(RuntimeException ex) {
 				log("Unexpected exception in TCP connection from "+client,ex);
-				if( buf != null && UDPProsessor.dumpBuf != null ) {
+				if( UDPProsessor.dumpBuf != null ) {
 					ex.printStackTrace(UDPProsessor.dumpBuf);
 					UDPProsessor.dumpBuf.println("TCP Exception "+client);
 					buf.dump(UDPProsessor.dumpBuf);
 				}
-			} finally {
-				openConnections.remove(sock);
-				IoUtils.closeQuietly(sock);
-				slot.release();
+				connection.close();
 			}
+		}
+
+		/**
+		 * The idle check only sees socket I/O, so it may fire while a slow request
+		 * (recursion, an UPDATE, a zone transfer) is being answered; this call then runs
+		 * just after the answer was queued, before it is sent. Close only if the
+		 * connection really has been idle; if not, look again when it could be (the
+		 * reactor doesn't call onIdle again until the next read or write).
+		 */
+		@Override
+		public void onIdle(INioConnection connection) {
+			checkIdle(connection);
+		}
+
+		@Override
+		public void onDeadline(INioConnection connection) {
+			checkIdle(connection);
+		}
+
+		private void checkIdle(INioConnection connection) {
+			long last = Math.max(lastActivity, Math.max(connection.getLastReadTime(), connection.getLastWriteTime()));
+			long left = idleTimeout-(System.currentTimeMillis()-last);
+			if( left <= 0 ) {
+				connection.close();
+			} else {
+				connection.setDeadline(left);
+			}
+		}
+
+		@Override
+		public void onError(INioConnection connection, Throwable error) {
+			if( DnsServer.isDebug() ) {
+				log("TCP connection from "+client+" failed", error);
+			}
+		}
+
+		@Override
+		public void onClose(INioConnection connection) {
+			setState("Closed", client);
 		}
 
 		/**
@@ -349,32 +436,65 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 		 */
 		private void sendFormatError(byte [] data) {
 			byte [] reply = UDPProsessor.buildFormatError(data, data == null ? 0 : data.length);
-			if( reply == null ) {
-				return;
-			}
-			try {
-				writeMessage(sock.getOutputStream(), reply);
-			} catch(IOException ex) {
-				log("IOException sending FORMERR",ex);
+			if( reply != null ) {
+				write(reply);
 			}
 		}
 
 		public void sendResponse(Message msg) {
 			if( msg != null ) {
-				try {
-					Tsig.Session tsig = currentTsig;
-					byte [] wire = msg.toByteArray(MAX_TCP_MESSAGE - (tsig == null ? 0 : tsig.reserve()));
-					if( tsig != null ) {
-						wire = tsig.signResponse(wire);
-					}
-					writeMessage(sock.getOutputStream(), wire);
-					if( UDPProsessor.dumpBuf != null ) {
-						UDPProsessor.dumpBuf.println("TCP("+sock+")->"+msg.toSmallString());
-					}
-				} catch(IOException ex) {
-					log("IOException sending reply to "+client,ex);
+				Tsig.Session tsig = currentTsig;
+				byte [] wire = msg.toByteArray(MAX_TCP_MESSAGE - (tsig == null ? 0 : tsig.reserve()));
+				if( tsig != null ) {
+					wire = tsig.signResponse(wire);
+				}
+				if( write(wire) && UDPProsessor.dumpBuf != null ) {
+					UDPProsessor.dumpBuf.println("TCP("+client+")->"+msg.toSmallString());
 				}
 			}
+		}
+
+		/**
+		 * Queue one message. A client that doesn't read (a zone transfer to a slow or
+		 * stalled peer) makes the sender wait here; one that reads nothing for the idle
+		 * timeout is disconnected, so a handler thread isn't held for ever.
+		 * @return true if the message was queued
+		 */
+		private boolean write(byte [] wire) {
+			INioConnection c = conn;
+			if( c == null ) {
+				return false;
+			}
+			lastActivity = System.currentTimeMillis();
+			try {
+				c.write(LengthFieldFrameDecoder.frame(wire, 2));
+			} catch(IOException ex) {
+				//  closed by the client, the idle timeout or shutdown
+				return false;
+			}
+			long pending = c.getPendingWriteBytes();
+			long since = System.currentTimeMillis();
+			try {
+				while( pending > MAX_PENDING_WRITE && c.isOpen() ) {
+					Thread.sleep(2);
+					long now = c.getPendingWriteBytes();
+					if( now < pending ) {
+						since = System.currentTimeMillis();
+						lastActivity = since;
+					} else if( System.currentTimeMillis()-since > idleTimeout ) {
+						log(() -> "TCP client "+client+" stopped reading, closing");
+						c.close();
+						return false;
+					}
+					pending = now;
+				}
+			} catch(InterruptedException ex) {
+				//  shutdown
+				Thread.currentThread().interrupt();
+				c.close();
+				return false;
+			}
+			return true;
 		}
 	}
 }

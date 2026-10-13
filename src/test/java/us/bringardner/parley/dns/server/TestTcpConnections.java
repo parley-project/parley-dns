@@ -55,6 +55,8 @@ public class TestTcpConnections {
 
 	private static File dir;
 	private static DnsServer server;
+	//  ms each request is held up for (a slow recursion, UPDATE...)
+	private static volatile long slowRequest = 0;
 
 	@BeforeAll
 	public static void setup() throws IOException {
@@ -68,7 +70,21 @@ public class TestTcpConnections {
 					+"ns1\tIN\tA\t10.0.0.53\n"
 					+"www\tIN\tA\t10.0.0.80\n");
 		}
-		server = new DnsServer();
+		server = new DnsServer() {
+			@Override
+			public us.bringardner.parley.dns.Tsig.KeyRing getTsigKeys() {
+				//  called first thing for every request
+				long ms = slowRequest;
+				if( ms > 0 ) {
+					try {
+						Thread.sleep(ms);
+					} catch(InterruptedException ex) {
+						Thread.currentThread().interrupt();
+					}
+				}
+				return super.getTsigKeys();
+			}
+		};
 		server.addZone(new Zone(zone));
 		server.setRecursionAvailable(false);
 	}
@@ -87,7 +103,12 @@ public class TestTcpConnections {
 		final Thread acceptor;
 
 		Listener(int maxConnections, int idleTimeoutMs) throws IOException {
-			TCPProsessor.initTCPProsessor(0, 10, InetAddress.getLoopbackAddress(), 200, maxConnections, idleTimeoutMs);
+			this(maxConnections, idleTimeoutMs, TCPProsessor.DEFAULT_MAX_CONNECTIONS_PER_CLIENT);
+		}
+
+		Listener(int maxConnections, int idleTimeoutMs, int maxPerClient) throws IOException {
+			TCPProsessor.initTCPProsessor(0, 10, InetAddress.getLoopbackAddress(), 200, maxConnections, idleTimeoutMs,
+					maxPerClient, 1);
 			port = TCPProsessor.getServerSocket().getLocalPort();
 			acceptor = new Thread(new TCPProsessor(server,0),"TestTCPAcceptor");
 			acceptor.setDaemon(true);
@@ -244,10 +265,10 @@ public class TestTcpConnections {
 		s.close();
 	}
 
-	// ------------------------------------------------------------ pending (framework plan, chunks 1 and 3)
+	// ------------------------------------------------------------ round 5 #78, #72 (framework plan, chunk 3)
 
+	/** Round 5 #78: a message that has started must arrive within the idle timeout. */
 	@Test
-	@org.junit.jupiter.api.Disabled("Round 5 #78: chunks 1 and 3 (a deadline for the whole message)")
 	public void aClientSendingOneByteAtATimeLosesItsSlot() throws Exception {
 		try(Listener l = new Listener(1, 300)) {
 			try(Socket s = idleClient(l.port)) {
@@ -270,8 +291,8 @@ public class TestTcpConnections {
 		}
 	}
 
+	/** Round 5 #72: one client address can't take every slot. */
 	@Test
-	@org.junit.jupiter.api.Disabled("Round 5 #72: chunks 1 and 3 (a connection limit per client address)")
 	public void oneAddressCantTakeEverySlot() throws Exception {
 		InetAddress other = InetAddress.getByName("127.0.0.2");
 		try(Socket probe = new Socket()) {
@@ -280,9 +301,10 @@ public class TestTcpConnections {
 			//  macOS has only 127.0.0.1 on lo0 unless an alias is added
 			org.junit.jupiter.api.Assumptions.assumeTrue(false, "127.0.0.2 not available: "+ex);
 		}
-		try(Listener l = new Listener(8, 10000)) {
+		try(Listener l = new Listener(8, 10000, 4)) {
 			List<Socket> idle = new ArrayList<Socket>();
 			try {
+				//  only 4 of them are kept open
 				for(int i=0; i < 8; i++ ) {
 					idle.add(idleClient(l.port));
 				}
@@ -310,5 +332,146 @@ public class TestTcpConnections {
 				}
 			}
 		}
+	}
+
+	@Test
+	public void connectionsOverThePerClientLimitAreRejected() throws Exception {
+		try(Listener l = new Listener(8, 5000, 2)) {
+			assertEquals(2, TCPProsessor.getMaxConnectionsPerClient());
+			Socket a = idleClient(l.port);
+			Socket b = idleClient(l.port);
+			waitFor(() -> TCPProsessor.getActiveConnections() == 2, 3000);
+			long rejectedBefore = TCPProsessor.getRejected();
+			try(Socket c = idleClient(l.port)) {
+				assertTrue(closedByServer(c), "a third connection from the same address is closed at once");
+			}
+			assertEquals(rejectedBefore+1, TCPProsessor.getRejected());
+			a.close();
+			b.close();
+		}
+	}
+
+	@Test
+	public void aMalformedMessageGetsFormErrAndTheConnectionIsClosed() throws Exception {
+		try(Listener l = new Listener(8, 5000); Socket s = idleClient(l.port)) {
+			//  a header announcing a question that isn't there
+			byte [] bad = new byte[] {0x12, 0x34, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+			TCPProsessor.writeMessage(s.getOutputStream(), bad);
+			InputStream in = s.getInputStream();
+			byte [] sz = new byte[2];
+			Message.readArray(in, sz);
+			byte [] data = new byte[Utility.makeShort(sz[0],sz[1])];
+			Message.readArray(in, data);
+			assertEquals(0x12, data[0]);
+			assertEquals(0x34, data[1]);
+			assertEquals(1, data[3] & 0x0F, "RCODE FORMERR");
+			assertTrue(closedByServer(s), "then the connection is closed");
+		}
+	}
+
+	@Test
+	public void aMessageShorterThanAHeaderClosesTheConnection() throws Exception {
+		try(Listener l = new Listener(8, 5000); Socket s = idleClient(l.port)) {
+			TCPProsessor.writeMessage(s.getOutputStream(), new byte[] {1, 2, 3});
+			assertTrue(closedByServer(s));
+		}
+	}
+
+	@Test
+	public void aQueryLargerThanOneReadIsServed() throws Exception {
+		//  a message split over several TCP segments
+		try(Listener l = new Listener(8, 5000); Socket s = idleClient(l.port)) {
+			Message q = new Message();
+			q.setQuestion("www.tcp.test", DNS.A, DNS.IN);
+			q.setID(77);
+			byte [] b = q.toByteArray();
+			OutputStream out = s.getOutputStream();
+			out.write(new byte[] {(byte)(b.length >> 8)});
+			out.flush();
+			Thread.sleep(50);
+			out.write(new byte[] {(byte)b.length});
+			out.write(b, 0, 5);
+			out.flush();
+			Thread.sleep(50);
+			out.write(b, 5, b.length-5);
+			out.flush();
+			InputStream in = s.getInputStream();
+			byte [] sz = new byte[2];
+			Message.readArray(in, sz);
+			byte [] data = new byte[Utility.makeShort(sz[0],sz[1])];
+			Message.readArray(in, data);
+			Message r = new Message(new ByteBuffer(data));
+			assertEquals(77, r.getID());
+			assertEquals(1, r.getAnswerCount());
+		}
+	}
+
+	/** A request slower than the idle timeout still gets its answer (review of chunk 3). */
+	@Test
+	public void aRequestSlowerThanTheIdleTimeoutIsAnswered() throws Exception {
+		slowRequest = 1500;
+		try(Listener l = new Listener(8, 500)) {
+			Message r = query(l.port, "www.tcp.test");
+			assertEquals(1, r.getAnswerCount());
+		} finally {
+			slowRequest = 0;
+		}
+	}
+
+	/** After a slow request the connection is still closed once it really is idle. */
+	@Test
+	public void anIdleConnectionIsClosedAfterASlowRequest() throws Exception {
+		slowRequest = 1500;
+		try(Listener l = new Listener(8, 500); Socket s = idleClient(l.port)) {
+			Message q = new Message();
+			q.setQuestion("www.tcp.test", DNS.A, DNS.IN);
+			TCPProsessor.writeMessage(s.getOutputStream(), q.toByteArray());
+			InputStream in = s.getInputStream();
+			byte [] sz = new byte[2];
+			Message.readArray(in, sz);
+			byte [] data = new byte[Utility.makeShort(sz[0],sz[1])];
+			Message.readArray(in, data);
+			long start = System.currentTimeMillis();
+			assertTrue(closedByServer(s), "closed once idle");
+			long took = System.currentTimeMillis()-start;
+			assertTrue(took >= 300, "not before the idle timeout, took "+took);
+		} finally {
+			slowRequest = 0;
+		}
+	}
+
+	@Test
+	public void framesAfterAMalformedMessageAreIgnored() throws Exception {
+		try(Listener l = new Listener(8, 5000); Socket s = idleClient(l.port)) {
+			byte [] bad = new byte[] {0x12, 0x34, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+			Message q = new Message();
+			q.setQuestion("www.tcp.test", DNS.A, DNS.IN);
+			q.setID(99);
+			java.io.ByteArrayOutputStream both = new java.io.ByteArrayOutputStream();
+			TCPProsessor.writeMessage(both, bad);
+			TCPProsessor.writeMessage(both, q.toByteArray());
+			s.getOutputStream().write(both.toByteArray());
+			s.getOutputStream().flush();
+			InputStream in = s.getInputStream();
+			byte [] sz = new byte[2];
+			Message.readArray(in, sz);
+			byte [] data = new byte[Utility.makeShort(sz[0],sz[1])];
+			Message.readArray(in, data);
+			assertEquals(1, data[3] & 0x0F, "FORMERR");
+			assertTrue(closedByServer(s), "nothing more: the query after it isn't answered");
+		}
+	}
+
+	@Test
+	public void stopClosesTcp() throws Exception {
+		Listener l = new Listener(8, 30_000);
+		try(Socket s = idleClient(l.port)) {
+			waitFor(() -> TCPProsessor.getActiveConnections() == 1, 3000);
+			new DnsServer().stop();
+			assertTrue(closedByServer(s));
+		} finally {
+			l.close();
+		}
+		assertEquals(null, TCPProsessor.getServerSocket());
 	}
 }

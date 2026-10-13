@@ -227,12 +227,13 @@ A bind address of `localhost` means this host's own name (its network address), 
 | `JDns.udpPort` / `JDns.tcpPort` | `JDns.dnsPort` | Per-protocol port |
 | `JDns.udp.bindAddress` / `JDns.tcpBindAddress` | `JDns.bindAddress` | Per-protocol listen address |
 | `JDns.timeout` | 5000 | Socket timeout (ms) for both protocols |
-| `JDns.udpTimeout` / `JDns.tcpTimeout` | `JDns.timeout` | Per-protocol socket timeouts (ms); how often listeners check for shutdown |
+| `JDns.udpTimeout` / `JDns.tcpTimeout` | `JDns.timeout` | Per-protocol socket timeouts (ms); how often the UDP listeners check for shutdown (TCP: no longer used) |
 | `JDns.udpProcCount` | 10 | UDP listener threads |
-| `JDns.tcpProcCount` | 1 | TCP acceptor threads (connections are served by the pool below) |
+| `JDns.tcpProcCount` | 1 | TCP reactor threads, which read and write every connection (requests are answered on a pool of up to `JDns.tcpMaxConnections` threads) |
 | `JDns.tcpBacklog` | 10 | TCP listen backlog |
 | `JDns.tcpMaxConnections` | 64 | TCP connections served at once; more are closed immediately |
-| `JDns.tcpIdleTimeout` | 10000 | An idle TCP connection is closed after this many ms |
+| `JDns.tcpMaxConnectionsPerClient` | 8 | TCP connections from one client address; more are closed immediately (0: no limit) |
+| `JDns.tcpIdleTimeout` | 10000 | An idle TCP connection is closed after this many ms; a message that has started must also arrive within it |
 | `JDns.udpMaxResponse` | 512 | Largest UDP response (bytes) to clients without EDNS; bigger answers are truncated (TC) and clients retry over TCP |
 | `JDns.ednsUdpSize` | 1232 | Largest UDP response to EDNS clients (512–4096; the client's own size is used if smaller). Responses echo an OPT record; EDNS versions other than 0 get BADVERS |
 | `JDns.zoneCutReferrals` | true | Names at or below NS records below a zone's apex (a delegation) get a referral (NS + glue, not authoritative) instead of NXDOMAIN / an authoritative answer. Set false if your zones put NS records on ordinary hosts |
