@@ -1,5 +1,5 @@
 # Expected nsupdate output, recorded from ISC nsupdate 9.18.39 (Ubuntu 24.04) run against a
-# BjlDns server (upd.test.txt here; TSIG key upd.key; unsigned updates allowed from 127.0.0.1).
+# parley-dns server (upd.test.txt here; TSIG key upd.key; unsigned updates allowed from 127.0.0.1).
 # Each case: '=== name', 'args:' (tab separated), 'stdin:' (\n = new line, \t = tab), 'exit:', then
 # '--- stdout', '--- stderr' and '--- zone' (dig AXFR after the run, when the case changes the zone).
 # ${PORT} is the server's port, ${DIR} this directory, ${SCRIPT} script.txt with the port filled in, ${SINK} a UDP port that never answers, ${CLOSED} a closed port.

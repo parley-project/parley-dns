@@ -295,4 +295,31 @@ public class TestResolverQueue {
 			assertTrue(threads.get(0).join(2000), "and then the thread stops");
 		}
 	}
+
+	/** Round 4 #65: the answer to a TSIG-signed recursive query is signed. */
+	@Test
+	public void aSignedQueryGetsASignedAnswer() throws Exception {
+		ResolverThread.setMaxQueueAge(0);
+		us.bringardner.parley.dns.Tsig.KeyRing keys = us.bringardner.parley.dns.Tsig.KeyRing.parse("rk:hmac-sha256:"
+				+java.util.Base64.getEncoder().encodeToString(new byte[32]));
+		try(SlowUpstream up = new SlowUpstream(10); DatagramSocket client = new DatagramSocket(0, LOOPBACK)) {
+			useUpstream(up.port());
+			client.setSoTimeout(5000);
+			startThreads(1);
+			us.bringardner.parley.dns.Tsig.Session mine = us.bringardner.parley.dns.Tsig.Session.client(keys.get("rk"));
+			byte [] wire = mine.signRequest(request("signed.queue.test", 55).toByteArray());
+			QueryData q = new QueryData(LOOPBACK, client.getLocalPort(), new Message(new ByteBuffer(wire)));
+			q.setWire(wire);
+			us.bringardner.parley.dns.Tsig.Session server = us.bringardner.parley.dns.Tsig.Session.verifyRequest(keys, wire);
+			assertEquals(0, server.getError());
+			q.setTsigSession(server);
+			assertTrue(ResolverThread.addQuery(q));
+			byte [] buf = new byte[DNS.MAXUDPLEN];
+			DatagramPacket p = new DatagramPacket(buf, buf.length);
+			client.receive(p);
+			byte [] answer = java.util.Arrays.copyOf(buf, p.getLength());
+			mine.verifyResponse(answer);
+			assertEquals(1, new Message(new ByteBuffer(answer)).getAnswerCount());
+		}
+	}
 }

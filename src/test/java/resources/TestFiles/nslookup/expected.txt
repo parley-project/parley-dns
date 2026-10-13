@@ -1,5 +1,5 @@
 # Expected nslookup output, recorded from ISC nslookup 9.18.39 (Ubuntu 24.04) run against
-# BjlDns serving nsl.test.txt and the two reverse zones in this directory (TestNsLookupOffline).
+# parley-dns serving nsl.test.txt and the two reverse zones in this directory (TestNsLookupOffline).
 # Each case: '=== name', 'args:' (after -port=PORT), 'stdin:' (\n = new line), 'exit:', '---', then the output.
 # ${PORT} stands for the server's port.
 === defaultLookup

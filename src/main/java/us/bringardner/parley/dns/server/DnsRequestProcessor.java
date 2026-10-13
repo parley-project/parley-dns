@@ -88,6 +88,7 @@ public abstract class DnsRequestProcessor  extends DnsBaseClass implements DNS
 			return;
 		}
 		query.setTsigKey(tsig.getKey().getName());
+		query.setTsigSession(tsig);
 	}
 	try {
 		answer(query, edns);

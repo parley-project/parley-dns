@@ -95,7 +95,7 @@ import us.bringardner.parley.dns.server.Zone;
  */
 public class NsUpdate extends Utility {
 
-	public static final String VERSION = "BjlDns";
+	public static final String VERSION = "parley-dns";
 	/** The session key named writes for "nsupdate -l". */
 	public static final String SESSION_KEYFILE = "/var/run/named/session.key";
 

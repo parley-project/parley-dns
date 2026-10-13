@@ -112,7 +112,7 @@ public class NsLookup extends Utility {
 	static final int UDP_TIMEOUT = 5;
 	static final int TCP_TIMEOUT = 10;
 
-	static final String VERSION = "nslookup BjlDns";
+	static final String VERSION = "nslookup parley-dns";
 
 	/** Text before the rdata, per type (BIND nslookup, types 0-41). */
 	private static final String [] RTYPETEXT = {
