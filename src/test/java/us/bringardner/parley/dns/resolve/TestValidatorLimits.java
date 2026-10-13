@@ -133,11 +133,26 @@ public class TestValidatorLimits {
 	}
 
 	@Test
+	public void deepNamesStaySecure() throws Exception {
+		//  An ip6.arpa name has 34 labels; each step down costs signature checks.
+		//  With a total of 64 such names came out BOGUS on a cold cache.
+		for(String zone : new String[] {"sec.test", "n3.test"}) {
+			StringBuilder sb = new StringBuilder();
+			for(int i=0; i < 34; i++ ) {
+				sb.append(Integer.toHexString(i%16)).append('.');
+			}
+			Validator v = validator();
+			Validator.Result r = check(v, sb+zone, DNS.PTR);
+			assertEquals(Validator.Status.SECURE, r.status, zone+": "+r);
+		}
+	}
+
+	@Test
 	public void theBudgetIsPerValidation() throws Exception {
 		Validator v = validator();
-		//  many ordinary validations in a row on one thread never run out
-		for(int i=0; i < 3*Validator.MAX_VERIFICATIONS; i++ ) {
-			v.clear();
+		//  each validation (with the zone keys cached) makes one check: together
+		//  they make more than one validation may, on one thread
+		for(int i=0; i < Validator.MAX_VERIFICATIONS+50; i++ ) {
 			assertEquals(Validator.Status.SECURE, check(v, "www.sec.test", DNS.A).status, "validation "+i);
 		}
 	}

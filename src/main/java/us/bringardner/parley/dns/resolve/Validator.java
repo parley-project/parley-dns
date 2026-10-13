@@ -128,10 +128,14 @@ public final class Validator extends DnsBaseClass {
 	 * make, and how many of them may fail. Each RRSIG used to be tried against
 	 * every key with its tag and algorithm, for every RRset, DS and denial proof,
 	 * with no limit: a zone with many colliding keys and signatures cost minutes
-	 * of CPU per query. A legitimate answer needs a handful (about two per zone
-	 * on the way down, one per RRset). Over either limit the answer is BOGUS.
+	 * of CPU per query. Over either limit the answer is BOGUS.
+	 * <p>
+	 * The failure limit is what stops KeyTrap: a check that succeeds ends the
+	 * search for its RRset, so only failures multiply. The total limit bounds
+	 * honest work, which grows with the name: walking down a name costs about
+	 * two checks per label (a DS and its proof), and an ip6.arpa name has 34.
 	 */
-	static final int MAX_VERIFICATIONS = 64;
+	static final int MAX_VERIFICATIONS = 512;
 	static final int MAX_FAILED_VERIFICATIONS = 16;
 
 	/** The signature checks spent by the validation running on this thread, and what they proved. */
