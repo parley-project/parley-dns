@@ -29,6 +29,8 @@ import java.util.SortedSet;
 import java.util.TreeSet;
 import us.bringardner.parley.core.util.Hex;
 
+import us.bringardner.parley.core.util.Base32Hex;
+
 /**
  * The NSEC3 record (RFC 5155 3): like NSEC, but the chain is made of hashed
  * names, so it can't be walked to list the zone. The owner is the base32hex

@@ -57,7 +57,7 @@ public class DnsAdminClient implements DnsAdminConstants {
 
 	public static void main(String args[]) throws IOException  {
 
-		String name = us.bringardner.parley.dns.RenamedProperty.get(DnsServer.PROP_ADMIN_HOST, "name");
+		String name = us.bringardner.parley.core.util.RenamedProperty.get(DnsServer.PROP_ADMIN_HOST, "name");
 		if( args.length>0) {
 			name = args[0];
 		}
@@ -69,7 +69,7 @@ public class DnsAdminClient implements DnsAdminConstants {
 		}
 
 		int port = DnsServer.getAdminPort();
-		String tmp = us.bringardner.parley.dns.RenamedProperty.get(DnsServer.PROP_ADMIN_PORT, "port");
+		String tmp = us.bringardner.parley.core.util.RenamedProperty.get(DnsServer.PROP_ADMIN_PORT, "port");
 		if( tmp == null && args.length>1) {
 			tmp = args[1];
 		}
