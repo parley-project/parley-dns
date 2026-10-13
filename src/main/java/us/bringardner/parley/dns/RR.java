@@ -182,6 +182,9 @@ public  class RR extends Section
 	//  Read all the bytes
 	public  void readRdata(ByteBuffer in) {
 		rdlength = in.nextShort();
+		if( rdlength > in.remaining() ) {
+			throw new DnsFormatException("RDLENGTH "+rdlength+" of "+getName()+" runs past the end of the message ("+in.remaining()+" bytes left)");
+		}
 		rdata = new byte [rdlength];
 		source = in;
 		sourcePos = in.getReadPos();

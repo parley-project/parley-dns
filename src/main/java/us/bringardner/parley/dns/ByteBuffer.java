@@ -492,9 +492,16 @@ ARCOUNT         an unsigned 16 bit integer specifying the number of
 		Get the next 8 bit byte from the ByteBuffer, incrementing the read position
 	 **/
 	public int next() {
-		int ret = buf[rpos++]&0xff;
+		if( rpos >= buf.length || rpos < 0 ) {
+			//  A truncated or malformed message: FORMERR, not ArrayIndexOutOfBounds
+			throw new DnsFormatException("Message ends at offset "+buf.length+", read past it at "+rpos);
+		}
+		return buf[rpos++]&0xff;
+	}
 
-		return ret;
+	/** @return the number of bytes left to read */
+	public int remaining() {
+		return Math.max(0, buf.length-rpos);
 	}	
 	
 	/**
