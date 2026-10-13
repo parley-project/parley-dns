@@ -862,7 +862,7 @@ public final class Validator extends DnsBaseClass {
 			for(RR rr : ds) {
 				list.add((Ds)rr);
 			}
-			return keysFromDs(name, list, Math.min(zone.expires, now+Math.min(MAX_TTL, ttl(ds))));
+			return keysFromDs(name, list, Math.min(Math.min(zone.expires, now+Math.min(MAX_TTL, ttl(ds))), sigLimit(sig, now)));
 		}
 		int rcode = m.getResponseCode();
 		if( rcode != DNS.NOERROR && rcode != DNS.NAME_ERROR ) {
@@ -990,13 +990,22 @@ public final class Validator extends DnsBaseClass {
 					continue;
 				}
 				ZoneKeys single = new ZoneKeys(zone, Status.SECURE, Collections.singletonList(k), 0, null);
-				if( verifySet(set, sigs, single) != null ) {
-					long exp = Math.min(maxExpires, now+Math.min(MAX_TTL, ttl(set)));
+				Rrsig good = verifySet(set, sigs, single);
+				if( good != null ) {
+					long exp = Math.min(Math.min(maxExpires, now+Math.min(MAX_TTL, ttl(set))), sigLimit(good, now));
 					return new ZoneKeys(zone, Status.SECURE, keys, exp, null);
 				}
 			}
 		}
 		return bogus(zone, "the DNSKEY set of "+zone+" is not signed by a key its DS points to", now);
+	}
+
+	/**
+	 * Round 5 #92: how long data validated with this signature may be kept (seconds
+	 * since 1970): its original TTL from now, and its expiration (RFC 4035 5.3.3).
+	 */
+	private static long sigLimit(Rrsig sig, long now) {
+		return Math.min(now+(sig.getOrigTtl() & 0xffffffffL), sig.getExpiration());
 	}
 
 	private static boolean digestMatches(String zone, Dnskey k, Ds ds) {

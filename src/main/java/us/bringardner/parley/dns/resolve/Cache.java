@@ -108,7 +108,21 @@ public class Cache extends DnsBaseClass
 
 		/** The same entry with a validation result. */
 		Entry withResult(Validator.Result r) {
-			return new Entry(header, question, answer, authority, additional, storedAt, expiresAt, r);
+			long exp = expiresAt;
+			if( r != null && r.status == Validator.Status.SECURE ) {
+				//  Round 5 #92: a secure answer is kept no longer than its signatures allow,
+				//  their original TTL and their expiration (RFC 4035 5.3.3)
+				for(List<RR> section : java.util.Arrays.asList(answer, authority)) {
+					for(RR rr : section) {
+						if( rr instanceof us.bringardner.parley.dns.Rrsig ) {
+							us.bringardner.parley.dns.Rrsig sig = (us.bringardner.parley.dns.Rrsig)rr;
+							exp = Math.min(exp, storedAt+(sig.getOrigTtl() & 0xffffffffL)*1000L);
+							exp = Math.min(exp, sig.getExpiration()*1000L);
+						}
+					}
+				}
+			}
+			return new Entry(header, question, answer, authority, additional, storedAt, exp, r);
 		}
 
 		boolean isExpired(long now) {
@@ -373,23 +387,26 @@ public class Cache extends DnsBaseClass
 	 */
 	private static Message toMessage(Entry e, Section asked, long now) {
 		long elapsedSec = (now - e.storedAt) / 1000L;
+		//  no TTL beyond the entry's own expiry (e.g. its signatures', round 5 #92)
+		long left = e.validated != null && e.validated.status == Validator.Status.SECURE
+				? Math.max(0, (e.expiresAt - now) / 1000L) : Long.MAX_VALUE;
 		Message ret = new Message();
 		ret.setHeader(e.header.copy());
 		ret.setQuestion(new Section(asked));
 		for(RR rr : e.answer) {
-			RR c = copyWithRemainingTtl(rr, elapsedSec, now);
+			RR c = copyWithRemainingTtl(rr, elapsedSec, left, now);
 			if( c != null ) {
 				ret.addAnswer(c);
 			}
 		}
 		for(RR rr : e.authority) {
-			RR c = copyWithRemainingTtl(rr, elapsedSec, now);
+			RR c = copyWithRemainingTtl(rr, elapsedSec, left, now);
 			if( c != null ) {
 				ret.addAuthority(c);
 			}
 		}
 		for(RR rr : e.additional) {
-			RR c = copyWithRemainingTtl(rr, elapsedSec, now);
+			RR c = copyWithRemainingTtl(rr, elapsedSec, left, now);
 			if( c != null ) {
 				ret.addAdditional(c);
 			}
@@ -398,8 +415,8 @@ public class Cache extends DnsBaseClass
 	}
 
 	/** @return a copy with TTL reduced by elapsedSec, or null if that record has expired. */
-	private static RR copyWithRemainingTtl(RR rr, long elapsedSec, long now) {
-		long remaining = ttlOf(rr) - elapsedSec;
+	private static RR copyWithRemainingTtl(RR rr, long elapsedSec, long left, long now) {
+		long remaining = Math.min(ttlOf(rr) - elapsedSec, Math.max(1, left));
 		if( remaining <= 0 ) {
 			return null;
 		}
