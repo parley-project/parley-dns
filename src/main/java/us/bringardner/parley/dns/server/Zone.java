@@ -1345,6 +1345,57 @@ public class Zone implements DNS {
 		}
 	}
 
+	/**
+	 * Round 5 #74: whether a journal entry reads back, through the same code
+	 * {@link #replayJournal()} uses, as what it was written for. Names and
+	 * strings from the wire can hold spaces, quotes or line breaks; written as
+	 * they are, such an entry stopped the zone loading after a restart, or added
+	 * records that were never in the update. An entry that doesn't read back
+	 * must not be written.
+	 *
+	 * @param entry the journal line ("add ...", "del ...", "delset ...", ...)
+	 * @param rr for "add" and "del", the record the line was made from; null otherwise
+	 * @param name the owner name the entry is for
+	 */
+	boolean journalEntryReadsBack(String entry, RR rr, String name) {
+		if( entry.indexOf('\n') >= 0 || entry.indexOf('\r') >= 0 ) {
+			return false;
+		}
+		try {
+			List<String> t = parseLine(null, entry.trim());
+			if( t.isEmpty() ) {
+				return false;
+			}
+			String op = t.get(0);
+			List<String> args = new ArrayList<String>(t.subList(1, t.size()));
+			if( args.isEmpty() || !stripDot(args.get(0)).equalsIgnoreCase(stripDot(name)) ) {
+				return false;
+			}
+			switch(op) {
+			case "add":
+			case "del": {
+				if( op.equals("del") ) {
+					args.add(1, "0");
+				}
+				RR back = buildRR(normalize(args));
+				return back.getType() == rr.getType()
+						&& stripDot(back.getName()).equalsIgnoreCase(stripDot(rr.getName()))
+						&& recordKey(back).equals(recordKey(rr))
+						&& (op.equals("del") || back.getTTL() == rr.getTTL());
+			}
+			case "delset":
+				return args.size() == 2;
+			case "delname":
+			case "delname-keepns":
+				return args.size() == 1;
+			default:
+				return false;
+			}
+		} catch(RuntimeException e) {
+			return false;
+		}
+	}
+
 	private void applyJournalLine(String op, List<String> args) {
 		switch(op) {
 		case "serial": {

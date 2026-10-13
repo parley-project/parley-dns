@@ -434,4 +434,65 @@ public class TestDynamicUpdate {
 			throw new AssertionError(e);
 		}
 	}
+
+	// ------------------------------------------------------------ round 5 #74: journal text
+
+	private String journalText() throws IOException {
+		File j = new File(dir, "up.test.txt.jnl");
+		return j.exists() ? new String(Files.readAllBytes(j.toPath()), StandardCharsets.UTF_8) : "";
+	}
+
+	@Test
+	public void nameWithSpaceIsRefusedAndTheZoneStillLoads() throws Exception {
+		long before = ZoneUpdater.getJournalRefusals();
+		String journal = journalText();
+		//  used to get NOERROR, and the journal then stopped the zone (and the server) loading
+		assertEquals(DNS.REFUSED, send(new Update().add(a("my host.up.test", "10.1.1.2"))));
+		assertEquals(before+1, ZoneUpdater.getJournalRefusals());
+		assertEquals(journal, journalText(), "nothing written");
+		assertTrue(zone().exactRecords("my host.up.test").isEmpty(), "nothing applied");
+		new Zone(zoneFile);
+	}
+
+	@Test
+	public void lineBreakInANameCantInjectRecords() throws Exception {
+		String owner = "inj 300 IN TXT x\nadd injected.up.test. 300 IN A 6.6.6.6\n;c.up.test";
+		assertEquals(DNS.REFUSED, send(new Update().add(a(owner, "10.1.1.1"))));
+		assertFalse(journalText().contains("injected"), journalText());
+		Zone again = new Zone(zoneFile);
+		assertTrue(again.exactRecords("injected.up.test").isEmpty(), "the injected record used to appear after a restart");
+	}
+
+	@Test
+	public void oneBadNameRefusesTheWholeUpdate() throws Exception {
+		assertEquals(DNS.REFUSED, send(new Update().add(a("good.up.test", "10.1.1.3")).add(a("bad name.up.test", "10.1.1.4"))));
+		assertTrue(zone().exactRecords("good.up.test").isEmpty(), "all or nothing");
+	}
+
+	@Test
+	public void lineBreakInATargetNameIsRefused() throws Exception {
+		Cname c = new Cname("alias.up.test");
+		c.setCname("x\nadd evil.up.test. 300 IN A 6.6.6.6\n;.up.test");
+		c.setTTL(300);
+		assertEquals(DNS.REFUSED, send(new Update().add(c)));
+		assertTrue(new Zone(zoneFile).exactRecords("evil.up.test").isEmpty());
+	}
+
+	@Test
+	public void quotesAndLineBreaksInTxtAreEscapedNotRefused() throws Exception {
+		us.bringardner.parley.dns.Txt txt = new us.bringardner.parley.dns.Txt("q.up.test");
+		txt.setText("say \"hi\"\nadd evil.up.test. 300 IN A 6.6.6.6");
+		txt.setTTL(300);
+		assertEquals(DNS.NOERROR, send(new Update().add(txt)));
+		Zone again = new Zone(zoneFile);
+		assertEquals("say \"hi\"\nadd evil.up.test. 300 IN A 6.6.6.6",
+				((us.bringardner.parley.dns.Txt)again.exactRecords("q.up.test").get(0)).getText());
+		assertTrue(again.exactRecords("evil.up.test").isEmpty());
+	}
+
+	@Test
+	public void ordinaryNamesStillWork() throws Exception {
+		assertEquals(DNS.NOERROR, send(new Update().add(a("_dmarc-x.host-1.up.test", "10.1.1.5"))));
+		assertEquals(1, new Zone(zoneFile).exactRecords("_dmarc-x.host-1.up.test").size());
+	}
 }
