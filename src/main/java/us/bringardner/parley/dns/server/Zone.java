@@ -315,6 +315,19 @@ public class Zone implements DNS {
 			break;
 		}
 
+		case SSHFP: {
+			//  name TTL IN SSHFP algorithm fptype fingerprint (hex, may be split)
+			if( list.size() < 6 ) {
+				throw new IllegalArgumentException("SSHFP needs algorithm, fingerprint type and fingerprint");
+			}
+			us.bringardner.parley.dns.Sshfp fp = new us.bringardner.parley.dns.Sshfp(rrName,dnsClass);
+			fp.setAlgorithm(Integer.parseInt((String)list.get(3)));
+			fp.setFingerprintType(Integer.parseInt((String)list.get(4)));
+			fp.setFingerprint(String.join("", list.subList(5, list.size())));
+			rr = fp;
+			break;
+		}
+
 		case DS: {
 			//  name TTL IN DS keytag algorithm digesttype digest (the digest may be split)
 			if( list.size() < 7 ) {
@@ -1437,7 +1450,7 @@ public class Zone implements DNS {
 	public static boolean isUpdatableType(int type) {
 		switch(type) {
 		case A: case AAAA: case NS: case CNAME: case PTR: case MX: case TXT: case SPF:
-		case HINFO: case SRV: case CAA: case SVCB: case HTTPS: case DS:
+		case HINFO: case SRV: case CAA: case SVCB: case HTTPS: case DS: case SSHFP:
 			return true;
 		default:
 			return false;

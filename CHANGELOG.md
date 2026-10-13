@@ -74,6 +74,8 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
   - Resolver threads are virtual threads on Java 21+ (`JDns.resolverVirtualThreads`, default true).
   - Upstream address ranking and hold-off moved to parley-net's `UpstreamHealth`; `ServerA` keeps its
     settings and methods.
+- SSHFP (RFC 4255, 6594): the `Sshfp` record (zone files, UPDATE, wire), `SshfpVerifier` to check an SSH
+  host key against validated SSHFP records, and `SshfpTool` to print the records for host keys.
 - `Base32Hex` and `RenamedProperty` moved to parley-core (`us.bringardner.parley.core.util`); a
   deprecated property name is now logged as a warning rather than an error.
 

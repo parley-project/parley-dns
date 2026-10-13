@@ -270,4 +270,16 @@ public class TestValidatingResolver {
 		assertEquals(Validator.Status.SECURE, a.result.status);
 		assertEquals(1, a.msg.getAnswerCount() - count(a.msg, DNS.RRSIG));
 	}
+
+	/** Chunk 8: SSHFP records checked through the validating resolver. */
+	@Test
+	public void sshfpCountsOnlyWhenValidated() {
+		assertEquals(SshfpVerifier.Result.MATCH, SshfpVerifier.verify("ssh.sec.test", TestSshfp.ED25519));
+		assertEquals(SshfpVerifier.Result.MISMATCH, SshfpVerifier.verify("ssh.sec.test",
+				"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAEBAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f"));
+		assertEquals(SshfpVerifier.Result.NO_RECORDS, SshfpVerifier.verify("www.sec.test", TestSshfp.ED25519), "signed NODATA");
+		assertEquals(SshfpVerifier.Result.NO_RECORDS, SshfpVerifier.verify("nothing.sec.test", TestSshfp.ED25519), "signed NXDOMAIN");
+		assertEquals(SshfpVerifier.Result.INSECURE, SshfpVerifier.verify("ssh.insecure.test", TestSshfp.ED25519), "unsigned zone");
+		assertEquals(SshfpVerifier.Result.INSECURE, SshfpVerifier.verify("sshout.sec.test", TestSshfp.ED25519), "a CNAME into an unsigned zone");
+	}
 }
