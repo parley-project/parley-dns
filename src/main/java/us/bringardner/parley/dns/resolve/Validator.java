@@ -86,7 +86,8 @@ public final class Validator extends DnsBaseClass {
 		public final String why;
 		/**
 		 * For SECURE: the RRsets of the answer and authority sections whose
-		 * signatures were checked ({@link #setKey(RR)}). Only these may go out
+		 * signatures were checked, by section and record ({@link #recordKey}).
+		 * Only these may go out
 		 * under the AD bit (round 5 #83).
 		 */
 		public final java.util.Set<String> validated;
@@ -147,28 +148,33 @@ public final class Validator extends DnsBaseClass {
 		final java.util.Set<String> validated = new java.util.HashSet<String>();
 	}
 
-	/** Note that an RRset of the message being validated is proven. */
-	private void proven(List<RR> set) {
+	private static final char ANSWER = 'A';
+	private static final char AUTHORITY = 'U';
+
+	/**
+	 * Note that an RRset of the message being validated is proven.
+	 * @param section ANSWER or AUTHORITY: where in the message the set is
+	 */
+	private void proven(List<RR> set, char section) {
 		Budget b = budget.get();
 		if( b != null ) {
 			for(RR rr : set) {
-				b.validated.add(setKey(rr));
+				b.validated.add(recordKey(section, rr));
+				b.validated.add(section+"|"+setKey(rr));
 			}
 		}
 	}
 
-	/**
-	 * The key of the RRset a record belongs to, for {@link Result#validated}:
-	 * owner and type; for a CNAME also the target (a second, unsigned CNAME
-	 * at the same name is a different "set"); an RRSIG belongs to what it covers.
-	 */
+	/** A record by section, owner, type and data: an RRset's members. */
+	static String recordKey(char section, RR rr) {
+		return section+"|"+setKey(rr)+"|"+rr.getRdataAsString();
+	}
+
+	/** The RRset a record belongs to (owner and type); an RRSIG belongs to what it covers. */
 	static String setKey(RR rr) {
 		String owner = Canonical.key(rr.getName());
 		if( rr instanceof Rrsig ) {
 			return owner+"|"+((Rrsig)rr).getTypeCovered();
-		}
-		if( rr.getType() == DNS.CNAME ) {
-			return owner+"|"+DNS.CNAME+"|"+Canonical.key(((Cname)rr).getCname());
 		}
 		return owner+"|"+rr.getType();
 	}
@@ -184,20 +190,19 @@ public final class Validator extends DnsBaseClass {
 		if( m == null || r == null || r.status != Status.SECURE ) {
 			return;
 		}
-		for(List<RR> section : Arrays.asList(m.getAnswer(), m.getAuthority())) {
-			section.removeIf(rr -> {
-				if( rr instanceof Rrsig && ((Rrsig)rr).getTypeCovered() == DNS.CNAME ) {
-					String prefix = Canonical.key(rr.getName())+"|"+DNS.CNAME+"|";
-					for(String k : r.validated) {
-						if( k.startsWith(prefix) ) {
-							return false;
-						}
-					}
-					return true;
-				}
-				return !r.validated.contains(setKey(rr));
-			});
-		}
+		strip(m.getAnswer(), ANSWER, r.validated);
+		strip(m.getAuthority(), AUTHORITY, r.validated);
+	}
+
+	/**
+	 * Keep the records validated in this section (same owner, type and data,
+	 * so a record added next to a validated one goes), and the RRSIGs of the
+	 * RRsets validated in this section.
+	 */
+	private static void strip(List<RR> section, char where, java.util.Set<String> validated) {
+		section.removeIf(rr -> rr instanceof Rrsig
+				? !validated.contains(where+"|"+setKey(rr))
+				: !validated.contains(recordKey(where, rr)));
 	}
 
 	private final ThreadLocal<Budget> budget = new ThreadLocal<Budget>();
@@ -447,7 +452,7 @@ public final class Validator extends DnsBaseClass {
 		if( good == null ) {
 			return new Result(Status.BOGUS, "no valid signature for "+owner+" "+typeName(type)+" by "+zk.zone);
 		}
-		proven(set);
+		proven(set, ANSWER);
 		int labels = Canonical.labelCount(owner);
 		if( good.getLabels() < labels ) {
 			//  A wildcard answer: prove the name itself does not exist
@@ -639,7 +644,7 @@ public final class Validator extends DnsBaseClass {
 				continue;
 			}
 			if( answer ) {
-				proven(set);
+				proven(set, AUTHORITY);
 			}
 			if( t == DNS.NSEC ) {
 				d.nsec.add((Nsec)set.get(0));
@@ -671,7 +676,7 @@ public final class Validator extends DnsBaseClass {
 			}
 		}
 		if( !soa.isEmpty() && verifySet(soa, sigsFor(m, zk.zone, DNS.SOA), zk) != null ) {
-			proven(soa);
+			proven(soa, AUTHORITY);
 		}
 		Denial d = denial(m, zk, true);
 		if( d.nsec3 != null ) {

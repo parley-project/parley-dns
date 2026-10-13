@@ -122,6 +122,45 @@ public class TestValidatedOnly {
 	}
 
 	@Test
+	public void aRecordLikeAValidatedOneInAnotherSectionIsRemoved() {
+		//  Same owner and type as the validated answer, but in the authority section
+		tamper = m -> {
+			Section q = m.getFirstQuestion();
+			if( q != null && q.getName().equalsIgnoreCase("www.sec.test") && q.getType() == DNS.A ) {
+				A evil = new A("www.sec.test", DNS.IN);
+				evil.setTTL(86400);
+				evil.setAddress("6.6.6.6");
+				m.addAuthority(evil);
+			}
+			return m;
+		};
+		Message m = answer("www.sec.test", DNS.A, Validator.Status.SECURE);
+		assertTrue(m.getHeader().getAD());
+		assertFalse(has(m.getAuthority(), "www.sec.test", DNS.A), "the extra A record in the authority section went out under AD");
+		assertTrue(has(m.getAnswer(), "www.sec.test", DNS.A));
+	}
+
+	@Test
+	public void aForgedSoaInTheAnswerSectionIsRemoved() {
+		tamper = m -> {
+			Section q = m.getFirstQuestion();
+			if( q != null && q.getName().equalsIgnoreCase("nope.sec.test") && q.getType() == DNS.A ) {
+				for(RR rr : new java.util.ArrayList<RR>(m.getAuthority())) {
+					if( rr.getType() == DNS.SOA ) {
+						RR copy = rr.copy();
+						copy.setTTL(999999);
+						m.addAnswer(copy);
+					}
+				}
+			}
+			return m;
+		};
+		Message m = answer("nope.sec.test", DNS.A, Validator.Status.SECURE);
+		assertFalse(has(m.getAnswer(), "sec.test", DNS.SOA), "only the authority section's SOA was validated");
+		assertTrue(has(m.getAuthority(), "sec.test", DNS.SOA));
+	}
+
+	@Test
 	public void aCnameChainIsKept() {
 		Message m = answer("alias.sec.test", DNS.A, Validator.Status.SECURE);
 		assertTrue(m.getHeader().getAD());
