@@ -112,6 +112,19 @@ public String getTsigKey() {
 public void setTsigKey(String tsigKey) {
 	this.tsigKey = tsigKey;
 }
+
+//  The TSIG session of a signed request: the response is signed with it, also when a
+//  resolver thread sends it later (round 4 #65)
+private volatile us.bringardner.parley.dns.Tsig.Session tsigSession;
+
+/** @return the TSIG session of a signed request, null if it wasn't signed */
+public us.bringardner.parley.dns.Tsig.Session getTsigSession() {
+	return tsigSession;
+}
+
+public void setTsigSession(us.bringardner.parley.dns.Tsig.Session session) {
+	this.tsigSession = session;
+}
 /**
  * Insert the method's description here.
  * Creation date: (10/16/2003 7:29:26 AM)

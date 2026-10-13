@@ -530,7 +530,13 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 			//  ending mid-record) and set TC on the shared message.
 			//  EDNS: drop an upstream OPT, echo ours if the client sent one
 			us.bringardner.parley.dns.Edns.applyToResponse(msg, query.getEdns());
-			byte [] data = msg.toByteArray(us.bringardner.parley.dns.server.UDPProsessor.udpLimit(query.getEdns()));
+			//  Round 4 #65: a signed request gets a signed response, also from here
+			us.bringardner.parley.dns.Tsig.Session tsig = query.getTsigSession();
+			int limit = us.bringardner.parley.dns.server.UDPProsessor.udpLimit(query.getEdns());
+			byte [] data = msg.toByteArray(limit - (tsig == null ? 0 : tsig.reserve()));
+			if( tsig != null ) {
+				data = tsig.signResponse(data);
+			}
 			int dataSize = data.length;
 
 			setState("SendResponse getPacket");
