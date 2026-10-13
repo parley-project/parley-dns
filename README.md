@@ -278,8 +278,6 @@ A bind address of `localhost` means this host's own name (its network address), 
 | `JDns.jdbcClass` | none | JDBC driver class to load (not needed for JDBC 4 drivers on the class path) |
 | `JDns.jdbcUser` / `JDns.jdbcPassword` | none | Database login |
 
-The standalone `DynamicDns` class uses the same four `JDns.jdbc*` properties.
-
 ### Zone transfer, TSIG, dynamic update
 
 | Property | Default | Meaning |
@@ -320,4 +318,3 @@ These were renamed so all names start with `JDns.`. The old names still work but
 | `TCPProcCount` | `JDns.tcpProcCount` |
 | `Resolver.maxBacklog` | `JDns.resolverMaxBacklog` |
 | `name`, `port` (DnsAdminClient) | `JDns.adminHost`, `JDns.adminPort` |
-| `DnsDriver`, `DynUrl`, `DynUser`, `DynPassword` (DynamicDns) | `JDns.jdbcClass`, `JDns.jdbcURL`, `JDns.jdbcUser`, `JDns.jdbcPassword` |
