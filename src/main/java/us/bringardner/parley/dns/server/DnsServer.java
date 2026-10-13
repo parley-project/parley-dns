@@ -35,7 +35,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.net.InetAddress;
-import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.sql.Connection;
@@ -114,6 +113,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public static final String PROP_TCP_MAX_CONNECTIONS = "JDns.tcpMaxConnections";
 	/** An idle TCP connection is closed after this many ms (default 10000). */
 	public static final String PROP_TCP_IDLE_TIMEOUT = "JDns.tcpIdleTimeout";
+	/** Most TCP connections from one client address (default 8, 0 for no limit). */
+	public static final String PROP_TCP_MAX_CONNECTIONS_PER_CLIENT = "JDns.tcpMaxConnectionsPerClient";
 	/** Address the admin port listens on. Default: loopback only. Use 0.0.0.0 for all interfaces. */
 	public static final String PROP_ADMIN_BIND_ADDRESS = "JDns.adminBindAddress";
 	public static final String PROP_JDBC_URL = "JDns.jdbcURL";
@@ -194,7 +195,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	private static final int POS_NAME = 4;
 	/** UDP listener threads (was UDPProcCount, still read). */
 	public static final String PROP_UDP_PROC_COUNT = "JDns.udpProcCount";
-	/** TCP acceptor threads (was TCPProcCount, still read). */
+	/** TCP reactor threads, which read and write the connections (was TCPProcCount, still read). */
 	public static final String PROP_TCP_PROC_COUNT = "JDns.tcpProcCount";
 	/** Host DnsAdminClient connects to (was the system property "name", still read). */
 	public static final String PROP_ADMIN_HOST = "JDns.adminHost";
@@ -304,8 +305,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 	private volatile boolean running = false;
 
-	//  TCP acceptor threads. Connections are served by a separate pool
-	//  (JDns.tcp.maxConnections), so one acceptor is enough; it was 4.
+	//  TCP reactor threads (NioServer). Requests are answered on a separate
+	//  pool (JDns.tcpMaxConnections threads), so one is enough; it was 4.
 	private int TCPProcCount = 1;
 
 	//  Answer names at or below a delegation (NS records below the apex)
@@ -321,7 +322,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		zoneCutReferrals = on;
 	}
 
-	/** Number of TCP acceptor threads (property TCPProcCount). */
+	/** Number of TCP reactor threads (property JDns.tcpProcCount). */
 	public int getTcpProcCount() {
 		return TCPProcCount;
 	}	
@@ -684,7 +685,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 
 		//  ---- TCP
-		TCPProcs = new TCPProsessor[TCPProcCount];
+		//  One TCPProsessor runs the NioServer; TCPProcCount is its reactor count
+		TCPProcs = new TCPProsessor[1];
 		int tcpPort = intProperty(PROP_TCP_PORT, dnsPort);
 		int backlog = intProperty(PROP_TCP_BACKLOG, 10);
 		//  (JDns.tcpBindAddress used to be read and then ignored)
@@ -695,10 +697,13 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		int tcpTimeout = intProperty(PROP_TCP_TIMEOUT, alltimeout);
 		int tcpMaxConnections = intProperty(PROP_TCP_MAX_CONNECTIONS, TCPProsessor.DEFAULT_MAX_CONNECTIONS);
 		int tcpIdleTimeout = intProperty(PROP_TCP_IDLE_TIMEOUT, TCPProsessor.DEFAULT_IDLE_TIMEOUT);
+		int tcpMaxPerClient = intProperty(PROP_TCP_MAX_CONNECTIONS_PER_CLIENT, TCPProsessor.DEFAULT_MAX_CONNECTIONS_PER_CLIENT);
 
 		log("TCP BindAddress = "+tcpAddress+":"+tcpPort+" backlog="+backlog+" timeout="+tcpTimeout
-				+" maxConnections="+tcpMaxConnections+" idleTimeout="+tcpIdleTimeout);
-		TCPProsessor.initTCPProsessor(tcpPort,backlog,tcpAddress,tcpTimeout,tcpMaxConnections,tcpIdleTimeout);
+				+" maxConnections="+tcpMaxConnections+" maxConnectionsPerClient="+tcpMaxPerClient
+				+" idleTimeout="+tcpIdleTimeout+" reactors="+TCPProcCount);
+		TCPProsessor.initTCPProsessor(tcpPort,backlog,tcpAddress,tcpTimeout,tcpMaxConnections,tcpIdleTimeout,
+				tcpMaxPerClient,TCPProcCount);
 
 		for(int i=0; i< TCPProcs.length; i++ ) {
 			TCPProcs[i] = new TCPProsessor(this,i);
@@ -1882,10 +1887,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		if( udp != null ) {
 			udp.close();
 		}
-		ServerSocket tcp = TCPProsessor.getServerSocket();
-		if( tcp != null ) {
-			IoUtils.closeQuietly(tcp);
-		}
+		TCPProsessor.closeListener();
 	}
 
 	/**

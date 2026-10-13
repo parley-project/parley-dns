@@ -28,6 +28,18 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
   `JDns.exitOnFatalError` is now `DnsServer.PROP_EXIT_ON_FATAL_ERROR`.
 - Removed: `DnsServer.handleAdminConnection` and `createAdminSocket` (use `startAdminServer(port)` /
   `createAdminServer(port)`), and the old `DnsAdminProcessor` constructor `(DnsServer, Socket)`.
+- DNS over TCP runs on parley-net's `NioServer` (2-byte `LengthFieldFrameDecoder`): no thread per
+  connection; requests are answered on a pool of up to `JDns.tcpMaxConnections` handler threads,
+  one at a time per connection. `TCPProsessor`'s static API is unchanged (plus an `initTCPProsessor`
+  overload with the per-client limit and reactor count, and `closeListener()`).
+  - Round 5 #78: a message that has started must arrive within `JDns.tcpIdleTimeout`; a client
+    sending a byte now and then can no longer hold a connection slot.
+  - Round 5 #72: new `JDns.tcpMaxConnectionsPerClient` (default 8): one address can't take every
+    connection slot.
+  - `JDns.tcpProcCount` is now the number of reactor threads; `JDns.tcpTimeout` is no longer used
+    for TCP.
+  - A client that stops reading a large answer (a zone transfer) is disconnected after the idle
+    timeout instead of holding a handler thread.
 
 ### Changed (behaviour)
 

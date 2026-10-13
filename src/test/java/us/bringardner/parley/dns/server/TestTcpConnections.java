@@ -87,7 +87,12 @@ public class TestTcpConnections {
 		final Thread acceptor;
 
 		Listener(int maxConnections, int idleTimeoutMs) throws IOException {
-			TCPProsessor.initTCPProsessor(0, 10, InetAddress.getLoopbackAddress(), 200, maxConnections, idleTimeoutMs);
+			this(maxConnections, idleTimeoutMs, TCPProsessor.DEFAULT_MAX_CONNECTIONS_PER_CLIENT);
+		}
+
+		Listener(int maxConnections, int idleTimeoutMs, int maxPerClient) throws IOException {
+			TCPProsessor.initTCPProsessor(0, 10, InetAddress.getLoopbackAddress(), 200, maxConnections, idleTimeoutMs,
+					maxPerClient, 1);
 			port = TCPProsessor.getServerSocket().getLocalPort();
 			acceptor = new Thread(new TCPProsessor(server,0),"TestTCPAcceptor");
 			acceptor.setDaemon(true);
@@ -244,10 +249,10 @@ public class TestTcpConnections {
 		s.close();
 	}
 
-	// ------------------------------------------------------------ pending (framework plan, chunks 1 and 3)
+	// ------------------------------------------------------------ round 5 #78, #72 (framework plan, chunk 3)
 
+	/** Round 5 #78: a message that has started must arrive within the idle timeout. */
 	@Test
-	@org.junit.jupiter.api.Disabled("Round 5 #78: chunks 1 and 3 (a deadline for the whole message)")
 	public void aClientSendingOneByteAtATimeLosesItsSlot() throws Exception {
 		try(Listener l = new Listener(1, 300)) {
 			try(Socket s = idleClient(l.port)) {
@@ -270,8 +275,8 @@ public class TestTcpConnections {
 		}
 	}
 
+	/** Round 5 #72: one client address can't take every slot. */
 	@Test
-	@org.junit.jupiter.api.Disabled("Round 5 #72: chunks 1 and 3 (a connection limit per client address)")
 	public void oneAddressCantTakeEverySlot() throws Exception {
 		InetAddress other = InetAddress.getByName("127.0.0.2");
 		try(Socket probe = new Socket()) {
@@ -280,9 +285,10 @@ public class TestTcpConnections {
 			//  macOS has only 127.0.0.1 on lo0 unless an alias is added
 			org.junit.jupiter.api.Assumptions.assumeTrue(false, "127.0.0.2 not available: "+ex);
 		}
-		try(Listener l = new Listener(8, 10000)) {
+		try(Listener l = new Listener(8, 10000, 4)) {
 			List<Socket> idle = new ArrayList<Socket>();
 			try {
+				//  only 4 of them are kept open
 				for(int i=0; i < 8; i++ ) {
 					idle.add(idleClient(l.port));
 				}
@@ -309,6 +315,78 @@ public class TestTcpConnections {
 					s.close();
 				}
 			}
+		}
+	}
+
+	@Test
+	public void connectionsOverThePerClientLimitAreRejected() throws Exception {
+		try(Listener l = new Listener(8, 5000, 2)) {
+			assertEquals(2, TCPProsessor.getMaxConnectionsPerClient());
+			Socket a = idleClient(l.port);
+			Socket b = idleClient(l.port);
+			waitFor(() -> TCPProsessor.getActiveConnections() == 2, 3000);
+			long rejectedBefore = TCPProsessor.getRejected();
+			try(Socket c = idleClient(l.port)) {
+				assertTrue(closedByServer(c), "a third connection from the same address is closed at once");
+			}
+			assertEquals(rejectedBefore+1, TCPProsessor.getRejected());
+			a.close();
+			b.close();
+		}
+	}
+
+	@Test
+	public void aMalformedMessageGetsFormErrAndTheConnectionIsClosed() throws Exception {
+		try(Listener l = new Listener(8, 5000); Socket s = idleClient(l.port)) {
+			//  a header announcing a question that isn't there
+			byte [] bad = new byte[] {0x12, 0x34, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+			TCPProsessor.writeMessage(s.getOutputStream(), bad);
+			InputStream in = s.getInputStream();
+			byte [] sz = new byte[2];
+			Message.readArray(in, sz);
+			byte [] data = new byte[Utility.makeShort(sz[0],sz[1])];
+			Message.readArray(in, data);
+			assertEquals(0x12, data[0]);
+			assertEquals(0x34, data[1]);
+			assertEquals(1, data[3] & 0x0F, "RCODE FORMERR");
+			assertTrue(closedByServer(s), "then the connection is closed");
+		}
+	}
+
+	@Test
+	public void aMessageShorterThanAHeaderClosesTheConnection() throws Exception {
+		try(Listener l = new Listener(8, 5000); Socket s = idleClient(l.port)) {
+			TCPProsessor.writeMessage(s.getOutputStream(), new byte[] {1, 2, 3});
+			assertTrue(closedByServer(s));
+		}
+	}
+
+	@Test
+	public void aQueryLargerThanOneReadIsServed() throws Exception {
+		//  a message split over several TCP segments
+		try(Listener l = new Listener(8, 5000); Socket s = idleClient(l.port)) {
+			Message q = new Message();
+			q.setQuestion("www.tcp.test", DNS.A, DNS.IN);
+			q.setID(77);
+			byte [] b = q.toByteArray();
+			OutputStream out = s.getOutputStream();
+			out.write(new byte[] {(byte)(b.length >> 8)});
+			out.flush();
+			Thread.sleep(50);
+			out.write(new byte[] {(byte)b.length});
+			out.write(b, 0, 5);
+			out.flush();
+			Thread.sleep(50);
+			out.write(b, 5, b.length-5);
+			out.flush();
+			InputStream in = s.getInputStream();
+			byte [] sz = new byte[2];
+			Message.readArray(in, sz);
+			byte [] data = new byte[Utility.makeShort(sz[0],sz[1])];
+			Message.readArray(in, data);
+			Message r = new Message(new ByteBuffer(data));
+			assertEquals(77, r.getID());
+			assertEquals(1, r.getAnswerCount());
 		}
 	}
 }
