@@ -30,7 +30,7 @@ import java.net.InetAddress;
  * "192.0.2.10, 10.0.0.0/8, 2001:db8::/32". Used for the zone transfer
  * allow-list. Only address literals are accepted (never a host name lookup).
  *
- * @deprecated moved to bjl_core: use {@link us.bringardner.parley.core.util.AddressMatcher}, which this
+ * @deprecated moved to parley-core: use {@link us.bringardner.parley.core.util.AddressMatcher}, which this
  *  now delegates to. Kept so code that uses this class still compiles; it will be removed.
  */
 @Deprecated
@@ -63,7 +63,7 @@ public final class AddressMatcher {
 		return delegate.isEmpty();
 	}
 
-	/** @return the bjl_core matcher this delegates to */
+	/** @return the parley-core matcher this delegates to */
 	public us.bringardner.parley.core.util.AddressMatcher toCoreMatcher() {
 		return delegate;
 	}

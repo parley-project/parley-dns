@@ -84,6 +84,9 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
   chain that ends without the data is followed by asking the target's own servers.
 - Round 4 #69: UDP requests up to 64 KB are read whole (larger than 2 KB were cut off); upstream
   answers already were.
+- Packaging: the POM takes plugin versions and `distributionManagement` from parley-parent (the old
+  source, deploy, surefire and site plugin overrides are gone; the sources jar is built once);
+  `nsupdate` / `nslookup` say parley-dns instead of BjlDns; the stale `Readme.txt` is removed.
 - Round 5 #84: the UPDATE journal is crash safe: the header is written into an empty journal too,
   each update is framed by `begin`/`end` lines (a torn last update is left out on replay), and a
   failed write is cut off again. Older journals without the framing still replay.

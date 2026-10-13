@@ -314,7 +314,7 @@ public final class DnssecKey {
 				}
 			}
 			//  The private key must belong to the public key
-			byte [] probe = "BjlDns key check".getBytes(StandardCharsets.US_ASCII);
+			byte [] probe = "parley-dns key check".getBytes(StandardCharsets.US_ASCII);
 			Algorithm a = Algorithm.of(k.getAlgorithm());
 			if( !a.verify(k.getKey(), probe, a.sign(pk, probe)) ) {
 				throw new IOException(priv.getName()+" does not hold the private key of "+keyFile.getName());
