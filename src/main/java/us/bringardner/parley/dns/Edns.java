@@ -137,8 +137,20 @@ public final class Edns implements DNS {
 				opt = rr;
 			}
 		}
+		//  Round 5 #97: an OPT anywhere else is malformed (RFC 6891 6.1.1)
+		boolean elsewhere = false;
+		for(java.util.List<RR> section : java.util.Arrays.asList(request.getAnswer(), request.getAuthority())) {
+			for(RR rr : section) {
+				if( rr.getType() == OPT ) {
+					elsewhere = true;
+				}
+			}
+		}
 		if( opt == null ) {
-			return Request.NONE;
+			return elsewhere ? new Request(true, MAX_UDP_PAYLOAD, 0, true, false) : Request.NONE;
+		}
+		if( elsewhere ) {
+			malformed = true;
 		}
 		if( opt.getNameAsName().getLables().size() != 0 ) {
 			malformed = true;

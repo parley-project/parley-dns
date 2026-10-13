@@ -74,6 +74,27 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
   - Resolver threads are virtual threads on Java 21+ (`JDns.resolverVirtualThreads`, default true).
   - Upstream address ranking and hold-off moved to parley-net's `UpstreamHealth`; `ServerA` keeps its
     settings and methods.
+- Round 5 #84: the UPDATE journal is crash safe: the header is written into an empty journal too,
+  each update is framed by `begin`/`end` lines (a torn last update is left out on replay), and a
+  failed write is cut off again. Older journals without the framing still replay.
+- Round 5 #88: a signed zone that can't be signed again keeps serving its last signed version while
+  the signatures are valid (also after its zone file changed), instead of going unsigned; an UPDATE
+  or re-sign that can't be signed is not made (nothing journaled).
+- Round 5 #89: SHA-1 DS records are ignored when a SHA-256 or SHA-384 one is there (RFC 4509 3).
+- Round 5 #90: DNSKEYs with the REVOKE bit (RFC 5011) are not used to validate.
+- Round 5 #91, denial proofs: NSEC3 records with unknown flags are ignored (RFC 5155 8.2); a DNAME
+  owner, like a delegation, proves nothing below it (RFC 6840 4.1); an NSEC whose next name is below
+  the query name can't prove NXDOMAIN (the name exists); an NSEC3 closest encloser that is a
+  delegation or DNAME is refused.
+- Round 5 #92: SECURE answers in the cache, and validated key sets, are kept no longer than their
+  signatures allow (original TTL, expiration; RFC 4035 5.3.3), and served TTLs are capped to match.
+- Round 5 #97: an OPT record in the answer or authority section is FORMERR (RFC 6891 6.1.1).
+- Round 5 #98: an UPDATE with a newer SOA replaces the whole SOA (names, timers, TTL), not only its
+  serial (RFC 2136 3.4.2.2); the journal has a new `soa` entry for it.
+- Round 5 #99: a NOTIFY answered with an error is not counted as acknowledged: REFUSED, NOTAUTH and
+  the like are logged and not retried (`ZoneNotifier.getRefused()`); SERVFAIL is retried.
+- Round 5 #100: a TSIG MAC longer than the hash, or shorter than the larger of 10 bytes and half of
+  it, is FORMERR (RFC 8945 5.2.2.1); it was answered BADSIG / BADTRUNC.
 - SSHFP (RFC 4255, 6594): the `Sshfp` record (zone files, UPDATE, wire), `SshfpVerifier` to check an SSH
   host key against validated SSHFP records, and `SshfpTool` to print the records for host keys.
 - `Base32Hex` and `RenamedProperty` moved to parley-core (`us.bringardner.parley.core.util`); a

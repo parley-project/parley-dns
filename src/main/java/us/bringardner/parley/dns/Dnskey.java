@@ -37,6 +37,8 @@ public class Dnskey extends RR {
 	public static final int FLAG_ZONE = 0x100;
 	/** Secure entry point flag (bit 15): a key signing key. */
 	public static final int FLAG_SEP = 0x1;
+	/** REVOKE (RFC 5011 3): the key must not be used to validate. */
+	public static final int FLAG_REVOKE = 0x80;
 
 	private int flags;
 	private int protocol;

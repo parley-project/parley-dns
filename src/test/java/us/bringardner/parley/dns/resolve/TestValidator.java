@@ -225,6 +225,15 @@ public class TestValidator {
 			return m;
 		};
 		expect(v, Validator.Status.BOGUS, "www.sec.test", DNS.A);
+		//  Round 5 #91: an empty non-terminal's NODATA proof turned into NXDOMAIN (the
+		//  NSEC shows a.b.c below b.c, so b.c exists)
+		tamper = m -> {
+			if( m.getFirstQuestion().getName().equalsIgnoreCase("b.c.sec.test") ) {
+				m.setResponseCode(DNS.NAME_ERROR);
+			}
+			return m;
+		};
+		expect(v, Validator.Status.BOGUS, "b.c.sec.test", DNS.A);
 		//  The proof of an unsigned delegation removed: can't be trusted either
 		tamper = m -> {
 			m.getAuthority().removeIf(rr -> rr.getType() == DNS.NSEC || rr.getType() == DNS.RRSIG);

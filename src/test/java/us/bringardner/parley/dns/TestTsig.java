@@ -182,7 +182,10 @@ public class TestTsig {
 		byte [] t16 = Tsig.append(body, r.keyName, r.algorithm, r.timeSigned, r.fudge, mac16, r.originalId, 0, new byte[0]);
 		assertEquals(Tsig.NOERROR, Tsig.Session.verifyRequest(KEYS, t16).getError());
 		byte [] t8 = Tsig.append(body, r.keyName, r.algorithm, r.timeSigned, r.fudge, java.util.Arrays.copyOf(r.mac, 8), r.originalId, 0, new byte[0]);
-		assertEquals(Tsig.BADTRUNC, Tsig.Session.verifyRequest(KEYS, t8).getError());
+		//  Round 5 #100: too short (or longer than the hash) is malformed, FORMERR (RFC 8945 5.2.2.1)
+		assertThrows(DnsFormatException.class, () -> Tsig.Session.verifyRequest(KEYS, t8));
+		byte [] t40 = Tsig.append(body, r.keyName, r.algorithm, r.timeSigned, r.fudge, java.util.Arrays.copyOf(r.mac, 40), r.originalId, 0, new byte[0]);
+		assertThrows(DnsFormatException.class, () -> Tsig.Session.verifyRequest(KEYS, t40));
 	}
 
 	@Test

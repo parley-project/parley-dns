@@ -361,4 +361,43 @@ public class TestCache {
 		}
 		assertNull(failure.get(), failure.get());
 	}
+
+	/** Round 5 #92: a SECURE entry lives no longer than its signatures' original TTL or expiration. */
+	@Test
+	public void secureEntriesFollowTheirSignatures() {
+		Cache c = newCache(10);
+		Message m = response("sig.example.com", "10.0.0.9", 3600);
+		us.bringardner.parley.dns.Rrsig sig = new us.bringardner.parley.dns.Rrsig("sig.example.com", DNS.IN);
+		sig.setTTL(3600);
+		sig.setTypeCovered(DNS.A);
+		sig.setAlgorithm(13);
+		sig.setLabels(3);
+		sig.setOrigTtl(60);
+		sig.setInception(now.get()/1000-3600);
+		sig.setExpiration(now.get()/1000+3600);
+		sig.setKeyTag(1);
+		sig.setSigner("example.com");
+		sig.setSignature(new byte[64]);
+		m.addAnswer(sig);
+		c.put(fromWire(m));
+		Object token = c.current(q("sig.example.com"));
+		c.setValidated(q("sig.example.com"), token, new Validator.Result(Validator.Status.SECURE, null));
+		Cache.Hit h = c.lookup(q("sig.example.com"));
+		assertTrue(h.msg.getAnswer().get(0).getTTL() <= 60, "TTL capped at the signed original TTL");
+		advanceSeconds(61);
+		assertNull(c.lookup(q("sig.example.com")), "gone after the original TTL");
+
+		//  and an expiration before the TTL ends
+		Message m2 = response("exp.example.com", "10.0.0.8", 3600);
+		us.bringardner.parley.dns.Rrsig s2 = (us.bringardner.parley.dns.Rrsig)sig.copy();
+		s2.setName("exp.example.com");
+		s2.setOrigTtl(3600);
+		s2.setExpiration(now.get()/1000+30);
+		m2.addAnswer(s2);
+		c.put(fromWire(m2));
+		c.setValidated(q("exp.example.com"), c.current(q("exp.example.com")), new Validator.Result(Validator.Status.SECURE, null));
+		assertTrue(c.lookup(q("exp.example.com")).msg.getAnswer().get(0).getTTL() <= 30);
+		advanceSeconds(31);
+		assertNull(c.lookup(q("exp.example.com")));
+	}
 }

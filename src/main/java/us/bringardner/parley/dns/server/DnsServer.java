@@ -2674,6 +2674,18 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				return ret;
 			}
 			if( r.changed() ) {
+				if( staleSigned.contains(Canonical.key(zone.getName())) ) {
+				log(() -> "UPDATE of "+zs.getName()+" refused: the zone file changed but can't be signed, an older version is served");
+				ret.setResponseCodeServerFailure();
+				return ret;
+			}
+			//  Signed first: a change that can't be signed is not made (round 5 #88)
+				Zone served = prepareZone(r.zone, zone, true, zoneSet.zones, true);
+				if( served == null ) {
+					logError("UPDATE of "+zone.getName()+" not made: the zone can't be signed");
+					ret.setResponseCodeServerFailure();
+					return ret;
+				}
 				try {
 					writeJournal(zone, r.journal, req);
 				} catch(IOException ex) {
@@ -2681,7 +2693,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 					ret.setResponseCodeServerFailure();
 					return ret;
 				}
-				Zone served = prepareZone(r.zone, zone, true, zoneSet.zones);
 				publishUpdatedZone(zone, served);
 				final int n = r.journal.size();
 				log(() -> "UPDATE of "+zone.getName()+" from "+req.getClient()+(key == null ? "" : " key "+key)
@@ -2701,27 +2712,51 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		writeJournal(zone, lines, "from "+req.getClient()+(req.getTsigKey() != null ? " key "+req.getTsigKey() : ""));
 	}
 
-	/** Append lines to the zone's journal; why is written as a comment. */
+	/**
+	 * Append lines to the zone's journal; why is written as a comment.
+	 * <p>
+	 * Round 5 #84: crash safe. The header goes into an empty file too (a failed first
+	 * write used to leave one, and later entries then lacked the 'base' line); each
+	 * update is framed by 'begin' and 'end' lines, so a torn last update is ignored on
+	 * replay; a failed write is cut off again.
+	 */
 	private void writeJournal(Zone zone, List<String> lines, String why) throws IOException {
 		File jnl = zone.getJournalFile();
 		if( jnl == null ) {
 			//  A zone that was not loaded from a file (only kept in memory)
 			return;
 		}
-		boolean create = !jnl.exists();
-		try(FileOutputStream out = new FileOutputStream(jnl, true)) {
+		try(java.nio.channels.FileChannel ch = java.nio.channels.FileChannel.open(jnl.toPath(),
+				java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE)) {
+			long start = ch.size();
 			StringBuilder b = new StringBuilder();
-			if( create ) {
+			if( start == 0 ) {
 				b.append("; Dynamic updates of ").append(zone.getName()).append(" (RFC 2136), applied on top of ")
 					.append(zone.getMasterFile().getName()).append(".\n; Edit the zone file and raise its serial to start over.\n");
 				b.append("base ").append(Integer.toUnsignedString(zone.getSoa().getSerial())).append('\n');
 			}
-			b.append("; ").append(new Date()).append(' ').append(why).append('\n');
+			b.append("; ").append(new Date()).append(' ').append(why.replace('\n', ' ').replace('\r', ' ')).append('\n');
+			b.append("begin\n");
 			for(String l : lines) {
 				b.append(l).append('\n');
 			}
-			out.write(b.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-			out.getFD().sync();
+			b.append("end\n");
+			java.nio.ByteBuffer data = java.nio.ByteBuffer.wrap(b.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			try {
+				ch.position(start);
+				while( data.hasRemaining() ) {
+					ch.write(data);
+				}
+				ch.force(true);
+			} catch(IOException | RuntimeException ex) {
+				//  no half update left at the end of the journal
+				try {
+					ch.truncate(start);
+					ch.force(true);
+				} catch(IOException ignore) {
+				}
+				throw ex;
+			}
 		}
 	}
 
@@ -3075,6 +3110,22 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 * @param zones the zones (by lower case name) that will be served
 	 */
 	Zone prepareZone(Zone loaded, Zone current, boolean force, Map<String, Zone> zones) {
+		return prepareZone(loaded, current, force, zones, false);
+	}
+
+	//  Signed zones served in an older version than their zone file, because the new one
+	//  couldn't be signed (round 5 #88): no UPDATEs until it is
+	private final java.util.Set<String> staleSigned = ConcurrentHashMap.newKeySet();
+	//  When re-signing a zone last failed (s): it is tried again after RESIGN_RETRY
+	private final Map<String, Long> signFailedAt = new ConcurrentHashMap<String, Long>();
+	/** A zone that couldn't be signed again is tried again after this long (s). */
+	static final long RESIGN_RETRY = 10*60;
+
+	/**
+	 * @param orNull return null if the zone has keys but can't be signed, instead of
+	 *  falling back (an UPDATE or a re-sign is then not made at all)
+	 */
+	private Zone prepareZone(Zone loaded, Zone current, boolean force, Map<String, Zone> zones, boolean orNull) {
 		Zone unsigned = loaded.getUnsigned();
 		String name = Canonical.key(unsigned.getName());
 		List<DnssecKey> keys = dnssecKeys.get(name);
@@ -3114,6 +3165,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		try {
 			long start = System.currentTimeMillis();
 			ZoneSigner.Result r = ZoneSigner.sign(unsigned, dyn, fp, keys, now, dnssecValidity, nsec3);
+			staleSigned.remove(name);
+			signFailedAt.remove(name);
 			for(String w : r.warnings) {
 				logError("DNSSEC: "+w);
 			}
@@ -3124,11 +3177,25 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 					+new Date(sz.expires*1000));
 			return r.zone;
 		} catch(RuntimeException ex) {
-			if( cs != null && cs.expires > now && cs.unsigned == unsigned ) {
-				logError("DNSSEC: can't sign "+name+" ("+ex.getMessage()+"), still serving the previous signatures", ex);
+			if( orNull ) {
+				logError("DNSSEC: can't sign "+name+" ("+ex.getMessage()+")", ex);
+				return null;
+			}
+			if( cs != null && cs.expires > now ) {
+				//  Round 5 #88: unsigned, it would be BOGUS to every validator while the
+				//  parent has a DS. The last signed version is served until it expires,
+				//  even if it is older than the zone file.
+				logError("DNSSEC: can't sign "+name+" ("+ex.getMessage()+"): still serving the previous signed version"
+						+(cs.unsigned == unsigned ? "" : ", WITHOUT the latest changes to the zone file (UPDATEs are refused until it is signed)")
+						+", valid until "+new Date(cs.expires*1000)+". Fix the keys or the zone.", ex);
+				if( cs.unsigned != unsigned ) {
+					//  An UPDATE to the old version would be journaled against the old serial,
+					//  and set aside (lost) at the next start
+					staleSigned.add(name);
+				}
 				return current;
 			}
-			logError("DNSSEC: can't sign "+name+" ("+ex.getMessage()+"), serving it unsigned", ex);
+			logError("DNSSEC: can't sign "+name+" ("+ex.getMessage()+"), serving it UNSIGNED: validators reject it while the parent has a DS", ex);
 			return unsigned;
 		}
 	}
@@ -3184,6 +3251,20 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			Soa soa = (Soa)base.getSoa().copy();
 			soa.setSerial(soa.getSerial()+1);
 			next.replaceSoa(soa);
+			String key = Canonical.key(base.getName());
+			Long failed = signFailedAt.get(key);
+			if( failed != null && now-failed < RESIGN_RETRY ) {
+				continue;
+			}
+			Zone served = prepareZone(next, z, true, zoneSet.zones, true);
+			if( served == null ) {
+				//  Round 5 #88: the current signatures are served while they are valid;
+				//  tried again (and logged) every RESIGN_RETRY, not every minute
+				signFailedAt.put(key, now);
+				logError("DNSSEC: "+base.getName()+" not signed again; its signatures expire "+new Date(sz.expires*1000)
+						+", trying again in "+RESIGN_RETRY/60+" minutes");
+				continue;
+			}
 			try {
 				writeJournal(base, Collections.singletonList("serial "+Integer.toUnsignedString(soa.getSerial())),
 						"signed again (DNSSEC signatures renewed)");
@@ -3191,7 +3272,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				logError("DNSSEC: can't write the journal of "+base.getName()+"; not signed again", ex);
 				continue;
 			}
-			Zone served = prepareZone(next, z, true, zoneSet.zones);
 			publishUpdatedZone(z, served);
 			ZoneNotifier nf = notifier;
 			if( nf != null ) {

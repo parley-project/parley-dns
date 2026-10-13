@@ -59,6 +59,8 @@ import us.bringardner.parley.dns.Utility;
  */
 public class Zone implements DNS {
 
+	private static final us.bringardner.parley.dns.DnsBaseClass LOG = new us.bringardner.parley.dns.DnsBaseClass();
+
 
 	// This is the name of the file that contained the data
 	private String fileName;
@@ -1318,26 +1320,72 @@ public class Zone implements DNS {
 		if( jnl == null || !jnl.isFile() ) {
 			return;
 		}
+		byte [] data = java.nio.file.Files.readAllBytes(jnl.toPath());
 		int line = 0;
 		boolean outOfDate = false;
-		try(BufferedReader in = new BufferedReader(new FileReader(jnl))) {
-			String text;
-			boolean based = false;
-			while( (text = in.readLine()) != null ) {
+		boolean based = false;
+		//  Round 5 #84: the lines of an update between 'begin' and 'end', applied at 'end';
+		//  null outside one (journals written before the framing have none)
+		List<List<String>> block = null;
+		int blockLine = 0;
+		long blockStart = 0;
+		//  Where the journal's good part ends: a torn last update or line is cut off here,
+		//  so the next update isn't appended to it
+		long cut = data.length;
+		try {
+			int pos = 0;
+			while( pos < data.length ) {
+				int nl = pos;
+				while( nl < data.length && data[nl] != '\n' ) {
+					nl++;
+				}
+				if( nl == data.length ) {
+					//  A last line without its line break: cut off by a crash
+					cut = pos;
+					break;
+				}
+				long lineStart = pos;
+				String text = new String(data, pos, nl-pos, java.nio.charset.StandardCharsets.UTF_8).trim();
+				pos = nl+1;
 				line++;
-				text = text.trim();
 				if( text.isEmpty() || text.startsWith(";") ) {
 					continue;
 				}
 				List<String> t = parseLine(null, text);
 				String op = t.get(0);
+				if( based && op.equals("begin") && t.size() == 1 ) {
+					if( block != null ) {
+						//  The update before was cut off and this one appended after it
+						//  (journals written before torn ends were cut off): skip it
+						final int at = blockLine;
+						LOG.logWarn(jnl.getName()+": the update at line "+at+" is incomplete and was not applied");
+					}
+					block = new ArrayList<List<String>>();
+					blockLine = line;
+					blockStart = lineStart;
+					continue;
+				}
+				if( based && op.equals("end") && t.size() == 1 ) {
+					if( block == null ) {
+						throw new IOException("'end' without 'begin'");
+					}
+					for(List<String> l : block) {
+						applyJournalLine(l.get(0), l.subList(1, l.size()));
+					}
+					block = null;
+					continue;
+				}
+				if( block != null ) {
+					block.add(t);
+					continue;
+				}
 				if( !based ) {
 					if( !op.equals("base") || t.size() != 2 ) {
 						throw new IOException("journal must start with 'base <serial>'");
 					}
 					if( Long.parseLong(t.get(1)) != (soa.getSerial() & 0xffffffffL) ) {
 						//  The zone file was edited (new serial): its content wins. The journal is
-						//  set aside below, once it is closed: Windows won't rename an open file.
+						//  set aside below.
 						outOfDate = true;
 						break;
 					}
@@ -1354,6 +1402,28 @@ public class Zone implements DNS {
 			old.delete();
 			if( !jnl.renameTo(old) ) {
 				throw new IOException("Error in "+jnl.getName()+" at line "+line+": can't set aside the out of date journal "+jnl);
+			}
+			return;
+		}
+		if( block != null ) {
+			//  The last update was cut off (a crash while it was written): it was never
+			//  answered NOERROR, so it is left out
+			final int at = blockLine;
+			LOG.logWarn(jnl.getName()+": the update at line "+at+" is incomplete and was not applied");
+			cut = Math.min(cut, blockStart);
+		}
+		if( !based ) {
+			//  No 'base' line: the header itself was cut off. Start the journal again.
+			cut = 0;
+		}
+		if( cut < data.length ) {
+			try(java.nio.channels.FileChannel ch = java.nio.channels.FileChannel.open(jnl.toPath(), java.nio.file.StandardOpenOption.WRITE)) {
+				ch.truncate(cut);
+				ch.force(true);
+				final long c = cut;
+				LOG.logWarn(jnl.getName()+": cut off at byte "+c+" (a write that didn't finish)");
+			} catch(IOException ex) {
+				LOG.logError("Can't cut off the incomplete end of "+jnl.getName()+": the next update may not replay", ex);
 			}
 		}
 	}
@@ -1396,6 +1466,17 @@ public class Zone implements DNS {
 						&& recordKey(back).equals(recordKey(rr))
 						&& (op.equals("del") || back.getTTL() == rr.getTTL());
 			}
+			case "soa": {
+				if( args.size() != 9 || !(rr instanceof Soa) ) {
+					return false;
+				}
+				Soa back = soaFromJournal(args);
+				Soa want = (Soa)rr;
+				return back.getMname().equalsIgnoreCase(want.getMname()) && back.getRname().equalsIgnoreCase(want.getRname())
+						&& back.getSerial() == want.getSerial() && back.getTTL() == want.getTTL()
+						&& back.getRefreash() == want.getRefreash() && back.getRetry() == want.getRetry()
+						&& back.getExpire() == want.getExpire() && back.getMinimum() == want.getMinimum();
+			}
 			case "delset":
 				return args.size() == 2;
 			case "delname":
@@ -1409,8 +1490,41 @@ public class Zone implements DNS {
 		}
 	}
 
+	/**
+	 * Round 5 #98: the journal entry for a new SOA (RFC 2136 3.4.2.2), all of it:
+	 * "soa owner ttl mname rname serial refresh retry expire minimum".
+	 */
+	static String soaJournalEntry(String owner, Soa s) {
+		return "soa "+dotted(owner)+" "+s.getTTL()+" "+dotted(s.getMname())+" "+dotted(s.getRname())+" "
+				+Integer.toUnsignedString(s.getSerial())+" "+s.getRefreash()+" "+s.getRetry()+" "+s.getExpire()+" "+s.getMinimum();
+	}
+
+	private static String dotted(String name) {
+		return name.endsWith(".") ? name : name+".";
+	}
+
+	/** The SOA of a "soa" journal entry's arguments (owner first), from the current one. */
+	private Soa soaFromJournal(List<String> args) {
+		Soa s = (Soa)soa.copy();
+		s.setTTL(Integer.parseInt(args.get(1)));
+		s.setMname(stripDot(args.get(2)));
+		s.setRname(stripDot(args.get(3)));
+		s.setSerial((int)Long.parseLong(args.get(4)));
+		s.setRefreash(Integer.parseInt(args.get(5)));
+		s.setRetry(Integer.parseInt(args.get(6)));
+		s.setExpire(Integer.parseInt(args.get(7)));
+		s.setMinimum(Integer.parseInt(args.get(8)));
+		return s;
+	}
+
 	private void applyJournalLine(String op, List<String> args) {
 		switch(op) {
+		case "soa":
+			if( args.size() != 9 ) {
+				throw new IllegalArgumentException("soa needs owner ttl mname rname serial refresh retry expire minimum");
+			}
+			soa = soaFromJournal(args);
+			break;
 		case "serial": {
 			Soa s = (Soa)soa.copy();
 			s.setSerial((int)Long.parseLong(args.get(0)));
