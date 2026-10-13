@@ -612,4 +612,43 @@ public class TestDynamicUpdate {
 		send(new Update().add(soa));
 		assertEquals("ns2.up.test", server.getZone("up.test").getSoa().getMname());
 	}
+
+	/** Round 5 #84 (review): an update after a torn one still replays after the next restart. */
+	@Test
+	public void anUpdateAfterATornOneStillReplays() throws Exception {
+		assertEquals(DNS.NOERROR, send(new Update().add(a("one.up.test", "10.1.1.4"))));
+		File jnl = new File(dir, "up.test.txt.jnl");
+		java.nio.file.Files.write(jnl.toPath(), "; torn\nbegin\nadd two.up.test. 300 IN A 10.1.1.5\nadd thr".getBytes(),
+				java.nio.file.StandardOpenOption.APPEND);
+		//  restart: the torn end is cut off
+		restart();
+		assertEquals(DNS.NOERROR, send(new Update().add(a("four.up.test", "10.1.1.7"))));
+		//  and the restart after that
+		Zone again = new Zone(zoneFile);
+		assertEquals(1, again.exactRecords("one.up.test").size());
+		assertEquals(0, again.exactRecords("two.up.test").size());
+		assertEquals(1, again.exactRecords("four.up.test").size());
+	}
+
+	/** Round 5 #84 (review): a header cut off before its 'base' line starts the journal again. */
+	@Test
+	public void aTornHeaderStartsTheJournalAgain() throws Exception {
+		File jnl = new File(dir, "up.test.txt.jnl");
+		java.nio.file.Files.write(jnl.toPath(), "; Dynamic updates of up.te".getBytes());
+		restart();
+		assertEquals(DNS.NOERROR, send(new Update().add(a("five.up.test", "10.1.1.8"))));
+		assertEquals(1, new Zone(zoneFile).exactRecords("five.up.test").size());
+	}
+
+	/** A new server on the same files, as after a restart. */
+	private void restart() throws Exception {
+		ZoneNotifier n = server.getNotifier();
+		if( n != null ) {
+			n.shutdown();
+		}
+		server = new DnsServer();
+		server.loadZones();
+		server.setRecursionAvailable(false);
+		server.setUpdateAllow("127.0.0.1");
+	}
 }

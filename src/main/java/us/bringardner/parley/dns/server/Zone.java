@@ -1320,18 +1320,34 @@ public class Zone implements DNS {
 		if( jnl == null || !jnl.isFile() ) {
 			return;
 		}
+		byte [] data = java.nio.file.Files.readAllBytes(jnl.toPath());
 		int line = 0;
 		boolean outOfDate = false;
+		boolean based = false;
 		//  Round 5 #84: the lines of an update between 'begin' and 'end', applied at 'end';
 		//  null outside one (journals written before the framing have none)
 		List<List<String>> block = null;
 		int blockLine = 0;
-		try(BufferedReader in = new BufferedReader(new java.io.InputStreamReader(new java.io.FileInputStream(jnl), java.nio.charset.StandardCharsets.UTF_8))) {
-			String text;
-			boolean based = false;
-			while( (text = in.readLine()) != null ) {
+		long blockStart = 0;
+		//  Where the journal's good part ends: a torn last update or line is cut off here,
+		//  so the next update isn't appended to it
+		long cut = data.length;
+		try {
+			int pos = 0;
+			while( pos < data.length ) {
+				int nl = pos;
+				while( nl < data.length && data[nl] != '\n' ) {
+					nl++;
+				}
+				if( nl == data.length ) {
+					//  A last line without its line break: cut off by a crash
+					cut = pos;
+					break;
+				}
+				long lineStart = pos;
+				String text = new String(data, pos, nl-pos, java.nio.charset.StandardCharsets.UTF_8).trim();
+				pos = nl+1;
 				line++;
-				text = text.trim();
 				if( text.isEmpty() || text.startsWith(";") ) {
 					continue;
 				}
@@ -1339,10 +1355,14 @@ public class Zone implements DNS {
 				String op = t.get(0);
 				if( based && op.equals("begin") && t.size() == 1 ) {
 					if( block != null ) {
-						throw new IOException("'begin' inside the update that began at line "+blockLine);
+						//  The update before was cut off and this one appended after it
+						//  (journals written before torn ends were cut off): skip it
+						final int at = blockLine;
+						LOG.logWarn(jnl.getName()+": the update at line "+at+" is incomplete and was not applied");
 					}
 					block = new ArrayList<List<String>>();
 					blockLine = line;
+					blockStart = lineStart;
 					continue;
 				}
 				if( based && op.equals("end") && t.size() == 1 ) {
@@ -1365,7 +1385,7 @@ public class Zone implements DNS {
 					}
 					if( Long.parseLong(t.get(1)) != (soa.getSerial() & 0xffffffffL) ) {
 						//  The zone file was edited (new serial): its content wins. The journal is
-						//  set aside below, once it is closed: Windows won't rename an open file.
+						//  set aside below.
 						outOfDate = true;
 						break;
 					}
@@ -1373,12 +1393,6 @@ public class Zone implements DNS {
 					continue;
 				}
 				applyJournalLine(op, t.subList(1, t.size()));
-			}
-			if( block != null ) {
-				//  The last update was cut off (a crash while it was written): it was never
-				//  answered NOERROR, so it is left out
-				final int at = blockLine;
-				LOG.logWarn(jnl.getName()+": the update at line "+at+" is incomplete and was not applied");
 			}
 		} catch(IOException | RuntimeException e) {
 			throw new IOException("Error in "+jnl.getName()+" at line "+line+": "+e.getMessage(), e);
@@ -1388,6 +1402,28 @@ public class Zone implements DNS {
 			old.delete();
 			if( !jnl.renameTo(old) ) {
 				throw new IOException("Error in "+jnl.getName()+" at line "+line+": can't set aside the out of date journal "+jnl);
+			}
+			return;
+		}
+		if( block != null ) {
+			//  The last update was cut off (a crash while it was written): it was never
+			//  answered NOERROR, so it is left out
+			final int at = blockLine;
+			LOG.logWarn(jnl.getName()+": the update at line "+at+" is incomplete and was not applied");
+			cut = Math.min(cut, blockStart);
+		}
+		if( !based ) {
+			//  No 'base' line: the header itself was cut off. Start the journal again.
+			cut = 0;
+		}
+		if( cut < data.length ) {
+			try(java.nio.channels.FileChannel ch = java.nio.channels.FileChannel.open(jnl.toPath(), java.nio.file.StandardOpenOption.WRITE)) {
+				ch.truncate(cut);
+				ch.force(true);
+				final long c = cut;
+				LOG.logWarn(jnl.getName()+": cut off at byte "+c+" (a write that didn't finish)");
+			} catch(IOException ex) {
+				LOG.logError("Can't cut off the incomplete end of "+jnl.getName()+": the next update may not replay", ex);
 			}
 		}
 	}

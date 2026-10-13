@@ -673,5 +673,8 @@ public class TestDnssecServer {
 		server.addZone(new Zone(zoneFile));
 		assertNotNull(zone().getSigned());
 		verify(ask("www.sec.test", DNS.A), "still the previous signatures");
+		//  an UPDATE to that older version would be journaled against the old serial
+		assertEquals(DNS.SERVER_ERROR, update(a));
+		assertFalse(new File(dir, "sec.test.txt.jnl").exists());
 	}
 }

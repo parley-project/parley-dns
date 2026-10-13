@@ -2674,7 +2674,12 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				return ret;
 			}
 			if( r.changed() ) {
-				//  Signed first: a change that can't be signed is not made (round 5 #88)
+				if( staleSigned.contains(Canonical.key(zone.getName())) ) {
+				log(() -> "UPDATE of "+zs.getName()+" refused: the zone file changed but can't be signed, an older version is served");
+				ret.setResponseCodeServerFailure();
+				return ret;
+			}
+			//  Signed first: a change that can't be signed is not made (round 5 #88)
 				Zone served = prepareZone(r.zone, zone, true, zoneSet.zones, true);
 				if( served == null ) {
 					logError("UPDATE of "+zone.getName()+" not made: the zone can't be signed");
@@ -3108,6 +3113,14 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		return prepareZone(loaded, current, force, zones, false);
 	}
 
+	//  Signed zones served in an older version than their zone file, because the new one
+	//  couldn't be signed (round 5 #88): no UPDATEs until it is
+	private final java.util.Set<String> staleSigned = ConcurrentHashMap.newKeySet();
+	//  When re-signing a zone last failed (s): it is tried again after RESIGN_RETRY
+	private final Map<String, Long> signFailedAt = new ConcurrentHashMap<String, Long>();
+	/** A zone that couldn't be signed again is tried again after this long (s). */
+	static final long RESIGN_RETRY = 10*60;
+
 	/**
 	 * @param orNull return null if the zone has keys but can't be signed, instead of
 	 *  falling back (an UPDATE or a re-sign is then not made at all)
@@ -3152,6 +3165,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		try {
 			long start = System.currentTimeMillis();
 			ZoneSigner.Result r = ZoneSigner.sign(unsigned, dyn, fp, keys, now, dnssecValidity, nsec3);
+			staleSigned.remove(name);
+			signFailedAt.remove(name);
 			for(String w : r.warnings) {
 				logError("DNSSEC: "+w);
 			}
@@ -3171,8 +3186,13 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				//  parent has a DS. The last signed version is served until it expires,
 				//  even if it is older than the zone file.
 				logError("DNSSEC: can't sign "+name+" ("+ex.getMessage()+"): still serving the previous signed version"
-						+(cs.unsigned == unsigned ? "" : ", WITHOUT the latest changes to the zone file")
+						+(cs.unsigned == unsigned ? "" : ", WITHOUT the latest changes to the zone file (UPDATEs are refused until it is signed)")
 						+", valid until "+new Date(cs.expires*1000)+". Fix the keys or the zone.", ex);
+				if( cs.unsigned != unsigned ) {
+					//  An UPDATE to the old version would be journaled against the old serial,
+					//  and set aside (lost) at the next start
+					staleSigned.add(name);
+				}
 				return current;
 			}
 			logError("DNSSEC: can't sign "+name+" ("+ex.getMessage()+"), serving it UNSIGNED: validators reject it while the parent has a DS", ex);
@@ -3231,10 +3251,18 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			Soa soa = (Soa)base.getSoa().copy();
 			soa.setSerial(soa.getSerial()+1);
 			next.replaceSoa(soa);
+			String key = Canonical.key(base.getName());
+			Long failed = signFailedAt.get(key);
+			if( failed != null && now-failed < RESIGN_RETRY ) {
+				continue;
+			}
 			Zone served = prepareZone(next, z, true, zoneSet.zones, true);
 			if( served == null ) {
-				//  Round 5 #88: the current signatures are served while they are valid
-				logError("DNSSEC: "+base.getName()+" not signed again; its signatures expire "+new Date(sz.expires*1000));
+				//  Round 5 #88: the current signatures are served while they are valid;
+				//  tried again (and logged) every RESIGN_RETRY, not every minute
+				signFailedAt.put(key, now);
+				logError("DNSSEC: "+base.getName()+" not signed again; its signatures expire "+new Date(sz.expires*1000)
+						+", trying again in "+RESIGN_RETRY/60+" minutes");
 				continue;
 			}
 			try {
