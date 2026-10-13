@@ -74,6 +74,11 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
   - Resolver threads are virtual threads on Java 21+ (`JDns.resolverVirtualThreads`, default true).
   - Upstream address ranking and hold-off moved to parley-net's `UpstreamHealth`; `ServerA` keeps its
     settings and methods.
+- Round 4 #65: answers to TSIG-signed recursive queries are signed (the resolver thread used to
+  send them unsigned, so the client rejected them).
+- Round 4 #62: upstream servers that answer REFUSED, SERVFAIL, NOTAUTH, NOTIMP or FORMERR, or refer
+  upwards or sideways (lame), count as failing for ranking; when only such referrals come back the
+  client gets SERVFAIL instead of NOERROR without data.
 - Round 5 #84: the UPDATE journal is crash safe: the header is written into an empty journal too,
   each update is framed by `begin`/`end` lines (a torn last update is left out on replay), and a
   failed write is cut off again. Older journals without the framing still replay.

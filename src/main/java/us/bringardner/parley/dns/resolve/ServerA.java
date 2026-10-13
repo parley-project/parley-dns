@@ -280,7 +280,11 @@ public class ServerA  extends DnsBaseClass
 			//  Timeout or I/O error, counted as a failure below
 		}
 
-		if( ret != null ) {
+		if( ret != null && isRefusal(ret.getResponseCode()) ) {
+			//  Round 4 #62: a lame or refusing server answers fast, but not usefully: for
+			//  ranking it is a failure, so it doesn't sort ahead of working servers
+			health.failed(start);
+		} else if( ret != null ) {
 			health.succeeded(start);
 		} else {
 			//  A timeout counts as a slow answer so the server sorts behind responsive ones
@@ -288,6 +292,17 @@ public class ServerA  extends DnsBaseClass
 		}
 
 		return ret;
+	}
+
+	/** RCODEs that mean this server can't answer the question for us (round 4 #62). */
+	static boolean isRefusal(int rcode) {
+		return rcode == DNS.SERVER_ERROR || rcode == DNS.REFUSED || rcode == DNS.NOT_IMPLEMENTED
+				|| rcode == DNS.FORMAT_ERROR || rcode == 9;	//  9: NOTAUTH
+	}
+
+	/** Count an answer that turned out useless (e.g. a referral that isn't closer) as a failure. */
+	void lame() {
+		health.failed();
 	}
 
 	/** Hold-off (ms) after the k-th failure past MAX_TRIES (k >= 1): HOLD_OFF_MIN doubled k-1 times, at most DEACTIVATE. */

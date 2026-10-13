@@ -209,7 +209,7 @@ public class RemoteServer  extends DnsBaseClass {
 				continue;
 			}
 			tried = true;
-			if( usable(ret=svr.query(nm, svr.timeoutFor(remaining), deadline, false)) ) {
+			if( useful(svr, ret=svr.query(nm, svr.timeoutFor(remaining), deadline, false)) ) {
 				return ret;
 			}
 		}
@@ -221,13 +221,34 @@ public class RemoteServer  extends DnsBaseClass {
 			long remaining = deadline - System.currentTimeMillis();
 			if( next != null && remaining > 0 ) {
 				ret = next.query(nm, next.timeoutFor(remaining), deadline, true);
-				if( usable(ret) ) {
+				if( useful(next, ret) ) {
 					return ret;
 				}
 			}
 		}
 
 		return null;
+	}
+
+	/**
+	 * Usable, and not a lame referral: a referral must be to a zone below this one
+	 * (round 4 #62). A server that refers upwards or sideways is counted as failing,
+	 * so it sorts behind the others.
+	 */
+	private boolean useful(ServerA svr, Message ret) {
+		if( !usable(ret) ) {
+			return false;
+		}
+		if( ret.getAnswerCount() == 0 && ret.getResponseCode() == DNS.NOERROR && !Resolver.isNoData(ret) && !ret.isRecursive() ) {
+			String zone = us.bringardner.parley.dns.dnssec.Canonical.key(nameStr == null ? "" : nameStr);
+			for(us.bringardner.parley.dns.RR rr : ret.getAuthority()) {
+				if( rr.getType() == DNS.NS && !us.bringardner.parley.dns.dnssec.Canonical.isBelow(rr.getName(), zone, false) ) {
+					svr.lame();
+					return false;
+				}
+			}
+		}
+		return true;
 	}
 
 	/** An answer, NXDOMAIN or a referral (anything with records). */

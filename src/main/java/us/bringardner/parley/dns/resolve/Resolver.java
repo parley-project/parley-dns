@@ -819,6 +819,11 @@ public class Resolver  extends DnsBaseClass
 			}
 		}
 
+		if( ret != null && !ret.isRecursive() && ret.getResponseCode() == DNS.NOERROR && ret.getAnswerCount() == 0 && !isNoData(ret) ) {
+			//  Round 4 #62: only a referral that leads nowhere closer is left: no answer
+			//  (the client used to get NOERROR without data), SERVFAIL instead
+			return null;
+		}
 		return ret;
 	}
 	
