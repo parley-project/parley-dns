@@ -76,6 +76,23 @@ public class ZoneUpdater implements DNS {
 		return new Result(rcode, null, null);
 	}
 
+	/**
+	 * Round 5 #74: an update whose journal entry would not read back as the
+	 * same change (a name or string with a space, quote, line break or other
+	 * byte the zone file text can't carry) is refused as a whole, nothing applied.
+	 */
+	private static Result unsafe(String name) {
+		journalRefusals.incrementAndGet();
+		return fail(REFUSED);
+	}
+
+	private static final java.util.concurrent.atomic.AtomicLong journalRefusals = new java.util.concurrent.atomic.AtomicLong();
+
+	/** @return UPDATEs refused because a change could not be written to the journal safely (round 5 #74) */
+	public static long getJournalRefusals() {
+		return journalRefusals.get();
+	}
+
 	private static boolean isMeta(int type) {
 		return type == AXFR || type == IXFR || type == 253 || type == 254 || type == TYPE_ANY || type == OPT;
 	}
@@ -220,26 +237,46 @@ public class ZoneUpdater implements DNS {
 				String key = Zone.recordKey(u);
 				if( type == CNAME && hasCname ) {
 					//  replaces the CNAME
+					if( !z.journalEntryReadsBack("delset "+absolute(name)+" CNAME", null, name) ) {
+						return unsafe(name);
+					}
 					z.removeRecords(name, r -> r.getType() == CNAME);
 					journal.add("delset "+absolute(name)+" CNAME");
 				} else if( z.removeRecords(name, r -> Zone.recordKey(r).equals(key)) > 0 ) {
 					//  the same record again: new TTL
+					if( !z.journalEntryReadsBack("del "+delLine(u), u, name) ) {
+						return unsafe(name);
+					}
 					journal.add("del "+delLine(u));
+				}
+				if( !z.journalEntryReadsBack("add "+Zone.recordLine(u), u, name) ) {
+					return unsafe(name);
 				}
 				z.addRecord(u);
 				journal.add("add "+Zone.recordLine(u));
 			} else if( cls == CLASS_ANY ) {
 				if( type == TYPE_ANY ) {
 					java.util.function.Predicate<RR> which = apex ? (r -> r.getType() != NS) : (r -> true);
+					String entry = apex ? "delname-keepns "+absolute(name) : "delname "+absolute(name);
+					if( !z.journalEntryReadsBack(entry, null, name) ) {
+						return unsafe(name);
+					}
 					if( z.removeRecords(name, which) > 0 ) {
-						journal.add(apex ? "delname-keepns "+absolute(name) : "delname "+absolute(name));
+						journal.add(entry);
 					}
 				} else {
 					if( apex && (type == SOA || type == NS) ) {
 						continue;
 					}
+					if( type < 0 || type >= DNS.TYPENAMES.length ) {
+						return unsafe(name);
+					}
+					String entry = "delset "+absolute(name)+" "+DNS.TYPENAMES[type];
+					if( !z.journalEntryReadsBack(entry, null, name) ) {
+						return unsafe(name);
+					}
 					if( z.removeRecords(name, r -> r.getType() == type) > 0 ) {
-						journal.add("delset "+absolute(name)+" "+DNS.TYPENAMES[type]);
+						journal.add(entry);
 					}
 				}
 			} else {
@@ -259,6 +296,9 @@ public class ZoneUpdater implements DNS {
 						//  never the last NS of the zone
 						continue;
 					}
+				}
+				if( !z.journalEntryReadsBack("del "+delLine(u), u, name) ) {
+					return unsafe(name);
 				}
 				if( z.removeRecords(name, r -> Zone.recordKey(r).equals(key)) > 0 ) {
 					journal.add("del "+delLine(u));
