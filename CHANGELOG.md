@@ -77,6 +77,9 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
 - Round 5 #84: the UPDATE journal is crash safe: the header is written into an empty journal too,
   each update is framed by `begin`/`end` lines (a torn last update is left out on replay), and a
   failed write is cut off again. Older journals without the framing still replay.
+- Round 5 #88: a signed zone that can't be signed again keeps serving its last signed version while
+  the signatures are valid (also after its zone file changed), instead of going unsigned; an UPDATE
+  or re-sign that can't be signed is not made (nothing journaled).
 - SSHFP (RFC 4255, 6594): the `Sshfp` record (zone files, UPDATE, wire), `SshfpVerifier` to check an SSH
   host key against validated SSHFP records, and `SshfpTool` to print the records for host keys.
 - `Base32Hex` and `RenamedProperty` moved to parley-core (`us.bringardner.parley.core.util`); a

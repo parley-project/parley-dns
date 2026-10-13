@@ -644,4 +644,34 @@ public class TestDnssecServer {
 		assertEquals(0, count(m.getAuthority(), DNS.NSEC));
 		assertTrue(optDo(m));
 	}
+
+	/** Round 5 #88: a zone that can't be signed any more isn't served unsigned. */
+	@Test
+	public void aZoneThatCantBeSignedKeepsItsSignatures() throws Exception {
+		server.setUpdateAllow("127.0.0.1");
+		SignedZone before = zone().getSigned();
+		assertNotNull(before);
+		//  the private keys are gone: nothing can sign
+		new File(dir, ksk.baseName()+".private").delete();
+		new File(dir, zsk.baseName()+".private").delete();
+		server.reloadDnssecKeys();
+		assertNotNull(zone().getSigned(), "still signed after the keys changed");
+		verify(ask("www.sec.test", DNS.A), "the previous signatures");
+		//  an update that can't be signed isn't made
+		A a = new A("nosign.sec.test");
+		a.setAddress("10.7.7.8");
+		a.setTTL(300);
+		assertEquals(DNS.SERVER_ERROR, update(a));
+		assertFalse(new File(dir, "sec.test.txt.jnl").exists(), "nothing journaled");
+		assertEquals(0, ask("nosign.sec.test", DNS.A).getAnswerCount());
+		//  nor a re-sign: the signatures already there are served
+		assertEquals(0, server.resignDue(before.refreshAt+1));
+		assertNotNull(zone().getSigned());
+		assertEquals(100, zone().getSoa().getSerial());
+		//  an edited zone file keeps the signed version too, while it is valid
+		write(zoneFile, zoneText(200, childDs));
+		server.addZone(new Zone(zoneFile));
+		assertNotNull(zone().getSigned());
+		verify(ask("www.sec.test", DNS.A), "still the previous signatures");
+	}
 }

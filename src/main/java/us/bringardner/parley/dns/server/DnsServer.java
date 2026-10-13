@@ -2674,6 +2674,13 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				return ret;
 			}
 			if( r.changed() ) {
+				//  Signed first: a change that can't be signed is not made (round 5 #88)
+				Zone served = prepareZone(r.zone, zone, true, zoneSet.zones, true);
+				if( served == null ) {
+					logError("UPDATE of "+zone.getName()+" not made: the zone can't be signed");
+					ret.setResponseCodeServerFailure();
+					return ret;
+				}
 				try {
 					writeJournal(zone, r.journal, req);
 				} catch(IOException ex) {
@@ -2681,7 +2688,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 					ret.setResponseCodeServerFailure();
 					return ret;
 				}
-				Zone served = prepareZone(r.zone, zone, true, zoneSet.zones);
 				publishUpdatedZone(zone, served);
 				final int n = r.journal.size();
 				log(() -> "UPDATE of "+zone.getName()+" from "+req.getClient()+(key == null ? "" : " key "+key)
@@ -3099,6 +3105,14 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 * @param zones the zones (by lower case name) that will be served
 	 */
 	Zone prepareZone(Zone loaded, Zone current, boolean force, Map<String, Zone> zones) {
+		return prepareZone(loaded, current, force, zones, false);
+	}
+
+	/**
+	 * @param orNull return null if the zone has keys but can't be signed, instead of
+	 *  falling back (an UPDATE or a re-sign is then not made at all)
+	 */
+	private Zone prepareZone(Zone loaded, Zone current, boolean force, Map<String, Zone> zones, boolean orNull) {
 		Zone unsigned = loaded.getUnsigned();
 		String name = Canonical.key(unsigned.getName());
 		List<DnssecKey> keys = dnssecKeys.get(name);
@@ -3148,11 +3162,20 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 					+new Date(sz.expires*1000));
 			return r.zone;
 		} catch(RuntimeException ex) {
-			if( cs != null && cs.expires > now && cs.unsigned == unsigned ) {
-				logError("DNSSEC: can't sign "+name+" ("+ex.getMessage()+"), still serving the previous signatures", ex);
+			if( orNull ) {
+				logError("DNSSEC: can't sign "+name+" ("+ex.getMessage()+")", ex);
+				return null;
+			}
+			if( cs != null && cs.expires > now ) {
+				//  Round 5 #88: unsigned, it would be BOGUS to every validator while the
+				//  parent has a DS. The last signed version is served until it expires,
+				//  even if it is older than the zone file.
+				logError("DNSSEC: can't sign "+name+" ("+ex.getMessage()+"): still serving the previous signed version"
+						+(cs.unsigned == unsigned ? "" : ", WITHOUT the latest changes to the zone file")
+						+", valid until "+new Date(cs.expires*1000)+". Fix the keys or the zone.", ex);
 				return current;
 			}
-			logError("DNSSEC: can't sign "+name+" ("+ex.getMessage()+"), serving it unsigned", ex);
+			logError("DNSSEC: can't sign "+name+" ("+ex.getMessage()+"), serving it UNSIGNED: validators reject it while the parent has a DS", ex);
 			return unsigned;
 		}
 	}
@@ -3208,6 +3231,12 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			Soa soa = (Soa)base.getSoa().copy();
 			soa.setSerial(soa.getSerial()+1);
 			next.replaceSoa(soa);
+			Zone served = prepareZone(next, z, true, zoneSet.zones, true);
+			if( served == null ) {
+				//  Round 5 #88: the current signatures are served while they are valid
+				logError("DNSSEC: "+base.getName()+" not signed again; its signatures expire "+new Date(sz.expires*1000));
+				continue;
+			}
 			try {
 				writeJournal(base, Collections.singletonList("serial "+Integer.toUnsignedString(soa.getSerial())),
 						"signed again (DNSSEC signatures renewed)");
@@ -3215,7 +3244,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				logError("DNSSEC: can't write the journal of "+base.getName()+"; not signed again", ex);
 				continue;
 			}
-			Zone served = prepareZone(next, z, true, zoneSet.zones);
 			publishUpdatedZone(z, served);
 			ZoneNotifier nf = notifier;
 			if( nf != null ) {
