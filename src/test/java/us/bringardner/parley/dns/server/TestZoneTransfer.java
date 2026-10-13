@@ -329,6 +329,10 @@ public class TestZoneTransfer {
 		final Thread thread;
 
 		FakeSecondary(boolean answer) throws IOException {
+			this(answer, DNS.NOERROR);
+		}
+
+		FakeSecondary(boolean answer, int rcode) throws IOException {
 			thread = new Thread(() -> {
 				byte [] buf = new byte[4096];
 				while( !sock.isClosed() ) {
@@ -343,6 +347,7 @@ public class TestZoneTransfer {
 							r.getHeader().setOPCODE(DNS.NOTIFY);
 							r.setMessageTypeResponse();
 							r.setQuestion(m.getQuestion().get(0));
+							r.setResponseCode(rcode);
 							byte [] b = r.toByteArray();
 							sock.send(new DatagramPacket(b, b.length, p.getSocketAddress()));
 						}
@@ -422,6 +427,29 @@ public class TestZoneTransfer {
 			assertEquals(3, n.getSent());
 			assertEquals(1, n.getFailed());
 			assertEquals(0, n.getAcknowledged());
+		}
+	}
+
+	/** Round 5 #99: only NOERROR acknowledges a NOTIFY. */
+	@Test
+	public void aRefusedNotifyIsNotAnAcknowledgement() throws Exception {
+		try(FakeSecondary sec = new FakeSecondary(true, DNS.REFUSED)) {
+			server.setNotifyTargets(sec.target(), 3, 100);
+			ZoneNotifier n = server.getNotifier();
+			n.notifyZone(server.getZone("xfr.test"));
+			assertTrue(n.awaitIdle(10_000));
+			assertEquals(1, sec.received.size(), "not sent again: it won't help");
+			assertEquals(0, n.getAcknowledged());
+			assertEquals(1, n.getRefused());
+		}
+		try(FakeSecondary sec = new FakeSecondary(true, DNS.SERVER_ERROR)) {
+			server.setNotifyTargets(sec.target(), 3, 100);
+			ZoneNotifier n = server.getNotifier();
+			n.notifyZone(server.getZone("xfr.test"));
+			assertTrue(n.awaitIdle(10_000));
+			assertEquals(3, sec.received.size(), "SERVFAIL is retried");
+			assertEquals(0, n.getAcknowledged());
+			assertEquals(1, n.getFailed());
 		}
 	}
 

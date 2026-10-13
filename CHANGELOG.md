@@ -80,6 +80,11 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
 - Round 5 #88: a signed zone that can't be signed again keeps serving its last signed version while
   the signatures are valid (also after its zone file changed), instead of going unsigned; an UPDATE
   or re-sign that can't be signed is not made (nothing journaled).
+- Round 5 #97: an OPT record in the answer or authority section is FORMERR (RFC 6891 6.1.1).
+- Round 5 #99: a NOTIFY answered with an error is not counted as acknowledged: REFUSED, NOTAUTH and
+  the like are logged and not retried (`ZoneNotifier.getRefused()`); SERVFAIL is retried.
+- Round 5 #100: a TSIG MAC longer than the hash, or shorter than the larger of 10 bytes and half of
+  it, is FORMERR (RFC 8945 5.2.2.1); it was answered BADSIG / BADTRUNC.
 - SSHFP (RFC 4255, 6594): the `Sshfp` record (zone files, UPDATE, wire), `SshfpVerifier` to check an SSH
   host key against validated SSHFP records, and `SshfpTool` to print the records for host keys.
 - `Base32Hex` and `RenamedProperty` moved to parley-core (`us.bringardner.parley.core.util`); a

@@ -685,8 +685,10 @@ public final class Tsig {
 			}
 			int full = key.macLength();
 			if( r.mac.length > full || r.mac.length < Math.max(10, full/2) ) {
-				return new Session(null, r.keyName, r.algorithm, r.fudge, new byte[0],
-						r.mac.length > full ? BADSIG : BADTRUNC, r.timeSigned);
+				//  Round 5 #100: RFC 8945 5.2.2.1, a MAC longer than the hash or shorter
+				//  than the larger of 10 and half the hash is malformed: FORMERR
+				throw new DnsFormatException("TSIG MAC of "+r.mac.length+" bytes for "+r.algorithm
+						+" (allowed: "+Math.max(10, full/2)+" to "+full+")");
 			}
 			Mac mac = key.mac();
 			mac.update(strip(msg, r));

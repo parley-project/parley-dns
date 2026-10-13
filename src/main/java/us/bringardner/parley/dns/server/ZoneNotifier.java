@@ -65,6 +65,7 @@ public class ZoneNotifier extends DnsBaseClass {
 	private final ExecutorService sender = Executors.newSingleThreadExecutor(new NamedThreadFactory("ZoneNotifier"));
 	private final AtomicLong sent = new AtomicLong();
 	private final AtomicLong acknowledged = new AtomicLong();
+	private final AtomicLong refused = new AtomicLong();
 	private final AtomicLong failed = new AtomicLong();
 
 	/**
@@ -204,9 +205,21 @@ public class ZoneNotifier extends DnsBaseClass {
 					return false;
 				}, null);
 				if( answer != null ) {
-					acknowledged.incrementAndGet();
-					log(() -> "NOTIFY for "+zoneName+" acknowledged by "+target);
-					return;
+					//  Round 5 #99: only NOERROR is an acknowledgement
+					int rcode = new Message(new ByteBuffer(answer)).getResponseCode();
+					if( rcode == DNS.NOERROR ) {
+						acknowledged.incrementAndGet();
+						log(() -> "NOTIFY for "+zoneName+" acknowledged by "+target);
+						return;
+					}
+					if( rcode != DNS.SERVER_ERROR ) {
+						//  REFUSED, NOTAUTH, NOTIMP...: sending it again won't change that
+						refused.incrementAndGet();
+						logError("NOTIFY for "+zoneName+" refused by "+target+" (RCODE "+rcode
+								+"): check that it is a secondary for the zone and accepts NOTIFY from us");
+						return;
+					}
+					//  SERVFAIL: it may work next time
 				}
 				wait *= 2;
 			}
@@ -221,6 +234,8 @@ public class ZoneNotifier extends DnsBaseClass {
 	public long getSent() { return sent.get(); }
 	public long getAcknowledged() { return acknowledged.get(); }
 	public long getFailed() { return failed.get(); }
+	/** @return NOTIFYs answered with an error other than SERVFAIL (REFUSED, NOTAUTH...): not retried */
+	public long getRefused() { return refused.get(); }
 
 	/** Stop sending (queued notifications are dropped). */
 	public void shutdown() {

@@ -278,6 +278,19 @@ public class TestEdns {
 		assertNull(optOf(r));
 	}
 
+	/** Round 5 #97: an OPT outside the additional section is FORMERR (RFC 6891 6.1.1). */
+	@Test
+	public void anOptOutsideTheAdditionalSectionIsFormErr() throws IOException {
+		Message q = query("www.edns.test");
+		q.addAuthority(opt(1232, 0));
+		Message r = new Message(new ByteBuffer(udp(q)));
+		assertEquals(DNS.FORMAT_ERROR, r.getResponseCode());
+		Message q2 = query("www.edns.test", opt(1232, 0));
+		q2.addAnswer(opt(1232, 0));
+		assertEquals(DNS.FORMAT_ERROR, new Message(new ByteBuffer(udp(q2))).getResponseCode());
+		assertTrue(Edns.parse(q).isMalformed());
+	}
+
 	@Test
 	public void smallAnswerWithEdns() throws IOException {
 		Message r = new Message(new ByteBuffer(udp(query("www.edns.test", opt(1232, 0)))));
