@@ -207,10 +207,24 @@ public class ZoneUpdater implements DNS {
 			if( cls == zclass ) {
 				if( type == SOA ) {
 					if( apex && serialNewer(((Soa)u).getSerial(), z.getSoa().getSerial()) ) {
+						//  Round 5 #98: the new SOA replaces the old one (RFC 2136 3.4.2.2),
+						//  not just its serial
+						Soa n = (Soa)u;
 						Soa s = (Soa)z.getSoa().copy();
-						s.setSerial(((Soa)u).getSerial());
+						s.setMname(n.getMname());
+						s.setRname(n.getRname());
+						s.setSerial(n.getSerial());
+						s.setRefreash(n.getRefreash());
+						s.setRetry(n.getRetry());
+						s.setExpire(n.getExpire());
+						s.setMinimum(n.getMinimum());
+						s.setTTL(n.getTTL());
+						String entry = Zone.soaJournalEntry(z.getName(), s);
+						if( !z.journalEntryReadsBack(entry, s, name) ) {
+							return unsafe(name);
+						}
 						z.replaceSoa(s);
-						journal.add("serial "+Integer.toUnsignedString(s.getSerial()));
+						journal.add(entry);
 						soaSet = true;
 					}
 					continue;

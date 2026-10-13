@@ -1430,6 +1430,17 @@ public class Zone implements DNS {
 						&& recordKey(back).equals(recordKey(rr))
 						&& (op.equals("del") || back.getTTL() == rr.getTTL());
 			}
+			case "soa": {
+				if( args.size() != 9 || !(rr instanceof Soa) ) {
+					return false;
+				}
+				Soa back = soaFromJournal(args);
+				Soa want = (Soa)rr;
+				return back.getMname().equalsIgnoreCase(want.getMname()) && back.getRname().equalsIgnoreCase(want.getRname())
+						&& back.getSerial() == want.getSerial() && back.getTTL() == want.getTTL()
+						&& back.getRefreash() == want.getRefreash() && back.getRetry() == want.getRetry()
+						&& back.getExpire() == want.getExpire() && back.getMinimum() == want.getMinimum();
+			}
 			case "delset":
 				return args.size() == 2;
 			case "delname":
@@ -1443,8 +1454,41 @@ public class Zone implements DNS {
 		}
 	}
 
+	/**
+	 * Round 5 #98: the journal entry for a new SOA (RFC 2136 3.4.2.2), all of it:
+	 * "soa owner ttl mname rname serial refresh retry expire minimum".
+	 */
+	static String soaJournalEntry(String owner, Soa s) {
+		return "soa "+dotted(owner)+" "+s.getTTL()+" "+dotted(s.getMname())+" "+dotted(s.getRname())+" "
+				+Integer.toUnsignedString(s.getSerial())+" "+s.getRefreash()+" "+s.getRetry()+" "+s.getExpire()+" "+s.getMinimum();
+	}
+
+	private static String dotted(String name) {
+		return name.endsWith(".") ? name : name+".";
+	}
+
+	/** The SOA of a "soa" journal entry's arguments (owner first), from the current one. */
+	private Soa soaFromJournal(List<String> args) {
+		Soa s = (Soa)soa.copy();
+		s.setTTL(Integer.parseInt(args.get(1)));
+		s.setMname(stripDot(args.get(2)));
+		s.setRname(stripDot(args.get(3)));
+		s.setSerial((int)Long.parseLong(args.get(4)));
+		s.setRefreash(Integer.parseInt(args.get(5)));
+		s.setRetry(Integer.parseInt(args.get(6)));
+		s.setExpire(Integer.parseInt(args.get(7)));
+		s.setMinimum(Integer.parseInt(args.get(8)));
+		return s;
+	}
+
 	private void applyJournalLine(String op, List<String> args) {
 		switch(op) {
+		case "soa":
+			if( args.size() != 9 ) {
+				throw new IllegalArgumentException("soa needs owner ttl mname rname serial refresh retry expire minimum");
+			}
+			soa = soaFromJournal(args);
+			break;
 		case "serial": {
 			Soa s = (Soa)soa.copy();
 			s.setSerial((int)Long.parseLong(args.get(0)));

@@ -580,4 +580,36 @@ public class TestDynamicUpdate {
 		java.nio.file.Files.write(jnl.toPath(), ("base "+Integer.toUnsignedString(z.getSoa().getSerial())+"\n; old style\nadd old.up.test. 300 IN A 10.1.1.6\n").getBytes());
 		assertEquals(1, new Zone(zoneFile).exactRecords("old.up.test").size());
 	}
+
+	/** Round 5 #98: an UPDATE with a newer SOA replaces all of it (RFC 2136 3.4.2.2). */
+	@Test
+	public void aNewSoaReplacesTheOldOne() throws Exception {
+		us.bringardner.parley.dns.Soa soa = new us.bringardner.parley.dns.Soa("up.test");
+		soa.setMname("ns2.up.test");
+		soa.setRname("admin.up.test");
+		soa.setSerial(500);
+		soa.setRefreash(7200);
+		soa.setRetry(600);
+		soa.setExpire(604800);
+		soa.setMinimum(60);
+		soa.setTTL(900);
+		assertEquals(DNS.NOERROR, send(new Update().add(soa)));
+		us.bringardner.parley.dns.Soa now = server.getZone("up.test").getSoa();
+		assertEquals(500, now.getSerial());
+		assertEquals("ns2.up.test", now.getMname());
+		assertEquals("admin.up.test", now.getRname());
+		assertEquals(7200, now.getRefreash());
+		assertEquals(60, now.getMinimum());
+		//  and it survives a restart
+		us.bringardner.parley.dns.Soa back = new Zone(zoneFile).getSoa();
+		assertEquals(500, back.getSerial());
+		assertEquals("ns2.up.test", back.getMname());
+		assertEquals(604800, back.getExpire());
+		assertEquals(900, back.getTTL());
+		//  an older serial is ignored
+		soa.setSerial(400);
+		soa.setMname("ns3.up.test");
+		send(new Update().add(soa));
+		assertEquals("ns2.up.test", server.getZone("up.test").getSoa().getMname());
+	}
 }
