@@ -25,11 +25,8 @@ package us.bringardner.parley.dns.dnssec;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
-import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.GeneralSecurityException;
@@ -47,6 +44,7 @@ import java.util.Map;
 import java.util.TimeZone;
 
 import us.bringardner.parley.dns.DNS;
+import us.bringardner.parley.dns.DnsBaseClass;
 import us.bringardner.parley.dns.Dnskey;
 import us.bringardner.parley.dns.Ds;
 
@@ -62,6 +60,8 @@ import us.bringardner.parley.dns.Ds;
  * without its .private is published but never signs (for a key rollover).
  */
 public final class DnssecKey {
+
+	private static final DnsBaseClass LOG = new DnsBaseClass();
 
 	private final String zone;
 	private final Dnskey dnskey;
@@ -246,16 +246,9 @@ public final class DnssecKey {
 				p.append(t).append(": ").append(timeText(times.get(t))).append('\n');
 			}
 		}
-		Files.write(priv.toPath(), new byte[0]);
-		try {
-			java.util.Set<java.nio.file.attribute.PosixFilePermission> perms = java.nio.file.attribute.PosixFilePermissions.fromString("rw-------");
-			Files.setPosixFilePermissions(priv.toPath(), perms);
-		} catch(UnsupportedOperationException ex) {
-			//  not a POSIX file system
-		}
-		try(Writer w = new OutputStreamWriter(new FileOutputStream(priv), StandardCharsets.US_ASCII)) {
-			w.write(p.toString());
-		}
+		//  Round 5 #94: created new (an existing file or symlink is refused) and readable by
+		//  its owner only from the start, not chmod'ed after it was created
+		us.bringardner.parley.core.util.PrivateKeys.writePrivateFile(priv, p.toString());
 		StringBuilder k = new StringBuilder();
 		k.append("; This is a ").append(isKsk() ? "key-signing" : "zone-signing").append(" key, keyid ")
 			.append(getKeyTag()).append(", for ").append(zone).append(".\n");
@@ -283,6 +276,12 @@ public final class DnssecKey {
 		PrivateKey pk = null;
 		Map<String, Long> times = new LinkedHashMap<String, Long>();
 		if( priv.isFile() ) {
+			String exposed = us.bringardner.parley.core.util.PrivateKeys.exposure(priv);
+			if( exposed != null ) {
+				//  Round 5 #94: the key may already be in other hands
+				LOG.logWarn(priv+" is "+exposed+": anyone who can read it can sign for "+k.getName()
+						+". Make it readable by its owner only (chmod 600) and consider a key rollover.");
+			}
 			Map<String, String> fields = readFields(priv);
 			String alg = fields.get("Algorithm");
 			if( alg == null || !alg.trim().startsWith(String.valueOf(k.getAlgorithm())) ) {

@@ -58,6 +58,12 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
     (CLASS254 is NONE, TYPEnnn / CLASSnnn otherwise).
   - #96: RP and AFSDB names are written without compression (RFC 3597 4).
   - `setRdLength` refuses rdata over 65535 bytes; `setRdata` forgets the message the record came from.
+- DNSSEC keys use parley-core's crypto helpers (`Ec`, `PrivateKeys`):
+  - ECDSA DNSKEYs must be points on the curve; a key that isn't verifies nothing (it used to be
+    handed to the JDK as is). Signatures convert between DER and r||s with bounds-checked parsing.
+  - Round 5 #94: a new `.private` file is created with `PrivateKeys.writePrivateFile` (new file only,
+    so an existing file or symlink is refused; owner-only from the start). Loading a `.private` file
+    that its group or everyone can read logs a warning.
 
 ### Changed (behaviour)
 
