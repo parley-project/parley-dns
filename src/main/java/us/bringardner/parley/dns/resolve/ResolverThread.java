@@ -258,6 +258,10 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 		msg.getHeader().setAA(false);
 		msg.getHeader().setRA(true);
 		msg.getHeader().setRD(req.getHeader().getRD());
+		if( secure ) {
+			//  Only what was validated goes out with a SECURE answer (round 5 #83)
+			Validator.removeUnvalidated(msg, result);
+		}
 		msg.getHeader().setAD(secure && (dnssecOk || req.getHeader().getAD()));
 		msg.getHeader().setCD(req.getHeader().getCD());
 		if( !dnssecOk ) {

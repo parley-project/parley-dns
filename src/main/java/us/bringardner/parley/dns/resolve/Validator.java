@@ -84,10 +84,21 @@ public final class Validator extends DnsBaseClass {
 	public static final class Result {
 		public final Status status;
 		public final String why;
+		/**
+		 * For SECURE: the RRsets of the answer and authority sections whose
+		 * signatures were checked ({@link #setKey(RR)}). Only these may go out
+		 * under the AD bit (round 5 #83).
+		 */
+		public final java.util.Set<String> validated;
 
 		Result(Status status, String why) {
+			this(status, why, Collections.<String>emptySet());
+		}
+
+		Result(Status status, String why, java.util.Set<String> validated) {
 			this.status = status;
 			this.why = why;
+			this.validated = validated;
 		}
 
 		@Override
@@ -123,11 +134,66 @@ public final class Validator extends DnsBaseClass {
 	static final int MAX_VERIFICATIONS = 64;
 	static final int MAX_FAILED_VERIFICATIONS = 16;
 
-	/** The signature checks spent by the validation running on this thread. */
+	/** The signature checks spent by the validation running on this thread, and what they proved. */
 	private static final class Budget {
 		int verifications;
 		int failures;
 		boolean exhausted;
+		/** RRsets of the message being validated whose signatures checked out */
+		final java.util.Set<String> validated = new java.util.HashSet<String>();
+	}
+
+	/** Note that an RRset of the message being validated is proven. */
+	private void proven(List<RR> set) {
+		Budget b = budget.get();
+		if( b != null ) {
+			for(RR rr : set) {
+				b.validated.add(setKey(rr));
+			}
+		}
+	}
+
+	/**
+	 * The key of the RRset a record belongs to, for {@link Result#validated}:
+	 * owner and type; for a CNAME also the target (a second, unsigned CNAME
+	 * at the same name is a different "set"); an RRSIG belongs to what it covers.
+	 */
+	static String setKey(RR rr) {
+		String owner = Canonical.key(rr.getName());
+		if( rr instanceof Rrsig ) {
+			return owner+"|"+((Rrsig)rr).getTypeCovered();
+		}
+		if( rr.getType() == DNS.CNAME ) {
+			return owner+"|"+DNS.CNAME+"|"+Canonical.key(((Cname)rr).getCname());
+		}
+		return owner+"|"+rr.getType();
+	}
+
+	/**
+	 * Round 5 #83: remove from a SECURE answer's answer and authority sections
+	 * every record that wasn't validated, so the AD bit only covers data that
+	 * was checked (RFC 4035 3.2.3). Records added to a signed answer on the
+	 * way (an extra A record for another name, NS records in the authority
+	 * section) used to go out as if they were authenticated.
+	 */
+	public static void removeUnvalidated(Message m, Result r) {
+		if( m == null || r == null || r.status != Status.SECURE ) {
+			return;
+		}
+		for(List<RR> section : Arrays.asList(m.getAnswer(), m.getAuthority())) {
+			section.removeIf(rr -> {
+				if( rr instanceof Rrsig && ((Rrsig)rr).getTypeCovered() == DNS.CNAME ) {
+					String prefix = Canonical.key(rr.getName())+"|"+DNS.CNAME+"|";
+					for(String k : r.validated) {
+						if( k.startsWith(prefix) ) {
+							return false;
+						}
+					}
+					return true;
+				}
+				return !r.validated.contains(setKey(rr));
+			});
+		}
 	}
 
 	private final ThreadLocal<Budget> budget = new ThreadLocal<Budget>();
@@ -273,6 +339,9 @@ public final class Validator extends DnsBaseClass {
 				budgetExhausted.incrementAndGet();
 				return new Result(Status.BOGUS, "too many signature checks ("+b.verifications+", "+b.failures+" failed)");
 			}
+			if( r.status == Status.SECURE ) {
+				return new Result(Status.SECURE, r.why, Collections.unmodifiableSet(new java.util.HashSet<String>(b.validated)));
+			}
 			return r;
 		} finally {
 			if( saved == null ) {
@@ -374,11 +443,12 @@ public final class Validator extends DnsBaseClass {
 		if( good == null ) {
 			return new Result(Status.BOGUS, "no valid signature for "+owner+" "+typeName(type)+" by "+zk.zone);
 		}
+		proven(set);
 		int labels = Canonical.labelCount(owner);
 		if( good.getLabels() < labels ) {
 			//  A wildcard answer: prove the name itself does not exist
 			String ce = lastLabels(owner, good.getLabels());
-			Denial d = denial(m, zk);
+			Denial d = denial(m, zk, true);
 			if( d.nsec3 != null ) {
 				Nsec3 cover = d.nsec3Covering(nextCloser(owner, ce));
 				if( cover == null ) {
@@ -548,8 +618,11 @@ public final class Validator extends DnsBaseClass {
 		return dot < 0 ? o : o.substring(0, dot);
 	}
 
-	/** The verified NSEC / NSEC3 records of the message. */
-	private Denial denial(Message m, ZoneKeys zk) {
+	/**
+	 * The verified NSEC / NSEC3 records of the message.
+	 * @param answer m is the answer being validated (not one fetched on the way)
+	 */
+	private Denial denial(Message m, ZoneKeys zk, boolean answer) {
 		Denial d = new Denial();
 		d.apex = zk.zone;
 		for(List<RR> set : bySet(m.getAuthority()).values()) {
@@ -560,6 +633,9 @@ public final class Validator extends DnsBaseClass {
 			String owner = Canonical.key(set.get(0).getName());
 			if( verifySet(set, sigsFor(m, owner, t), zk) == null ) {
 				continue;
+			}
+			if( answer ) {
+				proven(set);
 			}
 			if( t == DNS.NSEC ) {
 				d.nsec.add((Nsec)set.get(0));
@@ -583,7 +659,17 @@ public final class Validator extends DnsBaseClass {
 		if( zk.status != Status.SECURE ) {
 			return new Result(zk.status, zk.why);
 		}
-		Denial d = denial(m, zk);
+		//  The zone's SOA, for negative caching (RFC 2308): kept only if its signature checks out
+		List<RR> soa = new ArrayList<RR>();
+		for(RR rr : m.getAuthority()) {
+			if( rr.getType() == DNS.SOA && Canonical.key(rr.getName()).equals(zk.zone) ) {
+				soa.add(rr);
+			}
+		}
+		if( !soa.isEmpty() && verifySet(soa, sigsFor(m, zk.zone, DNS.SOA), zk) != null ) {
+			proven(soa);
+		}
+		Denial d = denial(m, zk, true);
 		if( d.nsec3 != null ) {
 			if( d.params.getIterations() > MAX_NSEC3_ITERATIONS ) {
 				return new Result(Status.INSECURE, "NSEC3 with "+d.params.getIterations()+" iterations");
@@ -775,7 +861,7 @@ public final class Validator extends DnsBaseClass {
 			}
 			return withExpiry(zone, Math.min(zone.expires, now+Math.min(MAX_TTL, ttl(cname))));
 		}
-		Denial d = denial(m, zone);
+		Denial d = denial(m, zone, false);
 		long exp = Math.min(zone.expires, now+Math.min(MAX_TTL, negativeTtl(m)));
 		if( d.nsec3 != null ) {
 			if( d.params.getIterations() > MAX_NSEC3_ITERATIONS ) {
