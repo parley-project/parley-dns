@@ -243,6 +243,56 @@ public class TestTsigServer {
 		assertEquals(before+1, server.getTsigReplays().getReplays());
 	}
 
+	/** An UPDATE of tsig.test that adds (or, with del, deletes) rep.tsig.test A 10.9.9.9 */
+	private static byte [] update(int id, boolean del) {
+		Message m = new Message();
+		m.setQuestion("tsig.test", DNS.SOA, DNS.IN);
+		m.setID(id);
+		m.getHeader().setOPCODE(DNS.UPDATE);
+		us.bringardner.parley.dns.A a = new us.bringardner.parley.dns.A("rep.tsig.test");
+		a.setAddress("10.9.9.9");
+		a.setTTL(300);
+		if( del ) {
+			a.setDnsClass(254);
+			a.setTTL(0);
+		}
+		m.getAuthority().add(a);
+		return m.toByteArray();
+	}
+
+	private static int count(String name) throws IOException {
+		return new Message(new ByteBuffer(udp(query(name, DNS.A, 99)))).getAnswerCount();
+	}
+
+	@Test
+	public void aRepeatedUpdateGetsTheSameAnswerAndIsntAppliedAgain() throws Exception {
+		server.setUpdateKeys("other");
+		try {
+			Tsig.Session c = Tsig.Session.client(KEYS.get("other"));
+			byte [] add = c.signRequest(update(20, false));
+			byte [] first = udp(add);
+			c.verifyResponse(first);
+			assertEquals(DNS.NOERROR, new Message(new ByteBuffer(first)).getResponseCode());
+			assertEquals(1, count("rep.tsig.test"));
+
+			//  resent (say the response was lost): the same answer, signed, not BADTIME
+			byte [] again = udp(add);
+			assertEquals(DNS.NOERROR, new Message(new ByteBuffer(again)).getResponseCode());
+			assertEquals(Tsig.NOERROR, Tsig.find(again).error);
+
+			//  deleted by a later update; a replay of the add must not bring it back
+			Tsig.Session d = Tsig.Session.client(KEYS.get("other"));
+			assertEquals(DNS.NOERROR, new Message(new ByteBuffer(udp(d.signRequest(update(21, true))))).getResponseCode());
+			assertEquals(0, count("rep.tsig.test"));
+			long before = server.getTsigReplays().getReplays();
+			udp(add);
+			assertEquals(0, count("rep.tsig.test"), "the replayed UPDATE was applied again");
+			assertEquals(before+1, server.getTsigReplays().getReplays());
+		} finally {
+			server.setUpdateKeys(null);
+		}
+	}
+
 	@Test
 	public void aRepeatedSignedQueryIsStillAnswered() throws Exception {
 		//  Clients resend a query unchanged after a timeout; queries are read-only

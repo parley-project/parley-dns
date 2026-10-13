@@ -24,6 +24,7 @@ package us.bringardner.parley.dns;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -261,6 +262,23 @@ public class TestTsig {
 			Tsig.Session.verifyRequest(KEYS, req, Tsig.find(req).timeSigned, 300, cache);
 		}
 		assertEquals(3, cache.size());
+	}
+
+	@Test
+	public void aTruncatedCopyIsTheSameRequest() throws Exception {
+		//  The MAC size isn't covered by the MAC: a captured request with its MAC cut
+		//  to 16, 17 ... bytes still verifies. Each used to count as a new request.
+		Tsig.ReplayCache cache = new Tsig.ReplayCache();
+		byte [] req = Tsig.Session.client(KEYS.get("k256")).signRequest(query(76));
+		Tsig.Record r = Tsig.find(req);
+		assertEquals(Tsig.NOERROR, Tsig.Session.verifyRequest(KEYS, req, r.timeSigned, 300, cache).getError());
+		for(int len=16; len < 32; len++ ) {
+			byte [] cut = Tsig.append(Tsig.strip(req, r), r.keyName, r.algorithm, r.timeSigned, r.fudge,
+					java.util.Arrays.copyOf(r.mac, len), r.originalId, r.error, r.other);
+			Tsig.Session s = Tsig.Session.verifyRequest(KEYS, cut, r.timeSigned, 300, cache);
+			assertEquals(Tsig.BADTIME, s.getError(), "MAC cut to "+len+" bytes");
+			assertTrue(s.isRepeat());
+		}
 	}
 
 	@Test
