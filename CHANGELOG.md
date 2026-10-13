@@ -14,3 +14,9 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
 - Module name (`Automatic-Module-Name`): `us.bringardner.parley.dns` (none was set before).
 - Dependencies: `bjl_core` and `bjl_io` are now `parley-core` and `parley-io`.
 - The `JDns.*` configuration properties are unchanged.
+
+### Removed
+
+- `us.bringardner.parley.dns.dynamic.DynamicDns`. Nothing in the library used it, and when its
+  `JDns.jdbc*` properties were missing it fell back to a built-in database host and login.
+  Dynamic records are kept by `DnsServer` (`dynamic.txt` or the `JDns.jdbc*` database).

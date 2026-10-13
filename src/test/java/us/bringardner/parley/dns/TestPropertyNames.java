@@ -51,8 +51,7 @@ public class TestPropertyNames {
 			"us.bringardner.parley.dns.server.UDPProsessor",
 			"us.bringardner.parley.dns.server.FatalErrorHandler",
 			"us.bringardner.parley.dns.resolve.Resolver",
-			"us.bringardner.parley.dns.resolve.ResolverThread",
-			"us.bringardner.parley.dns.dynamic.DynamicDns"
+			"us.bringardner.parley.dns.resolve.ResolverThread"
 	};
 
 	/** The values of every PROP_ constant. */
