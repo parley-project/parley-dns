@@ -23,9 +23,7 @@
  */
 package us.bringardner.parley.dns.dnssec;
 
-import us.bringardner.parley.core.util.Der;
 import java.math.BigInteger;
-import java.security.AlgorithmParameters;
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.KeyPair;
@@ -51,6 +49,10 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+
+import us.bringardner.parley.core.util.Der;
+import us.bringardner.parley.core.util.Ec;
+import us.bringardner.parley.core.util.PrivateKeys;
 
 /**
  * The DNSSEC signing algorithms this server supports (RFC 8624 lists what
@@ -306,9 +308,7 @@ public abstract class Algorithm {
 		}
 
 		private ECParameterSpec params() throws GeneralSecurityException {
-			AlgorithmParameters p = AlgorithmParameters.getInstance("EC");
-			p.init(new ECGenParameterSpec(curve));
-			return p.getParameterSpec(ECParameterSpec.class);
+			return PrivateKeys.curve(curve);
 		}
 
 		@Override
@@ -318,93 +318,59 @@ public abstract class Algorithm {
 			return g.generateKeyPair();
 		}
 
+		/** x || y, each the field size (RFC 6605 4) */
 		@Override
 		public byte [] publicKeyField(PublicKey pub) {
-			ECPoint w = ((ECPublicKey)pub).getW();
-			byte [] ret = new byte[2*size];
-			System.arraycopy(unsigned(w.getAffineX(), size), 0, ret, 0, size);
-			System.arraycopy(unsigned(w.getAffineY(), size), 0, ret, size, size);
-			return ret;
+			ECPublicKey k = (ECPublicKey)pub;
+			return Ec.encodeRawPoint(k.getW(), k.getParams());
 		}
 
 		@Override
 		public Map<String, String> privateFields(KeyPair pair) {
 			Map<String, String> f = new LinkedHashMap<String, String>();
-			f.put("PrivateKey", b64(unsigned(((ECPrivateKey)pair.getPrivate()).getS(), size)));
+			f.put("PrivateKey", b64(Ec.unsigned(((ECPrivateKey)pair.getPrivate()).getS(), size)));
 			return f;
 		}
 
 		@Override
 		public PrivateKey privateKey(Map<String, String> f, byte [] pub) throws GeneralSecurityException {
+			//  (DnssecKey.load checks that it matches the public key)
 			return KeyFactory.getInstance("EC").generatePrivate(new ECPrivateKeySpec(new BigInteger(1, unb64(f, "PrivateKey")), params()));
 		}
 
+		/** @return r || s, each the field size (RFC 6605 4) */
 		@Override
 		public byte [] sign(PrivateKey key, byte [] data) {
 			try {
 				Signature s = Signature.getInstance(sigAlg);
 				s.initSign(key);
 				s.update(data);
-				return derToRaw(s.sign(), size);
+				return Ec.signatureFromDer(s.sign(), size);
 			} catch(GeneralSecurityException ex) {
 				throw new IllegalStateException(ex);
 			}
 		}
 
+		/**
+		 * @return false unless the key is a point on the curve and the signature (r || s)
+		 *  verifies
+		 */
 		@Override
 		public boolean verify(byte [] field, byte [] data, byte [] signature) {
 			try {
 				if( field.length != 2*size || signature.length != 2*size ) {
 					return false;
 				}
-				ECPoint w = new ECPoint(new BigInteger(1, Arrays.copyOfRange(field, 0, size)), new BigInteger(1, Arrays.copyOfRange(field, size, 2*size)));
-				PublicKey k = KeyFactory.getInstance("EC").generatePublic(new ECPublicKeySpec(w, params()));
+				ECParameterSpec params = params();
+				ECPoint w = Ec.rawPoint(field, params);
+				PublicKey k = KeyFactory.getInstance("EC").generatePublic(new ECPublicKeySpec(w, params));
 				Signature s = Signature.getInstance(sigAlg);
 				s.initVerify(k);
 				s.update(data);
-				return s.verify(rawToDer(signature, size));
+				return s.verify(Ec.signatureToDer(signature));
 			} catch(GeneralSecurityException | RuntimeException ex) {
 				return false;
 			}
-		}
-
-		/** ASN.1 SEQUENCE { INTEGER r, INTEGER s } to r|s, each size bytes (RFC 6605 4). */
-		static byte [] derToRaw(byte [] der, int size) {
-			int pos = 2;
-			if( (der[1]&0xff) > 0x80 ) {
-				pos += (der[1]&0x7f);
-			}
-			byte [] ret = new byte[2*size];
-			for(int part=0; part < 2; part++ ) {
-				if( der[pos] != 0x02 ) {
-					throw new IllegalStateException("bad ECDSA signature encoding");
-				}
-				int len = der[pos+1]&0xff;
-				pos += 2;
-				BigInteger v = new BigInteger(1, Arrays.copyOfRange(der, pos, pos+len));
-				System.arraycopy(unsigned(v, size), 0, ret, part*size, size);
-				pos += len;
-			}
-			return ret;
-		}
-
-		static byte [] rawToDer(byte [] raw, int size) {
-			byte [] r = new BigInteger(1, Arrays.copyOfRange(raw, 0, size)).toByteArray();
-			byte [] s = new BigInteger(1, Arrays.copyOfRange(raw, size, 2*size)).toByteArray();
-			int len = 2+r.length+2+s.length;
-			java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
-			out.write(0x30);
-			if( len > 127 ) {
-				out.write(0x81);
-			}
-			out.write(len);
-			out.write(0x02);
-			out.write(r.length);
-			out.write(r, 0, r.length);
-			out.write(0x02);
-			out.write(s.length);
-			out.write(s, 0, s.length);
-			return out.toByteArray();
 		}
 	}
 

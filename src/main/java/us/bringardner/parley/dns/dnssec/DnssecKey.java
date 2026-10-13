@@ -25,11 +25,8 @@ package us.bringardner.parley.dns.dnssec;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.OutputStreamWriter;
-import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.GeneralSecurityException;
@@ -47,6 +44,7 @@ import java.util.Map;
 import java.util.TimeZone;
 
 import us.bringardner.parley.dns.DNS;
+import us.bringardner.parley.dns.DnsBaseClass;
 import us.bringardner.parley.dns.Dnskey;
 import us.bringardner.parley.dns.Ds;
 
@@ -62,6 +60,8 @@ import us.bringardner.parley.dns.Ds;
  * without its .private is published but never signs (for a key rollover).
  */
 public final class DnssecKey {
+
+	private static final DnsBaseClass LOG = new DnsBaseClass();
 
 	private final String zone;
 	private final Dnskey dnskey;
@@ -232,8 +232,10 @@ public final class DnssecKey {
 		}
 		File key = new File(dir, baseName()+".key");
 		File priv = new File(dir, baseName()+".private");
-		if( key.exists() || priv.exists() ) {
-			throw new IOException(key+" already exists");
+		for(File f : new File[] {key, priv}) {
+			if( Files.exists(f.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS) ) {
+				throw new IOException(f+" already exists");
+			}
 		}
 		StringBuilder p = new StringBuilder();
 		p.append("Private-key-format: v1.3\n");
@@ -246,16 +248,9 @@ public final class DnssecKey {
 				p.append(t).append(": ").append(timeText(times.get(t))).append('\n');
 			}
 		}
-		Files.write(priv.toPath(), new byte[0]);
-		try {
-			java.util.Set<java.nio.file.attribute.PosixFilePermission> perms = java.nio.file.attribute.PosixFilePermissions.fromString("rw-------");
-			Files.setPosixFilePermissions(priv.toPath(), perms);
-		} catch(UnsupportedOperationException ex) {
-			//  not a POSIX file system
-		}
-		try(Writer w = new OutputStreamWriter(new FileOutputStream(priv), StandardCharsets.US_ASCII)) {
-			w.write(p.toString());
-		}
+		//  Round 5 #94: created new (an existing file or symlink is refused) and readable by
+		//  its owner only from the start, not chmod'ed after it was created
+		us.bringardner.parley.core.util.PrivateKeys.writePrivateFile(priv, p.toString());
 		StringBuilder k = new StringBuilder();
 		k.append("; This is a ").append(isKsk() ? "key-signing" : "zone-signing").append(" key, keyid ")
 			.append(getKeyTag()).append(", for ").append(zone).append(".\n");
@@ -266,7 +261,15 @@ public final class DnssecKey {
 			}
 		}
 		k.append(zone).append(". ").append(dnskey.getTTL()).append(" IN DNSKEY ").append(dnskey.getRdataAsString()).append('\n');
-		Files.write(key.toPath(), k.toString().getBytes(StandardCharsets.US_ASCII));
+		try {
+			//  a new file only: never through a link planted where it goes
+			Files.write(key.toPath(), k.toString().getBytes(StandardCharsets.US_ASCII), java.nio.file.StandardOpenOption.CREATE_NEW,
+					java.nio.file.StandardOpenOption.WRITE);
+		} catch(IOException | RuntimeException ex) {
+			//  no .private without its .key (a retry would find it in the way)
+			Files.deleteIfExists(priv.toPath());
+			throw ex;
+		}
 		return key;
 	}
 
@@ -283,6 +286,17 @@ public final class DnssecKey {
 		PrivateKey pk = null;
 		Map<String, Long> times = new LinkedHashMap<String, Long>();
 		if( priv.isFile() ) {
+			String exposed = us.bringardner.parley.core.util.PrivateKeys.exposure(priv);
+			if( exposed != null ) {
+				//  Round 5 #94: the key may already be in other hands. A group-readable key is
+				//  a common setup (root:named 0640), so that is only noted.
+				String msg = priv+" is "+exposed+": whoever can read it can sign for "+k.getName()+".";
+				if( exposed.contains("everyone") ) {
+					LOG.logWarn(msg+" Make it readable by its owner only (chmod 600) and consider a key rollover.");
+				} else {
+					LOG.logInfo(msg);
+				}
+			}
 			Map<String, String> fields = readFields(priv);
 			String alg = fields.get("Algorithm");
 			if( alg == null || !alg.trim().startsWith(String.valueOf(k.getAlgorithm())) ) {
