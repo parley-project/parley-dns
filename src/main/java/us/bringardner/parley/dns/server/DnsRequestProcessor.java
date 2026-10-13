@@ -65,12 +65,16 @@ public abstract class DnsRequestProcessor  extends DnsBaseClass implements DNS
 	}
 	if( tsig != null ) {
 		currentTsig = tsig;
-		if( tsig.isRepeat() && query.getMessage().getHeader().getOPCODE() == DNS.UPDATE && tsig.getReplay().getResult() >= 0 ) {
+		if( tsig.isRepeat() && query.getMessage().getHeader().getOPCODE() == DNS.UPDATE ) {
 			//  Round 5 #85: the same signed UPDATE again, e.g. resent because the
 			//  response was lost. It gets the first answer again; nothing is applied
 			//  a second time, so a replay can't change the zone either.
-			currentTsig = tsig.asFirst();
-			sendResponse(repeatedAnswer(query.getMessage(), tsig.getReplay().getResult()));
+			int first = tsig.getReplay().getResult();
+			if( first >= 0 ) {
+				currentTsig = tsig.asFirst();
+				sendResponse(repeatedAnswer(query.getMessage(), first));
+			}
+			//  else the first copy is still being processed: its answer is on the way
 			currentTsig = null;
 			return;
 		}
@@ -102,6 +106,15 @@ public abstract class DnsRequestProcessor  extends DnsBaseClass implements DNS
 	return q != null && (q.getType() == DNS.AXFR || q.getType() == DNS.IXFR);
  }
 
+ /** Note the RCODE of the answer to a signed request, for a repeat of it (see process). */
+ private Message remember(Message m) {
+	Tsig.Session t = currentTsig;
+	if( t != null && t.getReplay() != null && m != null ) {
+		t.getReplay().setResult(m.getResponseCode());
+	}
+	return m;
+ }
+
  /** The answer to a repeated UPDATE: its zone section and the first answer's RCODE. */
  static Message repeatedAnswer(Message req, int rcode) {
 	Message ret = notAuth(req);
@@ -125,9 +138,9 @@ public abstract class DnsRequestProcessor  extends DnsBaseClass implements DNS
  private void answer(QueryData query, Edns.Request edns) {
 	if( edns.isMalformed() ) {
 		//  RFC 6891 6.1.1: more than one OPT (or a bad one) is FORMERR
-		sendResponse(Edns.formatError(query.getMessage()));
+		sendResponse(remember(Edns.formatError(query.getMessage())));
 	} else if( edns.isBadVersion() ) {
-		sendResponse(Edns.badVersion(query.getMessage()));
+		sendResponse(remember(Edns.badVersion(query.getMessage())));
 	} else {
 		List<Message> reply = server.query(query);
 		if( reply != null ) {
