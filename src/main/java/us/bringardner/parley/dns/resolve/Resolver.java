@@ -370,6 +370,8 @@ public class Resolver  extends DnsBaseClass
 				"  current="+us.bringardner.parley.dns.resolve.ResolverThread.getBacklog()+
 				"\nResolver Stats: inflight="+(started-completed)+
 				" dropped(backlog full)="+ResolverThread.getDropped()+
+				" stale="+ResolverThread.getStale()+
+				" coalesced="+ResolverThread.getCoalesced()+
 				" servfail="+ResolverThread.getFailed()+
 				" completed="+completed+
 				" cacheHits="+cacheHits.get()+
@@ -552,6 +554,16 @@ public class Resolver  extends DnsBaseClass
 					break;
 				}
 			}
+		}
+		if( (tmp=prop.getProperty(ResolverThread.PROP_RESOLVER_MAX_QUEUE_AGE)) != null ) {
+			try {
+				ResolverThread.setMaxQueueAge(Long.parseLong(tmp.trim()));
+			} catch(NumberFormatException ex) {
+				new Resolver().logError("Invalid number for "+ResolverThread.PROP_RESOLVER_MAX_QUEUE_AGE+": '"+tmp+"'");
+			}
+		}
+		if( (tmp=prop.getProperty(ResolverThread.PROP_RESOLVER_VIRTUAL_THREADS)) != null ) {
+			ResolverThread.setVirtualThreads(Boolean.parseBoolean(tmp.trim()));
 		}
 		resolvers = new ResolverThread[resolverCount];
 

@@ -173,14 +173,7 @@ public class RemoteServer  extends DnsBaseClass {
 	 * ones keep a rotating order to spread the load.
 	 */
 	public Iterator<ServerA> iterator() {
-		java.util.List<ServerA> list = new java.util.ArrayList<ServerA>(addr);
-		int size = list.size();
-		if( size > 1 ) {
-			java.util.Collections.rotate(list, -Math.floorMod(pos.getAndIncrement(), size));
-			//  stable sort: rotation decides among equal response times
-			list.sort(java.util.Comparator.comparingLong(ServerA::getSrtt));
-		}
-		return list.iterator();
+		return us.bringardner.parley.net.client.UpstreamHealth.order(addr, ServerA::getHealth, pos.getAndIncrement()).iterator();
 	}
 
 
@@ -244,13 +237,7 @@ public class RemoteServer  extends DnsBaseClass {
 
 	/** The address whose hold-off ends first, or null if there are none. */
 	private ServerA soonest() {
-		ServerA ret = null;
-		for(ServerA s : addr) {
-			if( ret == null || s.getInactiveUntil() < ret.getInactiveUntil() ) {
-				ret = s;
-			}
-		}
-		return ret;
+		return us.bringardner.parley.net.client.UpstreamHealth.soonest(addr, ServerA::getHealth);
 	}
 
 	/** When an address of this zone is available again (ms); a past time if one is now. */
