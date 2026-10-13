@@ -59,6 +59,8 @@ import us.bringardner.parley.dns.Utility;
  */
 public class Zone implements DNS {
 
+	private static final us.bringardner.parley.dns.DnsBaseClass LOG = new us.bringardner.parley.dns.DnsBaseClass();
+
 
 	// This is the name of the file that contained the data
 	private String fileName;
@@ -1320,7 +1322,11 @@ public class Zone implements DNS {
 		}
 		int line = 0;
 		boolean outOfDate = false;
-		try(BufferedReader in = new BufferedReader(new FileReader(jnl))) {
+		//  Round 5 #84: the lines of an update between 'begin' and 'end', applied at 'end';
+		//  null outside one (journals written before the framing have none)
+		List<List<String>> block = null;
+		int blockLine = 0;
+		try(BufferedReader in = new BufferedReader(new java.io.InputStreamReader(new java.io.FileInputStream(jnl), java.nio.charset.StandardCharsets.UTF_8))) {
 			String text;
 			boolean based = false;
 			while( (text = in.readLine()) != null ) {
@@ -1331,6 +1337,28 @@ public class Zone implements DNS {
 				}
 				List<String> t = parseLine(null, text);
 				String op = t.get(0);
+				if( based && op.equals("begin") && t.size() == 1 ) {
+					if( block != null ) {
+						throw new IOException("'begin' inside the update that began at line "+blockLine);
+					}
+					block = new ArrayList<List<String>>();
+					blockLine = line;
+					continue;
+				}
+				if( based && op.equals("end") && t.size() == 1 ) {
+					if( block == null ) {
+						throw new IOException("'end' without 'begin'");
+					}
+					for(List<String> l : block) {
+						applyJournalLine(l.get(0), l.subList(1, l.size()));
+					}
+					block = null;
+					continue;
+				}
+				if( block != null ) {
+					block.add(t);
+					continue;
+				}
 				if( !based ) {
 					if( !op.equals("base") || t.size() != 2 ) {
 						throw new IOException("journal must start with 'base <serial>'");
@@ -1345,6 +1373,12 @@ public class Zone implements DNS {
 					continue;
 				}
 				applyJournalLine(op, t.subList(1, t.size()));
+			}
+			if( block != null ) {
+				//  The last update was cut off (a crash while it was written): it was never
+				//  answered NOERROR, so it is left out
+				final int at = blockLine;
+				LOG.logWarn(jnl.getName()+": the update at line "+at+" is incomplete and was not applied");
 			}
 		} catch(IOException | RuntimeException e) {
 			throw new IOException("Error in "+jnl.getName()+" at line "+line+": "+e.getMessage(), e);

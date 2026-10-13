@@ -2701,27 +2701,51 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		writeJournal(zone, lines, "from "+req.getClient()+(req.getTsigKey() != null ? " key "+req.getTsigKey() : ""));
 	}
 
-	/** Append lines to the zone's journal; why is written as a comment. */
+	/**
+	 * Append lines to the zone's journal; why is written as a comment.
+	 * <p>
+	 * Round 5 #84: crash safe. The header goes into an empty file too (a failed first
+	 * write used to leave one, and later entries then lacked the 'base' line); each
+	 * update is framed by 'begin' and 'end' lines, so a torn last update is ignored on
+	 * replay; a failed write is cut off again.
+	 */
 	private void writeJournal(Zone zone, List<String> lines, String why) throws IOException {
 		File jnl = zone.getJournalFile();
 		if( jnl == null ) {
 			//  A zone that was not loaded from a file (only kept in memory)
 			return;
 		}
-		boolean create = !jnl.exists();
-		try(FileOutputStream out = new FileOutputStream(jnl, true)) {
+		try(java.nio.channels.FileChannel ch = java.nio.channels.FileChannel.open(jnl.toPath(),
+				java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE)) {
+			long start = ch.size();
 			StringBuilder b = new StringBuilder();
-			if( create ) {
+			if( start == 0 ) {
 				b.append("; Dynamic updates of ").append(zone.getName()).append(" (RFC 2136), applied on top of ")
 					.append(zone.getMasterFile().getName()).append(".\n; Edit the zone file and raise its serial to start over.\n");
 				b.append("base ").append(Integer.toUnsignedString(zone.getSoa().getSerial())).append('\n');
 			}
-			b.append("; ").append(new Date()).append(' ').append(why).append('\n');
+			b.append("; ").append(new Date()).append(' ').append(why.replace('\n', ' ').replace('\r', ' ')).append('\n');
+			b.append("begin\n");
 			for(String l : lines) {
 				b.append(l).append('\n');
 			}
-			out.write(b.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-			out.getFD().sync();
+			b.append("end\n");
+			java.nio.ByteBuffer data = java.nio.ByteBuffer.wrap(b.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			try {
+				ch.position(start);
+				while( data.hasRemaining() ) {
+					ch.write(data);
+				}
+				ch.force(true);
+			} catch(IOException | RuntimeException ex) {
+				//  no half update left at the end of the journal
+				try {
+					ch.truncate(start);
+					ch.force(true);
+				} catch(IOException ignore) {
+				}
+				throw ex;
+			}
 		}
 	}
 
