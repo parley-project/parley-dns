@@ -174,10 +174,22 @@ public class Section extends Utility {
 		buf.setShort(dnsClass);
 	}
 	public String toString() {
+		//  Round 5 #95: any 16 bit type or class can be printed (class NONE comes
+		//  with every UPDATE that deletes a record)
 		return name.toString()+" "+
-				(type==255 ? "ANY":TYPENAMES[type])+" "+
-					(dnsClass == 255 ? "ANY": 
-						dnsClass > 255 ? 
-					"CLASS="+dnsClass:CLASSNAMES[dnsClass]);
+				(type==255 ? "ANY":Nsec.typeName(type))+" "+className(dnsClass);
+	}
+
+	/** Class names, or CLASSnnn (RFC 3597) for those without one. */
+	static String className(int c) {
+		switch(c) {
+		case 1: return "IN";
+		case 2: return "CS";
+		case 3: return "CH";
+		case 4: return "HS";
+		case 254: return "NONE";
+		case 255: return "ANY";
+		default: return "CLASS"+c;
+		}
 	}
 }

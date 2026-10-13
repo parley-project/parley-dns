@@ -144,7 +144,10 @@ Set the address of this host from a String representation in dot notation (999.9
 	}
 
 	public void setFromRdata() {
-		return;
+		//  Round 5 #95: an address is exactly 4 bytes
+		if( rdata == null || rdata.length != 4 ) {
+			throw new DnsFormatException("A rdata of "+(rdata == null ? 0 : rdata.length)+" bytes, not 4");
+		}
 	}
 	/**
 Add this resource record to the byte buffer as described in RFC 1035.

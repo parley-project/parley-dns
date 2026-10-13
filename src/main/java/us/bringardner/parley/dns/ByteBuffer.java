@@ -29,27 +29,20 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.PrintStream;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+
+import us.bringardner.parley.io.WireBuffer;
 /**
 This class manages the creation and parsing of the DNS message format (it's main purpose is to implement message compression as described in RFC 1035)
  **/
-public  class ByteBuffer {
+public  class ByteBuffer extends WireBuffer {
 
-	/**
-		Inner class used to manage message compression
-	 **/
-	class ptr {
-		short idx=-1;
-		String name;
-	}
+	//  Name compression (RFC 1035 4.1.4): names written so far -> their offset
+	private final Map<String, Integer> lables = new HashMap<String, Integer>();
 
-	byte [] buf;
-	int rpos; // Read position
-	int wpos; // Write Position
-	int inc = DNS.MAXUDPLEN;
-	Map<String, ptr> lables;
-
-	int rdlengthPos = 0;
+	private int rdlengthPos = 0;
+	private int inc = DNS.MAXUDPLEN;
 
 	//  DNSSEC canonical form (RFC 4034 6.2): names lower case and never compressed
 	private boolean canonical = false;
@@ -66,8 +59,6 @@ public  class ByteBuffer {
 		return canonical;
 	}
 
-
-
 	/**
 	Default constructor (creates a ByteBuffer with the initial size set to DNS.MAXUDPLEN
 	 **/
@@ -83,13 +74,22 @@ public  class ByteBuffer {
 	}
 	
 	/**
-	Create a ByteBuffer from a byte array setting the current position (used mainly to manage message compression in recieving messages)
+	 * A ByteBuffer over a byte array: reading starts at i and may go to the end of
+	 * the array, writing starts at 0 (used to follow compression pointers, and to
+	 * write into a given array).
 	 **/
 	public ByteBuffer(byte [] b, int i) {
-		buf = b;
-		rpos = i;
-		wpos = 0;
-		lables = new HashMap<String, ptr>();
+		super(b, Math.max(0, Math.min(i, b.length)), 0, b.length);
+		if( i < 0 || i > b.length ) {
+			//  reading starts outside the array: every read is a format error
+			pushLimit(0);
+		}
+	}
+
+	/** Malformed data is a DNS format error (FORMERR). */
+	@Override
+	protected RuntimeException malformed(String message) {
+		return new DnsFormatException(message);
 	}
 
 	/**
@@ -98,20 +98,11 @@ public  class ByteBuffer {
 	 **/
 	@Deprecated // No loop protection. Name parsing now follows pointers itself with bounds checks (see Name.init).
 	public ByteBuffer chkPointer() {
-
-		/*
-			If we are currently pointed at a pointer
-			create a new buffer pointing to the real
-			string, and return it, otherwise return null.
-		 */
-		if( rpos>=buf.length || (buf[rpos]&DNS.POINTER) == 0 ) {
+		if( remaining() == 0 || (peekU8()&DNS.POINTER) == 0 ) {
 			return this;
 		}
-
-		short newPos = (short)nextShort();
-		ByteBuffer ret = new ByteBuffer(buf,(newPos&0x3FFF));
-		ret.wpos = wpos;
-		return ret;
+		int newPos = nextShort();
+		return new ByteBuffer(getBuf(),(newPos&0x3FFF));
 	}
 	
 	/**
@@ -125,6 +116,9 @@ public  class ByteBuffer {
 		Dump the ByteBuffer showing the position, hex value, binary value and character of each byte (use to debug)
 	 **/
 	public void dump (PrintStream out) {
+		byte [] buf = getBuf();
+		int rpos = getReadPos();
+		int wpos = getWritePos();
 		int cnt = buf.length-1;
 
 		for(cnt=buf.length-1; cnt > 0 ; cnt-- ) {
@@ -187,6 +181,9 @@ public  class ByteBuffer {
                 the corresponding reply and can be used by the requester
                 to match up replies to outstanding queries.
 		 */
+		if( buf.length < 12 ) {
+			return;
+		}
 		out.println("\tID\t"+Utility.makeShort(buf[0], buf[1]));
 		/*
 		 
@@ -369,25 +366,26 @@ ARCOUNT         an unsigned 16 bit integer specifying the number of
 		Get the internal byte array
 	 **/
 	public byte [] getBuf() {
-		return buf;
+		return array();
 	}
 	
 	/**
-		Get the internal byte array (the array 'may' be trimmed to the size of the data actually in the array)
+		The bytes written (a copy, unless the array holds exactly them)
 	 **/
 	public byte [] getByteArray() {
+		byte [] buf = array();
+		int wpos = writePosition();
 		if(wpos < buf.length) {
-			byte [] tmp = new byte[wpos];
-			System.arraycopy(buf,0,tmp,0,wpos);
-			return tmp;
+			return copyOf(0, wpos);
 		} else {
 			return buf;
 		}
 	}
 	
 	/**
-		Get the increment (the number of bytes added to the size of the internal array if the current size is not sufficient)
+		The array now grows by doubling; kept for compatibility.
 	 **/
+	@Deprecated
 	public int getInc() { 
 		return inc;
 	}
@@ -396,14 +394,14 @@ ARCOUNT         an unsigned 16 bit integer specifying the number of
 		Get the posistion of the read pointer
 	 **/
 	public int getReadPos() {
-		return rpos;
+		return readPosition();
 	}
 	
 	/**
 		Get the position of the write pointer
 	 **/
 	public int getWritePos() {
-		return wpos;
+		return writePosition();
 	}
 	
 	/**
@@ -484,40 +482,32 @@ ARCOUNT         an unsigned 16 bit integer specifying the number of
 	}
 	
 	public void markPos(int s){
-		rdlengthPos = wpos;
+		rdlengthPos = writePosition();
 		setShort(s);
 	}
 	
 	/**
 		Get the next 8 bit byte from the ByteBuffer, incrementing the read position
+		@throws DnsFormatException past the end of the message (or of a limit)
 	 **/
 	public int next() {
-		if( rpos >= buf.length || rpos < 0 ) {
-			//  A truncated or malformed message: FORMERR, not ArrayIndexOutOfBounds
-			throw new DnsFormatException("Message ends at offset "+buf.length+", read past it at "+rpos);
-		}
-		return buf[rpos++]&0xff;
+		return getU8();
 	}
 
-	/** @return the number of bytes left to read */
-	public int remaining() {
-		return Math.max(0, buf.length-rpos);
-	}	
-	
 	/**
 		Get a 32 bit int from the buffer
 		@return int representation of the next four bytes in the ByteBuffer, incrementing the readPosition accordingly
 	 **/
 	public int nextInt() {
-		return Utility.makeInt( next(), next(),	next(), next());
+		return getInt32();
 	}
+
 	/**
 		Get a 16 bit int from the buffer
 		@return short representation of the next two bytes in the ByteBuffer, incrementing the readPosition accordingly
 	 **/
-
 	public int nextShort() {
-		return Utility.makeShort( next(), next());
+		return getU16();
 	}	
 	
 	//  Setters
@@ -525,26 +515,20 @@ ARCOUNT         an unsigned 16 bit integer specifying the number of
 		Add a 8 bit byte to the byte array , incrementing the write position
 	 */
 	public void setByte(byte b) {
-		if( wpos == buf.length) {
-			byte [] tmp = new byte[buf.length+inc];
-			System.arraycopy(buf,0,tmp,0,buf.length);
-			buf = tmp;
-		}
-		buf[wpos++] = b;
+		putU8(b);
 	}
 	
 	/**
 		Copy a byte array into the internal buffer at the current position
 	 **/
 	public void setBytes(byte [] b) {
-		for(int i=0; i < b.length; i++ ) {
-			setByte(b[i]);
-		}
+		putBytes(b);
 	}
 	
 	/**
-		Set the increment (the number of bytes added to the size of the internal array if the current size is not sufficiant)
+		The array now grows by doubling; kept for compatibility.
 	 **/
+	@Deprecated
 	public void setInc(int i) {
 		inc = i;
 	}
@@ -553,63 +537,93 @@ ARCOUNT         an unsigned 16 bit integer specifying the number of
 		Add a 32 bit integer to the byte array in Big Endian order (incrementing the write pointer accordingly)
 	 **/
 	public void setInt(int val) {
-		int s = (val >> 16);
-		setShort(s);
-		s = val&0xffff;
-		setShort(s);
+		putU32(val);
 	}
 	
 	/**
-		Add a name to this buffer and implement compression
-		as described in RFC 1035.
+		Add a name to this buffer, compressed as described in RFC 1035 4.1.4
+		(except in canonical form). Use {@link #setName(String, boolean)} with
+		false for the names of types other than RFC 1035's (RFC 3597 4).
 	 **/
 	public void setName(String name) {
-		if( name == null || name.isEmpty() || name.equals(".") ) {
-			//  The root name (e.g. the OPT owner) is a single zero octet;
-			//  "" used to be written as an empty label plus the terminator
-			setByte((byte)0);
-			return ;
-		}
+		setName(name, true);
+	}
+
+	/**
+	 * Add a name to this buffer.
+	 * <p>
+	 * The name is in text form (see {@link Name#wireLabels(String)}: "\\." is a dot
+	 * inside a label, octets are ISO-8859-1). Labels over 63 octets and names over
+	 * 255 are refused rather than written as something else (round 5 #82).
+	 * Compression pointers only point below offset 0x3FFF, the most 14 bits can
+	 * hold (round 5 #80).
+	 *
+	 * @param compress use compression pointers (never in canonical form)
+	 * @throws IllegalArgumentException if the name can't be written
+	 */
+	public void setName(String name, boolean compress) {
+		setName(name, compress, false);
+	}
+
+	/**
+	 * Add a name without compression and as it is, also in canonical form: the
+	 * NSEC next name keeps its case (RFC 6840 5.1).
+	 */
+	public void setNameAsIs(String name) {
+		setName(name, false, true);
+	}
+
+	private void setName(String name, boolean compress, boolean keepCase) {
+		List<byte[]> labels = Name.wireLabels(name);
 		if( canonical ) {
-			name = name.toLowerCase(java.util.Locale.ROOT);
-			for(String label : name.split("[.]", -1)) {
-				if( !label.isEmpty() ) {
-					byte [] b = label.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
-					setByte((byte)b.length);
-					setBytes(b);
+			if( keepCase ) {
+				for(byte [] b : labels) {
+					putBytes8(b);
+				}
+				putU8(0);
+				return;
+			}
+			for(byte [] b : labels) {
+				putBytes8(asciiLower(b));
+			}
+			putU8(0);
+			return;
+		}
+		for(int i=0, n=labels.size(); i < n; i++ ) {
+			if( compress ) {
+				String key = suffixKey(labels, i);
+				Integer at = lables.get(key);
+				if( at != null ) {
+					setShort(at|(DNS.POINTER<<8));
+					return;
+				}
+				if( writePosition() <= 0x3FFF ) {
+					lables.put(key, writePosition());
 				}
 			}
-			setByte((byte)0);
-			return;
+			putBytes8(labels.get(i));
 		}
+		putU8(0);
+	}
 
-		ptr p = (ptr)lables.get(name);
-		if( p != null ) {
-			setShort((short)(p.idx|(DNS.POINTER<<8))); //  ptr.idx is already made into a pointer
-			return;
+	/** The labels from i on, as a compression key (case is kept, as before). */
+	private static String suffixKey(List<byte[]> labels, int i) {
+		StringBuilder b = new StringBuilder();
+		for(int j=i; j < labels.size(); j++ ) {
+			b.append(new String(labels.get(j), java.nio.charset.StandardCharsets.ISO_8859_1)).append('\0');
 		}
+		return b.toString();
+	}
 
-		/*
-			If we made it to here, at lease part of the name will be new in the label list
-		 */
-		if( name.length() > 3 ) {
-			//  But only do it if there is a savings of 2 or more bytes
-			p = new ptr();
-			p.idx = (short)wpos;
-			p.name = name;
-			lables.put(name,p);
+	/** RFC 4034 6.2: only the ASCII letters are lower cased. */
+	private static byte [] asciiLower(byte [] b) {
+		byte [] ret = b.clone();
+		for(int i=0; i < ret.length; i++ ) {
+			if( ret[i] >= 'A' && ret[i] <= 'Z' ) {
+				ret[i] = (byte)(ret[i]+('a'-'A'));
+			}
 		}
-
-		//  Now, break the name apart and check each segment
-		int idx = name.indexOf(".");
-		String tmp = null;
-		if( idx > 0 ) {
-			tmp  = name.substring(idx+1);
-			name = name.substring(0,idx);
-		}
-		setByte((byte)name.length());
-		setBytes(name.getBytes());	
-		setName(tmp);
+		return ret;
 	}
 	
 	/**
@@ -623,18 +637,16 @@ ARCOUNT         an unsigned 16 bit integer specifying the number of
 	/**
 		Write the rdlength into the marked location
 		rdlength is calculated from the mark to the current pos
+		@throws IllegalArgumentException if the rdata is over 65535 bytes
 	 **/
 	public void setRdLength() {
-		int hld = wpos;
-		int rdlength = wpos-rdlengthPos-2;
-		wpos = rdlengthPos;
-		setShort((short)rdlength);
-		wpos = hld;
+		int rdlength = writePosition()-rdlengthPos-2;
+		setU16(rdlengthPos, rdlength);
 	}
 	
+	/** Add the low 16 bits of s. */
 	public void setShort(int s) {
-		setByte((byte)(s >> 8));
-		setByte((byte)s);
+		put16(s);
 	}
 	
 }

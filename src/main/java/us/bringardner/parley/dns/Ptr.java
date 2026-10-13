@@ -98,11 +98,9 @@ public  String getRdataAsString()
 	return ptr.toString(); 
 }
 		public void setFromRdata() {
-				ByteBuffer in = new ByteBuffer(getRdata());
-				if( source != null) {
-						in = new ByteBuffer(source.getBuf(),sourcePos);
-				}
+				ByteBuffer in = rdataReader();
 				ptr = new Name(in);
+				endOfRdata(in);
 		
 		}
 /**

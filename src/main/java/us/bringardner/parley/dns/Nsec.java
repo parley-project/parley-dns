@@ -174,7 +174,7 @@ public class Nsec extends RR {
 			if( n.length() > 0 ) {
 				n.append('.');
 			}
-			n.append(new String(r, pos, len, java.nio.charset.StandardCharsets.ISO_8859_1));
+			n.append(Name.escapeLabel(new String(r, pos, len, java.nio.charset.StandardCharsets.ISO_8859_1)));
 			pos += len;
 		}
 		TreeSet<Integer> t = parseBitmaps(r, pos);
@@ -194,7 +194,7 @@ public class Nsec extends RR {
 
 	/** Type names, or TYPEnnn (RFC 3597) for those without one. */
 	static String typeName(int t) {
-		if( t < TYPENAMES.length && !TYPENAMES[t].isEmpty() && !Character.isDigit(TYPENAMES[t].charAt(0)) ) {
+		if( t >= 0 && t < TYPENAMES.length && TYPENAMES[t] != null && !TYPENAMES[t].isEmpty() && !Character.isDigit(TYPENAMES[t].charAt(0)) ) {
 			return TYPENAMES[t];
 		}
 		switch(t) {

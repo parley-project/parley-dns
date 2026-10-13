@@ -105,14 +105,12 @@ public class Srv extends RR {
 
 	@Override
 	public void setFromRdata() {
-		ByteBuffer in = new ByteBuffer(rdata);
-		if( source != null ) {
-			in = new ByteBuffer(source.getBuf(),sourcePos);
-		}
+		ByteBuffer in = rdataReader();
 		priority = in.nextShort();
 		weight = in.nextShort();
 		port = in.nextShort();
 		target = new Name(in);
+		endOfRdata(in);
 		dirty = false;
 	}
 
@@ -122,22 +120,16 @@ public class Srv extends RR {
 		out.setShort(priority);
 		out.setShort(weight);
 		out.setShort(port);
-		writeUncompressed(out, out.isCanonical() ? target.toString().toLowerCase(java.util.Locale.ROOT) : target.toString());
+		writeUncompressed(out, out.isCanonical() ? us.bringardner.parley.dns.dnssec.Canonical.asciiLower(target.toString()) : target.toString());
 		out.setRdLength();
 	}
 
 	/** Write a name without compression pointers (RFC 2782 forbids them in SRV). */
 	static void writeUncompressed(ByteBuffer out, String name) {
-		if( name != null ) {
-			for(String label : name.split("[.]")) {
-				if( !label.isEmpty() ) {
-					byte [] b = label.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
-					out.setByte((byte)b.length);
-					out.setBytes(b);
-				}
-			}
-		}
-		out.setByte((byte)0);
+		//  (escapes, label and name lengths: see ByteBuffer.setName). The case is kept,
+		//  also in canonical form; a type whose names are lower cased there (RFC 4034
+		//  6.2) passes a lower case name.
+		out.setNameAsIs(name == null ? "" : name);
 	}
 
 	@Override

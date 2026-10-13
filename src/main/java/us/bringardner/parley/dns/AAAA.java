@@ -188,7 +188,10 @@ public class AAAA extends RR {
 	}
 
 	public void setFromRdata() {
-		return;
+		//  Round 5 #95: an address is exactly 16 bytes
+		if( rdata == null || rdata.length != 16 ) {
+			throw new DnsFormatException("AAAA rdata of "+(rdata == null ? 0 : rdata.length)+" bytes, not 16");
+		}
 	}
 
 	/**

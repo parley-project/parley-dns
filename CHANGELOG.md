@@ -40,6 +40,24 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
     for TCP.
   - A client that stops reading a large answer (a zone transfer) is disconnected after the idle
     timeout instead of holding a handler thread.
+- `ByteBuffer` is built on parley-io's `WireBuffer`: every read is bounds checked (FORMERR, not an
+  exception from the array), and each type's rdata is read through `RR.rdataReader()`, limited to its
+  RDLENGTH and required to use all of it (`RR.endOfRdata`). Round 5 fixes:
+  - #79: a record whose rdata is shorter or longer than its content is a format error (an MX with
+    RDLENGTH 2 used to take its exchange from the next record).
+  - #80: compression pointers only point below offset 0x3FFF (names past 16 KiB were corrupted).
+  - #81: names are written as ISO-8859-1, as they are read (a label with a high byte was echoed as
+    UTF-8 with the wrong length).
+  - #82: names in text form use master-file escapes (`\.` inside a label, `\\`, `\DDD`); a label over
+    63 octets, an empty label or a name over 255 octets is refused when written instead of corrupting
+    the message. `Name.wireLabels`, `Name.escapeLabel`, `ByteBuffer.setName(name, compress)`,
+    `setNameAsIs`.
+  - #93: canonical form (`Canonical.key`, signing) lower-cases A-Z only (RFC 4034 6.2);
+    `Canonical.isBelow` compares labels.
+  - #95: A and AAAA rdata must be 4 and 16 bytes; `Section.toString` prints any type or class
+    (CLASS254 is NONE, TYPEnnn / CLASSnnn otherwise).
+  - #96: RP and AFSDB names are written without compression (RFC 3597 4).
+  - `setRdLength` refuses rdata over 65535 bytes; `setRdata` forgets the message the record came from.
 
 ### Changed (behaviour)
 

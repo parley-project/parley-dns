@@ -90,11 +90,9 @@ Convert to a Java STring
 Set the internal NS value from the RDATA
 	 **/
 	public void setFromRdata() {
-		ByteBuffer in = new ByteBuffer(rdata);
-		if( source != null ) {
-			in = new ByteBuffer(source.getBuf(),sourcePos);
-		}
+		ByteBuffer in = rdataReader();
 		ns = new Name(in);
+		endOfRdata(in);
 	}
 	
 	/**

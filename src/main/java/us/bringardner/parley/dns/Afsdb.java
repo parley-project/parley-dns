@@ -108,12 +108,10 @@ public void setExchange(String c)
 }
 public void setFromRdata() 
 {
-	ByteBuffer in = new ByteBuffer(rdata);
-	if( source != null ) {
-		in = new ByteBuffer(source.getBuf(),sourcePos);
-	}
+	ByteBuffer in = rdataReader();
 	subType = in.nextShort();
-	hostName = new Name(in); 
+	hostName = new Name(in);
+	endOfRdata(in);
 	dirty = false;
 }
 /**
@@ -131,7 +129,8 @@ public void toByteArray(ByteBuffer in)
 {
 	super.toByteArray(in);	
 	in.setShort(subType);
-	in.setName(hostName);
+	//  RFC 3597 4: only the RFC 1035 types compress names in their rdata (round 5 #96)
+	in.setName(hostName.toString(), false);
 	in.setRdLength();
 }
 /**

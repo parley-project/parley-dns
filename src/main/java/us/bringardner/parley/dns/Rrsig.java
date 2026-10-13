@@ -164,7 +164,7 @@ public class Rrsig extends RR {
 			if( n.length() > 0 ) {
 				n.append('.');
 			}
-			n.append(new String(r, pos, len, java.nio.charset.StandardCharsets.ISO_8859_1));
+			n.append(Name.escapeLabel(new String(r, pos, len, java.nio.charset.StandardCharsets.ISO_8859_1)));
 			pos += len;
 		}
 		signer = n.toString();

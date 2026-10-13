@@ -420,12 +420,8 @@ public class Svcb extends RR {
 
 	@Override
 	public void setFromRdata() {
-		ByteBuffer in = new ByteBuffer(rdata);
-		int end = rdata == null ? 0 : rdata.length;
-		if( source != null ) {
-			in = new ByteBuffer(source.getBuf(), sourcePos);
-			end = sourcePos + rdlength;
-		}
+		ByteBuffer in = rdataReader();
+		int end = in.readEnd();
 		if( rdlength < 3 && (rdata == null || rdata.length < 3) ) {
 			throw new DnsFormatException("Invalid "+Utility.TYPENAMES[getType()]+" rdata");
 		}
@@ -452,6 +448,7 @@ public class Svcb extends RR {
 			p.put(key, v);
 			last = key;
 		}
+		endOfRdata(in);
 		params = p;
 		dirty = false;
 	}
