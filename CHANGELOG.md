@@ -82,6 +82,8 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
 - Round 4 #64: records an upstream server gives for names outside its zone are dropped (a server
   for evil.example can no longer add an address for www.bank.example after a CNAME to it); a CNAME
   chain that ends without the data is followed by asking the target's own servers.
+- Round 4 #69: UDP requests up to 64 KB are read whole (larger than 2 KB were cut off); upstream
+  answers already were.
 - Round 5 #84: the UPDATE journal is crash safe: the header is written into an empty journal too,
   each update is framed by `begin`/`end` lines (a torn last update is left out on replay), and a
   failed write is cut off again. Older journals without the framing still replay.

@@ -148,7 +148,9 @@ public void run ()
 			//  One receive buffer per thread (the request is copied out
 			//  before parsing); it used to allocate 2 KB per packet
 			if( recPckt == null ) {
-				data = new byte[MAXUDPLEN];
+				//  Round 4 #69: any datagram (an UPDATE with EDNS may be larger than 2 KB;
+				//  a longer one used to be cut off and answered FORMERR)
+				data = new byte[65535];
 				recPckt = new DatagramPacket(data,data.length);
 			} else {
 				recPckt.setLength(data.length);
