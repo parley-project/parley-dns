@@ -160,8 +160,19 @@ public class TestUdpTruncation {
 		server.addZone(new Zone(zone));
 		server.setRecursionAvailable(false);
 
-		try(DatagramSocket probe = new DatagramSocket(0, InetAddress.getLoopbackAddress())) {
-			port = probe.getLocalPort();
+		//  A free UDP port whose TCP twin is free too (it isn't always: the test
+		//  used to fail now and then with "Address already in use")
+		for(int i=0; ; i++ ) {
+			try(DatagramSocket probe = new DatagramSocket(0, InetAddress.getLoopbackAddress())) {
+				port = probe.getLocalPort();
+			}
+			try(java.net.ServerSocket s = new java.net.ServerSocket(port, 5, InetAddress.getLoopbackAddress())) {
+				break;
+			} catch(java.io.IOException ex) {
+				if( i > 20 ) {
+					throw ex;
+				}
+			}
 		}
 		DnsServer.setShutdown(false);
 		UDPProsessor.initUDPProsessor(port, InetAddress.getLoopbackAddress(), 200);

@@ -527,4 +527,16 @@ public class TestDynamicUpdate {
 		assertEquals(DNS.NOERROR, send(new Update().add(a("_dmarc-x.host-1.up.test", "10.1.1.5"))));
 		assertEquals(1, new Zone(zoneFile).exactRecords("_dmarc-x.host-1.up.test").size());
 	}
+
+	// ------------------------------------------------------------ pending
+
+	@Test
+	@org.junit.jupiter.api.Disabled("Round 5 #84: journal crash safety (an empty journal left by a failed first write)")
+	public void anEmptyJournalDoesntStopTheZoneLoading() throws Exception {
+		assertTrue(new File(dir, "up.test.txt.jnl").createNewFile());
+		assertEquals(DNS.NOERROR, send(new Update().add(a("new.up.test", "10.1.1.3"))));
+		//  the update used to be appended without the 'base' line: the zone didn't load again
+		Zone again = new Zone(zoneFile);
+		assertEquals(1, again.exactRecords("new.up.test").size());
+	}
 }

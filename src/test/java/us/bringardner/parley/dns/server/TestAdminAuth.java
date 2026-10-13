@@ -275,4 +275,34 @@ public class TestAdminAuth {
 			b.close();
 		}
 	}
+
+	// ------------------------------------------------------------ pending (framework plan, chunk 2)
+
+	@Test
+	@org.junit.jupiter.api.Disabled("Round 5 #73: chunk 2 (admin on parley-net, commands per session)")
+	public void commandOutputGoesOnlyToItsOwnSession() throws Exception {
+		try(AdminListener l = new AdminListener("s3cret");
+				Raw a = new Raw(InetAddress.getLoopbackAddress(), l.port())) {
+			String g = a.line();
+			a.send("auth "+AdminAuth.response("s3cret", AdminAuth.challengeFrom(g)));
+			assertTrue(a.line().startsWith("+"), "A authenticated");
+			try(Raw b = new Raw(InetAddress.getLoopbackAddress(), l.port())) {
+				b.line();   //  B's greeting; B never authenticates
+				Thread.sleep(300);
+				a.send("mem");
+				a.s.setSoTimeout(1500);
+				b.s.setSoTimeout(1500);
+				String toA = a.line();
+				assertTrue(toA != null && toA.startsWith("+"), "A gets its own output: "+toA);
+				String toB = null;
+				try {
+					toB = b.line();
+				} catch(java.net.SocketTimeoutException expected) {
+					// nothing for B
+				}
+				//  the static command table used to send A's output to the newest connection
+				assertEquals(null, toB, "the unauthenticated session B got A's output");
+			}
+		}
+	}
 }
