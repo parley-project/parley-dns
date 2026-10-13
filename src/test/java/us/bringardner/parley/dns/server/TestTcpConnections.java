@@ -55,6 +55,8 @@ public class TestTcpConnections {
 
 	private static File dir;
 	private static DnsServer server;
+	//  ms each request is held up for (a slow recursion, UPDATE...)
+	private static volatile long slowRequest = 0;
 
 	@BeforeAll
 	public static void setup() throws IOException {
@@ -68,7 +70,21 @@ public class TestTcpConnections {
 					+"ns1\tIN\tA\t10.0.0.53\n"
 					+"www\tIN\tA\t10.0.0.80\n");
 		}
-		server = new DnsServer();
+		server = new DnsServer() {
+			@Override
+			public us.bringardner.parley.dns.Tsig.KeyRing getTsigKeys() {
+				//  called first thing for every request
+				long ms = slowRequest;
+				if( ms > 0 ) {
+					try {
+						Thread.sleep(ms);
+					} catch(InterruptedException ex) {
+						Thread.currentThread().interrupt();
+					}
+				}
+				return super.getTsigKeys();
+			}
+		};
 		server.addZone(new Zone(zone));
 		server.setRecursionAvailable(false);
 	}
@@ -388,5 +404,74 @@ public class TestTcpConnections {
 			assertEquals(77, r.getID());
 			assertEquals(1, r.getAnswerCount());
 		}
+	}
+
+	/** A request slower than the idle timeout still gets its answer (review of chunk 3). */
+	@Test
+	public void aRequestSlowerThanTheIdleTimeoutIsAnswered() throws Exception {
+		slowRequest = 1500;
+		try(Listener l = new Listener(8, 500)) {
+			Message r = query(l.port, "www.tcp.test");
+			assertEquals(1, r.getAnswerCount());
+		} finally {
+			slowRequest = 0;
+		}
+	}
+
+	/** After a slow request the connection is still closed once it really is idle. */
+	@Test
+	public void anIdleConnectionIsClosedAfterASlowRequest() throws Exception {
+		slowRequest = 1500;
+		try(Listener l = new Listener(8, 500); Socket s = idleClient(l.port)) {
+			Message q = new Message();
+			q.setQuestion("www.tcp.test", DNS.A, DNS.IN);
+			TCPProsessor.writeMessage(s.getOutputStream(), q.toByteArray());
+			InputStream in = s.getInputStream();
+			byte [] sz = new byte[2];
+			Message.readArray(in, sz);
+			byte [] data = new byte[Utility.makeShort(sz[0],sz[1])];
+			Message.readArray(in, data);
+			long start = System.currentTimeMillis();
+			assertTrue(closedByServer(s), "closed once idle");
+			long took = System.currentTimeMillis()-start;
+			assertTrue(took >= 300, "not before the idle timeout, took "+took);
+		} finally {
+			slowRequest = 0;
+		}
+	}
+
+	@Test
+	public void framesAfterAMalformedMessageAreIgnored() throws Exception {
+		try(Listener l = new Listener(8, 5000); Socket s = idleClient(l.port)) {
+			byte [] bad = new byte[] {0x12, 0x34, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0};
+			Message q = new Message();
+			q.setQuestion("www.tcp.test", DNS.A, DNS.IN);
+			q.setID(99);
+			java.io.ByteArrayOutputStream both = new java.io.ByteArrayOutputStream();
+			TCPProsessor.writeMessage(both, bad);
+			TCPProsessor.writeMessage(both, q.toByteArray());
+			s.getOutputStream().write(both.toByteArray());
+			s.getOutputStream().flush();
+			InputStream in = s.getInputStream();
+			byte [] sz = new byte[2];
+			Message.readArray(in, sz);
+			byte [] data = new byte[Utility.makeShort(sz[0],sz[1])];
+			Message.readArray(in, data);
+			assertEquals(1, data[3] & 0x0F, "FORMERR");
+			assertTrue(closedByServer(s), "nothing more: the query after it isn't answered");
+		}
+	}
+
+	@Test
+	public void stopClosesTcp() throws Exception {
+		Listener l = new Listener(8, 30_000);
+		try(Socket s = idleClient(l.port)) {
+			waitFor(() -> TCPProsessor.getActiveConnections() == 1, 3000);
+			new DnsServer().stop();
+			assertTrue(closedByServer(s));
+		} finally {
+			l.close();
+		}
+		assertEquals(null, TCPProsessor.getServerSocket());
 	}
 }

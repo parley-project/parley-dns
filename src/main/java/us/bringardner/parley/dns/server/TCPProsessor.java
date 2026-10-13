@@ -213,6 +213,7 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 		ServerSocketChannel ch = channel;
 		nio = null;
 		connectionPool = null;
+		channel = null;
 		boolean ret = true;
 		if( s != null ) {
 			s.stop();
@@ -320,6 +321,10 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 	static final class Connection extends DnsRequestProcessor implements INioHandler {
 		private volatile INioConnection conn;
 		private volatile InetAddress client;
+		//  Set after a malformed message: frames already read are not processed
+		private volatile boolean closing;
+		//  When a request was last answered: the reactor's idle check only sees socket I/O
+		private volatile long lastActivity = System.currentTimeMillis();
 
 		Connection(DnsServer svr) {
 			this.server = svr;
@@ -339,6 +344,13 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 		@Override
 		public void onMessage(INioConnection connection, java.nio.ByteBuffer frame) {
 			conn = connection;
+			if( closing ) {
+				return;
+			}
+			if( DnsServer.isShutdown() ) {
+				connection.close();
+				return;
+			}
 			if( frame.remaining() < 12 ) {
 				//  Smaller than a DNS header: framing is broken
 				connection.close();
@@ -355,12 +367,15 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 				QueryData query = new QueryData(client,-1,msg);
 				query.setWire(data);
 				process(query);
+				lastActivity = System.currentTimeMillis();
 			} catch(DnsFormatException ex) {
 				// Malformed message: answer FORMERR and drop the connection
 				// (framing can't be trusted after a bad message).
 				if( DnsServer.isDebug() ) {
 					log(() -> "Malformed TCP message from "+client+" "+ex.getMessage());
 				}
+				closing = true;
+				connection.pauseReading();
 				sendFormatError(data);
 				connection.closeAfterFlush();
 			} catch(StackOverflowError ex) {
@@ -378,15 +393,29 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 		}
 
 		/**
-		 * The idle check may fire while a slow request (recursion, a zone transfer) is
-		 * being answered; it then runs after the answer is sent. Close only if the
-		 * connection is still idle.
+		 * The idle check only sees socket I/O, so it may fire while a slow request
+		 * (recursion, an UPDATE, a zone transfer) is being answered; this call then runs
+		 * just after the answer was queued, before it is sent. Close only if the
+		 * connection really has been idle; if not, look again when it could be (the
+		 * reactor doesn't call onIdle again until the next read or write).
 		 */
 		@Override
 		public void onIdle(INioConnection connection) {
-			long last = Math.max(connection.getLastReadTime(), connection.getLastWriteTime());
-			if( System.currentTimeMillis()-last >= idleTimeout ) {
+			checkIdle(connection);
+		}
+
+		@Override
+		public void onDeadline(INioConnection connection) {
+			checkIdle(connection);
+		}
+
+		private void checkIdle(INioConnection connection) {
+			long last = Math.max(lastActivity, Math.max(connection.getLastReadTime(), connection.getLastWriteTime()));
+			long left = idleTimeout-(System.currentTimeMillis()-last);
+			if( left <= 0 ) {
 				connection.close();
+			} else {
+				connection.setDeadline(left);
 			}
 		}
 
@@ -436,6 +465,7 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 			if( c == null ) {
 				return false;
 			}
+			lastActivity = System.currentTimeMillis();
 			try {
 				c.write(LengthFieldFrameDecoder.frame(wire, 2));
 			} catch(IOException ex) {
@@ -450,6 +480,7 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 					long now = c.getPendingWriteBytes();
 					if( now < pending ) {
 						since = System.currentTimeMillis();
+						lastActivity = since;
 					} else if( System.currentTimeMillis()-since > idleTimeout ) {
 						log(() -> "TCP client "+client+" stopped reading, closing");
 						c.close();

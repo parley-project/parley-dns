@@ -3250,6 +3250,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public void stop() 	{
 		running = false;
 		shutdown = true;
+		//  TCP (NioServer) doesn't watch the shutdown flag: stop accepting and close connections
+		TCPProsessor.closeListener();
 		Thread t = thread;
 		if( t != null && t != Thread.currentThread() ) {
 			t.interrupt();
