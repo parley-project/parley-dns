@@ -177,7 +177,7 @@ java -Xmx256m -XX:+ExitOnOutOfMemoryError \
      -cp parley-dns.jar:parley-core.jar:parley-io.jar us.bringardner.parley.dns.server.DnsServer
 ```
 
-`DnsServer.main` also installs `FatalErrorHandler`: any thread that dies from an uncaught error is logged, and on a JVM error (e.g. `OutOfMemoryError`) the process halts with exit code 1 so the supervisor starts a clean one. Set `-DJDns.exitOnFatalError=false` to only log. Applications that embed the server can call `FatalErrorHandler.install(true)`.
+`DnsServer.main` also installs `FatalErrorHandler`: any thread that dies from an uncaught error is logged, and on a JVM error (e.g. `OutOfMemoryError`) the process halts with exit code 1 so the supervisor starts a clean one. Set `-DJDns.exitOnFatalError=false` to only log. Applications that embed the server can call `FatalErrorHandler.install(true)` (`us.bringardner.parley.net.FatalErrorHandler`, from parley-net).
 
 If the server can't start (bad configuration, missing zone directory, a port in use), `DnsServer.main` logs why and exits with -1 (configuration, zones, UDP/TCP sockets) or -2 (admin socket). Applications that embed the server call `start()` and then `awaitStarted(timeoutMs)`, which throws `DnsServer.StartupException` with the cause and stops anything that had started; the server itself never calls `System.exit`.
 
@@ -257,6 +257,8 @@ A bind address of `localhost` means this host's own name (its network address), 
 | `JDns.dnssecTrustAnchors` | the root zone's keys (built in) | File of trust anchors (DS or DNSKEY records), relative to `JDns.dnsDir` |
 
 ### Admin port
+
+The admin port runs on parley-net's `Server` (one thread per session, virtual threads on Java 24+), and `DnsAdminClient` on its `Client`. The protocol is unchanged. Zone reloads, dynamic records and re-signing run on a thread of their own (`DnsMaintenance`), so an error in one of them is logged and the next round goes ahead.
 
 | Property | Default | Meaning |
 |---|---|---|

@@ -49,11 +49,10 @@ import us.bringardner.parley.dns.Name;
  */
 public class TestAdminLimits {
 
-	/** An admin listener that hands connections to DnsServer.handleAdminConnection. */
+	/** A DNS server's admin server (parley-net) on a free port. */
 	private static class AdminListener implements AutoCloseable {
 		final DnsServer server = new DnsServer();
-		final ServerSocket ss;
-		final Thread thread;
+		final DnsAdminServer admin;
 		final String savedSecret = System.getProperty(DnsServer.PROP_ADMIN_SECRET);
 
 		AdminListener(String secret) throws IOException {
@@ -62,21 +61,11 @@ public class TestAdminLimits {
 			} else {
 				System.setProperty(DnsServer.PROP_ADMIN_SECRET, secret);
 			}
-			ss = new ServerSocket(0, 10, InetAddress.getLoopbackAddress());
-			thread = new Thread(() -> {
-				while( !ss.isClosed() ) {
-					try {
-						server.handleAdminConnection(ss.accept());
-					} catch(IOException ex) {
-					}
-				}
-			},"TestAdminLimitsListener");
-			thread.setDaemon(true);
-			thread.start();
+			admin = server.startAdminServer(0);
 		}
 
 		int port() {
-			return ss.getLocalPort();
+			return admin.getLocalPort();
 		}
 
 		/** Wait until all admin slots are free again (the session ended). */
@@ -93,8 +82,7 @@ public class TestAdminLimits {
 
 		@Override
 		public void close() throws Exception {
-			ss.close();
-			thread.join(2000);
+			admin.stop();
 			if( savedSecret == null ) {
 				System.clearProperty(DnsServer.PROP_ADMIN_SECRET);
 			} else {
@@ -113,46 +101,7 @@ public class TestAdminLimits {
 		return new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
 	}
 
-	// ------------------------------------------------------------ LineLimitInputStream
-
-	private static InputStream limited(String text, int max) {
-		return new LineLimitInputStream(new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8)), max);
-	}
-
-	@Test
-	public void limitIsPerLine() throws Exception {
-		//  Exactly max bytes before each '\n' is fine, however many lines
-		String line = "abcdefghij";
-		StringBuilder sb = new StringBuilder();
-		for(int i=0; i < 100; i++ ) {
-			sb.append(line).append('\n');
-		}
-		try(InputStream in = limited(sb.toString(), 10)) {
-			byte [] buf = new byte[64];
-			int total = 0;
-			int n;
-			while( (n=in.read(buf, 0, buf.length)) > 0 ) {
-				total += n;
-			}
-			assertEquals(1100, total);
-		}
-	}
-
-	@Test
-	public void longLineFailsBothReadMethods() throws Exception {
-		try(InputStream in = limited("abcdefghijk\n", 10)) {
-			assertThrows(LineLimitInputStream.LineTooLongException.class, () -> in.read(new byte[64], 0, 64));
-		}
-		try(InputStream in = limited("abcdefghijk\n", 10)) {
-			assertThrows(LineLimitInputStream.LineTooLongException.class, () -> {
-				while( in.read() >= 0 ) {
-					//  read one byte at a time
-				}
-			});
-		}
-	}
-
-	// ------------------------------------------------------------ max line
+	// ------------------------------------------------------------ line length (parley-net Connection)
 
 	@Test
 	public void endlessLineEndsTheSession() throws Exception {

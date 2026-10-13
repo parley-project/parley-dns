@@ -48,11 +48,10 @@ import us.bringardner.parley.dns.Name;
  */
 public class TestAdminAuth {
 
-	/** An admin listener that hands connections to DnsServer.handleAdminConnection. */
+	/** A DNS server's admin server (parley-net) on a free port. */
 	private static class AdminListener implements AutoCloseable {
 		final DnsServer server = new DnsServer();
-		final ServerSocket ss;
-		final Thread thread;
+		final DnsAdminServer admin;
 		final String savedSecret = System.getProperty(DnsServer.PROP_ADMIN_SECRET);
 
 		AdminListener(String secret, InetAddress bind) throws IOException {
@@ -61,17 +60,8 @@ public class TestAdminAuth {
 			} else {
 				System.setProperty(DnsServer.PROP_ADMIN_SECRET, secret);
 			}
-			ss = new ServerSocket(0, 10, bind);
-			thread = new Thread(() -> {
-				while( !ss.isClosed() ) {
-					try {
-						server.handleAdminConnection(ss.accept());
-					} catch(IOException ex) {
-					}
-				}
-			},"TestAdminListener");
-			thread.setDaemon(true);
-			thread.start();
+			server.setAdminBindAddress(bind);
+			admin = server.startAdminServer(0);
 		}
 
 		AdminListener(String secret) throws IOException {
@@ -79,13 +69,12 @@ public class TestAdminAuth {
 		}
 
 		int port() {
-			return ss.getLocalPort();
+			return admin.getLocalPort();
 		}
 
 		@Override
 		public void close() throws Exception {
-			ss.close();
-			thread.join(2000);
+			admin.stop();
 			if( savedSecret == null ) {
 				System.clearProperty(DnsServer.PROP_ADMIN_SECRET);
 			} else {
@@ -279,7 +268,6 @@ public class TestAdminAuth {
 	// ------------------------------------------------------------ pending (framework plan, chunk 2)
 
 	@Test
-	@org.junit.jupiter.api.Disabled("Round 5 #73: chunk 2 (admin on parley-net, commands per session)")
 	public void commandOutputGoesOnlyToItsOwnSession() throws Exception {
 		try(AdminListener l = new AdminListener("s3cret");
 				Raw a = new Raw(InetAddress.getLoopbackAddress(), l.port())) {

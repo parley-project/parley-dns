@@ -15,6 +15,20 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
 - Dependencies: `bjl_core` and `bjl_io` are now `parley-core` and `parley-io`.
 - The `JDns.*` configuration properties are unchanged.
 
+### Changed (redesign: parley-dns on the Parley framework)
+
+- parley-dns now depends on **parley-net**. The admin port runs on parley-net's `Server`
+  (`DnsAdminServer`, with a `DnsAdminProcessor` per session) and `DnsAdminClient` on its `Client`.
+  The admin protocol, properties and replies are unchanged. Each session has its own commands: a
+  command's output used to go to the newest connection, logged in or not.
+- Zone reloads, dynamic records and re-signing run on their own thread (`DnsMaintenance`), each
+  step guarded: an error is logged and the next round goes ahead. They used to run in the admin
+  accept loop, where one RuntimeException stopped them for good.
+- `FatalErrorHandler` moved to parley-net (`us.bringardner.parley.net.FatalErrorHandler`);
+  `JDns.exitOnFatalError` is now `DnsServer.PROP_EXIT_ON_FATAL_ERROR`.
+- Removed: `DnsServer.handleAdminConnection` and `createAdminSocket` (use `startAdminServer(port)` /
+  `createAdminServer(port)`), and the old `DnsAdminProcessor` constructor `(DnsServer, Socket)`.
+
 ### Changed (behaviour)
 
 - Unsigned dynamic updates allowed by address (`JDns.updateAllow`) are accepted over UDP only from

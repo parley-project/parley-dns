@@ -29,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.nio.file.Files;
 import java.sql.SQLException;
@@ -155,18 +156,15 @@ public class TestServerConfig {
 	@Test
 	public void adminListensOnLoopbackByDefault() throws Exception {
 		withServer(props(), s -> {
-			try(ServerSocket admin = s.createAdminSocket()) {
-				assertTrue(admin.getInetAddress().isLoopbackAddress(), "admin bound to "+admin.getInetAddress());
-			}
+			InetAddress bind = s.createAdminServer(0).getBindAddr();
+			assertTrue(bind.isLoopbackAddress(), "admin bound to "+bind);
 		});
 	}
 
 	@Test
 	public void adminBindAddressConfigurable() throws Exception {
 		withServer(props(DnsServer.PROP_ADMIN_BIND_ADDRESS,"0.0.0.0"), s -> {
-			try(ServerSocket admin = s.createAdminSocket()) {
-				assertTrue(admin.getInetAddress().isAnyLocalAddress());
-			}
+			assertTrue(s.createAdminServer(0).getBindAddr().isAnyLocalAddress());
 		});
 	}
 

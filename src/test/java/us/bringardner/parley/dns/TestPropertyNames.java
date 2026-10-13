@@ -49,7 +49,6 @@ public class TestPropertyNames {
 	private static final String [] CLASSES = {
 			"us.bringardner.parley.dns.server.DnsServer",
 			"us.bringardner.parley.dns.server.UDPProsessor",
-			"us.bringardner.parley.dns.server.FatalErrorHandler",
 			"us.bringardner.parley.dns.resolve.Resolver",
 			"us.bringardner.parley.dns.resolve.ResolverThread"
 	};
