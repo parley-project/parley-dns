@@ -288,6 +288,7 @@ public interface DNS {
 		static final int RT    = 21; // Route Through		//EastLake
 		static final int SINK	=40;		// RFC2782		
 		static final int DS    = 43;  // Delegation signer (RFC 4034, DNSSEC)
+		static final int SSHFP = 44;  // SSH host key fingerprint (RFC 4255, RFC 6594)
 		static final int RRSIG = 46;  // Signature (RFC 4034, DNSSEC)
 		static final int NSEC  = 47;  // Next secure (RFC 4034, DNSSEC)
 		static final int DNSKEY= 48;  // Zone key (RFC 4034, DNSSEC)

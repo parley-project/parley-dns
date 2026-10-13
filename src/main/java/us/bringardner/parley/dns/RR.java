@@ -159,6 +159,7 @@ public  class RR extends Section
 		case AAAA:	ret = new AAAA(sec);break;
 		case SRV:	ret = new Srv(sec);break;
 		case CAA:	ret = new Caa(sec);break;
+		case SSHFP:	ret = new Sshfp(sec);break;
 		case SVCB:	ret = new Svcb(sec);break;
 		case HTTPS:	ret = new Https(sec);break;
 		case DS:	ret = new Ds(sec);break;
