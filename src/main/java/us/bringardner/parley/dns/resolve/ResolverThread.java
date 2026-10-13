@@ -39,7 +39,33 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 {
 	/** Queued recursive queries (was Resolver.maxBacklog, still read). */
 	public static final String PROP_RESOLVER_BACKLOG = "JDns.resolverMaxBacklog";
-	private static SimpleObjectFIFO fifo;
+	/** A queued query older than this (ms) is dropped instead of resolved (default 3000, 0: never). */
+	public static final String PROP_RESOLVER_MAX_QUEUE_AGE = "JDns.resolverMaxQueueAge";
+	/** Resolver threads are virtual threads where the JVM has them (Java 21+; default true). */
+	public static final String PROP_RESOLVER_VIRTUAL_THREADS = "JDns.resolverVirtualThreads";
+	/** Default for JDns.resolverMaxQueueAge: stub resolvers give up after 1 to 5 s. */
+	public static final long DEFAULT_MAX_QUEUE_AGE = 3000;
+
+	/** A queued query and when it was queued (round 4 #58). */
+	private static final class Queued {
+		final QueryData query;
+		final long at;
+		Queued(QueryData query, long at) {
+			this.query = query;
+			this.at = at;
+		}
+	}
+
+	//  Round 4 #70: a bounded blocking queue. SimpleObjectFIFO's notifyAll woke every
+	//  resolver thread for each query.
+	private static volatile java.util.concurrent.ArrayBlockingQueue<Queued> fifo;
+	private static volatile long maxQueueAge = DEFAULT_MAX_QUEUE_AGE;
+	private static volatile boolean virtualThreads = true;
+	//  Round 4 #59: lookups in progress (see coalesceKey); later askers wait for the first
+	private static final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<Void>> inFlight =
+			new java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<Void>>();
+	private static final java.util.concurrent.atomic.AtomicLong stale = new java.util.concurrent.atomic.AtomicLong();
+	private static final java.util.concurrent.atomic.AtomicLong coalesced = new java.util.concurrent.atomic.AtomicLong();
 	private volatile Thread thread;
 	//  Set to false by stop() from another thread
 	private volatile boolean running = false;
@@ -71,15 +97,11 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 	 * and the client waited for its own timeout.
 	 */
 	public static boolean addQuery(QueryData query) {
-		boolean ret = false;
-		try {
-			synchronized (fifo) {
-				if( !fifo.isFull() ) {
-					fifo.add(query);
-					ret = true;
-				}
-			}
-		} catch(Exception ex) {}
+		return enqueue(new Queued(query, System.currentTimeMillis()));
+	}
+
+	private static boolean enqueue(Queued q) {
+		boolean ret = q.query != null && fifo.offer(q);
 		if( !ret ) {
 			dropped.incrementAndGet();
 		}
@@ -116,18 +138,35 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 
 	/** Discard all queued queries. @return how many were removed */
 	public static int clearBacklog() {
-		int n = 0;
-		synchronized (fifo) {
-			while( fifo.getSize() > 0 ) {
-				try {
-					fifo.remove();
-				} catch(InterruptedException ex) {
-					break;
-				}
-				n++;
-			}
-		}
-		return n;
+		return fifo.drainTo(new java.util.ArrayList<Queued>());
+	}
+
+	/** Queued queries dropped because they waited longer than JDns.resolverMaxQueueAge (round 4 #58). */
+	public static long getStale() {
+		return stale.get();
+	}
+
+	/** Queries that waited for the same lookup in progress instead of starting their own (round 4 #59). */
+	public static long getCoalesced() {
+		return coalesced.get();
+	}
+
+	/** @param ms a queued query older than this is dropped; 0 or less: never */
+	public static void setMaxQueueAge(long ms) {
+		maxQueueAge = ms;
+	}
+
+	public static long getMaxQueueAge() {
+		return maxQueueAge;
+	}
+
+	/** @param on resolver threads started from now on are virtual threads (Java 21+) */
+	public static void setVirtualThreads(boolean on) {
+		virtualThreads = on;
+	}
+
+	public static boolean isVirtualThreads() {
+		return virtualThreads;
 	}
 
 	/** Queries refused because the backlog was full. */
@@ -277,15 +316,16 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 	}
 
 	public static int backlog() {
-		return fifo.getSize();
+		return fifo.size();
 	}
 	
 	public static int getBacklog() {
-		return fifo.getSize();
+		return fifo.size();
 	}
 	
 	public static int getMaxBackLog() {
-		return fifo.getCapacity();
+		java.util.concurrent.ArrayBlockingQueue<Queued> q = fifo;
+		return q.size()+q.remainingCapacity();
 	}
 	
 	/**
@@ -305,11 +345,12 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 			} catch(Exception ex) {}
 		}
 
-		fifo = new SimpleObjectFIFO(maxBacklog);
+		fifo = new java.util.concurrent.ArrayBlockingQueue<Queued>(Math.max(1, maxBacklog));
 	}
 	
+	/** Nothing to do: the queue wakes one thread per query. */
+	@Deprecated
 	public static void notifyThreads() {
-		fifo.notifyAll();
 	}
 	
 	/**
@@ -329,36 +370,10 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 		while( running ) {
 			try {
 				setState("Waiting on fifo");
-				QueryData question = (QueryData)fifo.remove();
+				Queued q = fifo.take();
 				setState("Returned on fifo");
-				if( running && question != null ) {
-					setState("Call Resolver", question);
-					Message msg = null;
-					Section toResolve = question.getResolveQuestion();
-					Validator.Result validated = null;
-					try {
-						Resolver.Answer a = resolveFor(question, toResolve);
-						msg = a.msg;
-						validated = a.result;
-					} catch(RuntimeException | StackOverflowError ex) {
-						logError("Resolver failed for "+toResolve, ex);
-					}
-					setState("Returned from resolver");
-					Message partial = question.getPartialAnswer();
-					if( partial != null ) {
-						//  Complete a local CNAME chain that pointed outside our zones
-						if( msg == null ) {
-							failed.incrementAndGet();
-						}
-						msg = completeCnameAnswer(partial, msg);
-					} else if( msg == null ) {
-						//  No answer (all servers timed out, no servers, or an error):
-						//  tell the client instead of leaving it to time out.
-						failed.incrementAndGet();
-						msg = failure(question, DNS.SERVER_ERROR);
-					}
-					finish(msg, question, validated, partial != null);
-					sendResponse(msg,question);
+				if( running ) {
+					serve(q, !again.remove(q));
 				}
 			} catch(InterruptedException ex) {
 				//  stop() interrupts the wait on the queue
@@ -372,6 +387,114 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 
 		setState("Stopped");
 		running = false;
+	}
+
+	/**
+	 * The lookup a query needs: its name, type and class, and whether the client
+	 * set CD (validation). Queries with the same key get the same upstream answer.
+	 */
+	static String coalesceKey(Section toResolve, boolean cd) {
+		return us.bringardner.parley.dns.dnssec.Canonical.key(toResolve.getName())+"|"+toResolve.getType()+"|"+toResolve.getDnsClass()+"|"+cd;
+	}
+
+	/**
+	 * Resolve a queued query and answer it.
+	 *
+	 * @param coalesce if the same lookup is in progress, wait for it (without holding
+	 *  this thread) and answer from the cache it fills; false for a query that already
+	 *  waited once
+	 */
+	private void serve(Queued q, boolean coalesce) {
+		QueryData question = q.query;
+		long age = System.currentTimeMillis()-q.at;
+		long maxAge = maxQueueAge;
+		if( maxAge > 0 && age > maxAge ) {
+			//  Round 4 #58: the client gave up long ago; resolving it only delays the rest
+			stale.incrementAndGet();
+			return;
+		}
+		Section toResolve = question.getResolveQuestion();
+		boolean cd = question.getMessage().getHeader().getCD();
+		String key = coalesceKey(toResolve, cd);
+		java.util.concurrent.CompletableFuture<Void> mine = new java.util.concurrent.CompletableFuture<Void>();
+		java.util.concurrent.CompletableFuture<Void> first = coalesce ? inFlight.putIfAbsent(key, mine) : null;
+		if( first != null ) {
+			//  Round 4 #59: the same lookup is in progress; answer when it is done
+			coalesced.incrementAndGet();
+			first.whenComplete((v, ex) -> afterLookup(q));
+			return;
+		}
+		try {
+			setState("Call Resolver", question);
+			Message msg = null;
+			Validator.Result validated = null;
+			try {
+				Resolver.Answer a = resolveFor(question, toResolve);
+				msg = a.msg;
+				validated = a.result;
+			} catch(RuntimeException | StackOverflowError ex) {
+				logError("Resolver failed for "+toResolve, ex);
+			}
+			setState("Returned from resolver");
+			respond(question, msg, validated);
+		} finally {
+			if( coalesce ) {
+				inFlight.remove(key, mine);
+			}
+			mine.complete(null);
+		}
+	}
+
+	/**
+	 * A query that waited for the same lookup: answered from the cache at once if the
+	 * lookup filled it, else queued again (it then resolves on its own).
+	 */
+	private void afterLookup(Queued q) {
+		try {
+			QueryData question = q.query;
+			Section toResolve = question.getResolveQuestion();
+			Resolver.Answer a = cachedFor(question, toResolve);
+			if( a != null && a.msg != null ) {
+				respond(question, a.msg, a.result);
+				return;
+			}
+			if( !requeue(q) ) {
+				respond(question, null, null);
+			}
+		} catch(RuntimeException ex) {
+			logError("Unexpected error answering a coalesced query", ex);
+		}
+	}
+
+	//  Queued again after waiting for a lookup: not coalesced a second time
+	private static final java.util.Set<Queued> again = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+	private static boolean requeue(Queued q) {
+		again.add(q);
+		if( enqueue(q) ) {
+			return true;
+		}
+		again.remove(q);
+		return false;
+	}
+
+	/** Answer the client: the resolved message, a completed CNAME chain, or SERVFAIL. */
+	private void respond(QueryData question, Message msg, Validator.Result validated) {
+		Message partial = question.getPartialAnswer();
+		if( partial != null ) {
+			//  Complete a local CNAME chain that pointed outside our zones
+			if( msg == null ) {
+				failed.incrementAndGet();
+			}
+			msg = completeCnameAnswer(partial, msg);
+		} else if( msg == null ) {
+			//  No answer (all servers timed out, no servers, or an error):
+			//  tell the client instead of leaving it to time out.
+			failed.incrementAndGet();
+			msg = failure(question, DNS.SERVER_ERROR);
+		}
+		finish(msg, question, validated, partial != null);
+		sendResponse(msg,question);
 	}
 	
 	/**
@@ -415,8 +538,7 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 	public synchronized void start(String name) {
 		if( !running ) {
 			running = true;
-			thread = new Thread(this);
-			thread.setName(name);
+			thread = new us.bringardner.parley.core.NamedThreadFactory(name).virtual(virtualThreads).newThread(this);
 			thread.start();
 			setState("Started");
 		}

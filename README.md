@@ -245,6 +245,8 @@ A bind address of `localhost` means this host's own name (its network address), 
 |---|---|---|
 | `JDns.resolvers` | 10 | Resolver threads (for names not in the cache; cached answers to UDP queries are sent by the UDP threads directly) |
 | `JDns.resolverMaxBacklog` | 200 | Queued recursive queries; when full, clients get SERVFAIL (a CNAME answer is sent without the target's records). Logged at most every 10 s |
+| `JDns.resolverMaxQueueAge` | 3000 | A queued recursive query that waited longer than this (ms) is dropped: its client has given up (0: never) |
+| `JDns.resolverVirtualThreads` | true | Resolver threads are virtual threads where the JVM has them (Java 21+) |
 | `JDns.resolveTimeout` | 4000 | Total time (ms) for one resolution, including referrals and CNAME hops |
 | `JDns.maxCacheEntries` | 10000 | Resolver cache size (LRU) |
 | `JDns.cacheSweepSeconds` | 60 | How often expired cache entries are removed |

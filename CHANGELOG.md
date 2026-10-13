@@ -64,6 +64,16 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
   - Round 5 #94: a new `.private` file is created with `PrivateKeys.writePrivateFile` (new file only,
     so an existing file or symlink is refused; owner-only from the start). Loading a `.private` file
     that its group or everyone can read logs a warning.
+- Resolver (round 4 #58, #59, #70):
+  - The recursive query queue is an `ArrayBlockingQueue` (one thread woken per query, not all of
+    them); `SimpleObjectFIFO` is removed.
+  - A queued query older than `JDns.resolverMaxQueueAge` (default 3000 ms) is dropped instead of
+    resolved: its client has given up (`ResolverThread.getStale()`).
+  - Identical lookups (name, type, class, CD) share one upstream resolution: later askers wait without
+    holding a thread and are answered from the cache it fills (`ResolverThread.getCoalesced()`).
+  - Resolver threads are virtual threads on Java 21+ (`JDns.resolverVirtualThreads`, default true).
+  - Upstream address ranking and hold-off moved to parley-net's `UpstreamHealth`; `ServerA` keeps its
+    settings and methods.
 
 ### Changed (behaviour)
 
