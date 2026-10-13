@@ -575,7 +575,8 @@ public final class Validator extends DnsBaseClass {
 				boolean last = Canonical.compareNames(next, owner) <= 0;
 				boolean covers = Canonical.compareNames(owner, name) < 0
 						&& (last || Canonical.compareNames(name, next) < 0);
-				boolean delegation = n.hasType(DNS.NS) && !n.hasType(DNS.SOA) && Canonical.isBelow(name, owner, false);
+				//  Round 5 #91: a DNAME owner, like a delegation, proves nothing below it (RFC 6840 4.1)
+				boolean delegation = isCut(n.hasType(DNS.NS), n.hasType(DNS.SOA), n.hasType(TYPE_DNAME)) && Canonical.isBelow(name, owner, false);
 				if( covers && !delegation ) {
 					return n;
 				}
@@ -627,6 +628,14 @@ public final class Validator extends DnsBaseClass {
 		}
 	}
 
+	/** DNAME (RFC 6672), which DNS.java has no constant for. */
+	static final int TYPE_DNAME = 39;
+
+	/** An owner whose records say the names below it aren't in this zone's data: a delegation, or a DNAME. */
+	private static boolean isCut(boolean ns, boolean soa, boolean dname) {
+		return (ns && !soa) || dname;
+	}
+
 	private static String ownerLabel(Nsec3 n) {
 		String o = Canonical.key(n.getName());
 		int dot = o.indexOf('.');
@@ -661,7 +670,9 @@ public final class Validator extends DnsBaseClass {
 				d.nsec.add((Nsec)set.get(0));
 			} else {
 				Nsec3 n = (Nsec3)set.get(0);
-				if( n.getHashAlgorithm() != Nsec3Params.SHA1 || !parent(owner).equals(zk.zone) ) {
+				//  Round 5 #91: flags other than opt-out are unknown: ignored (RFC 5155 8.2)
+				if( n.getHashAlgorithm() != Nsec3Params.SHA1 || !parent(owner).equals(zk.zone)
+						|| (n.getFlags() & ~Nsec3.FLAG_OPT_OUT) != 0 ) {
 					continue;
 				}
 				if( d.nsec3 == null ) {
@@ -703,6 +714,10 @@ public final class Validator extends DnsBaseClass {
 			Nsec cover = d.nsecCovering(name);
 			if( cover == null ) {
 				return new Result(Status.BOGUS, "no NSEC proves "+name+" does not exist");
+			}
+			if( Canonical.isBelow(cover.getNext(), name, false) ) {
+				//  Round 5 #91: a name below it exists, so it does too (an empty non-terminal)
+				return new Result(Status.BOGUS, "the NSEC for "+name+" shows names below it: it exists");
 			}
 			String ce = closestEncloser(name, cover);
 			if( d.nsecCovering("*."+ce) == null ) {
@@ -766,6 +781,12 @@ public final class Validator extends DnsBaseClass {
 		String ce = d.closestEncloser(name);
 		if( ce == null ) {
 			return new Result(Status.BOGUS, "no NSEC3 closest encloser for "+name);
+		}
+		Nsec3 ceNsec3 = d.nsec3Matching(ce);
+		if( isCut(ceNsec3.hasType(DNS.NS), ceNsec3.hasType(DNS.SOA), ceNsec3.hasType(TYPE_DNAME)) ) {
+			//  Round 5 #91: the closest encloser is a delegation or a DNAME: names below it
+			//  are not this zone's to deny (RFC 5155 8.3, RFC 6840 4.1)
+			return new Result(Status.BOGUS, "the NSEC3 closest encloser "+ce+" of "+name+" is a delegation or DNAME");
 		}
 		Nsec3 nc = d.nsec3Covering(nextCloser(name, ce));
 		if( nc == null ) {

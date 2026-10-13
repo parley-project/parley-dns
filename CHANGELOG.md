@@ -82,6 +82,10 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
   or re-sign that can't be signed is not made (nothing journaled).
 - Round 5 #89: SHA-1 DS records are ignored when a SHA-256 or SHA-384 one is there (RFC 4509 3).
 - Round 5 #90: DNSKEYs with the REVOKE bit (RFC 5011) are not used to validate.
+- Round 5 #91, denial proofs: NSEC3 records with unknown flags are ignored (RFC 5155 8.2); a DNAME
+  owner, like a delegation, proves nothing below it (RFC 6840 4.1); an NSEC whose next name is below
+  the query name can't prove NXDOMAIN (the name exists); an NSEC3 closest encloser that is a
+  delegation or DNAME is refused.
 - Round 5 #92: SECURE answers in the cache, and validated key sets, are kept no longer than their
   signatures allow (original TTL, expiration; RFC 4035 5.3.3), and served TTLs are capped to match.
 - Round 5 #97: an OPT record in the answer or authority section is FORMERR (RFC 6891 6.1.1).
