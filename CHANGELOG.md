@@ -25,6 +25,10 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
 - An UPDATE is REFUSED when one of its changes can't be written to the journal and read back
   unchanged (e.g. a name containing a space).
 - A DNSSEC-validated (SECURE) answer carries only the records that were validated.
+- PTR targets are written to the dynamic update journal (`<zone>.jnl`) as absolute names. Journals
+  written before this kept them without the final dot, and replaying them turned a target such as
+  `host.example.` into `host.example.<zone>.`: check PTR records added by dynamic update, or set
+  the old journal aside (raise the zone file's serial) once the zone file is up to date.
 
 ### Removed
 

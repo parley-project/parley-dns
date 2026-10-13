@@ -136,8 +136,14 @@ public final class Validator extends DnsBaseClass {
 	 * honest work, which grows with the name: walking down a name costs about
 	 * two checks per label (a DS and its proof), and an ip6.arpa name has 34.
 	 */
-	static final int MAX_VERIFICATIONS = 512;
+	static final int MAX_VERIFICATIONS = 150;
 	static final int MAX_FAILED_VERIFICATIONS = 16;
+	/**
+	 * NSEC / NSEC3 RRsets checked in one response. A denial needs at most three
+	 * (NSEC3 closest encloser, next closer, wildcard); a zone that sends hundreds
+	 * of correctly signed ones only makes us do signature checks.
+	 */
+	static final int MAX_DENIAL_SETS = 8;
 
 	/** The signature checks spent by the validation running on this thread, and what they proved. */
 	private static final class Budget {
@@ -634,10 +640,15 @@ public final class Validator extends DnsBaseClass {
 	private Denial denial(Message m, ZoneKeys zk, boolean answer) {
 		Denial d = new Denial();
 		d.apex = zk.zone;
+		int checked = 0;
 		for(List<RR> set : bySet(m.getAuthority()).values()) {
 			int t = set.get(0).getType();
 			if( t != DNS.NSEC && t != DNS.NSEC3 ) {
 				continue;
+			}
+			if( ++checked > MAX_DENIAL_SETS ) {
+				//  A proof needs at most three; more are only extra signature checks
+				break;
 			}
 			String owner = Canonical.key(set.get(0).getName());
 			if( verifySet(set, sigsFor(m, owner, t), zk) == null ) {
