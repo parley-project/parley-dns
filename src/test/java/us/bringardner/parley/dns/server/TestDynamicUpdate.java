@@ -523,6 +523,23 @@ public class TestDynamicUpdate {
 	}
 
 	@Test
+	public void ptrRecordsGoThroughTheJournal() throws Exception {
+		//  The journal check refused every PTR: its target was written without the
+		//  final dot, and read back relative to the zone (which corrupted it on replay)
+		us.bringardner.parley.dns.Ptr ptr = new us.bringardner.parley.dns.Ptr("7.up.test");
+		ptr.setPtr("host.elsewhere.example");
+		ptr.setTTL(300);
+		assertEquals(DNS.NOERROR, send(new Update().add(ptr)));
+		Zone again = new Zone(zoneFile);
+		assertEquals("host.elsewhere.example", again.exactRecords("7.up.test").get(0).getRdataAsString().replaceAll("\\.$", ""));
+		//  and deleted again
+		us.bringardner.parley.dns.Ptr del = new us.bringardner.parley.dns.Ptr("7.up.test");
+		del.setPtr("host.elsewhere.example");
+		assertEquals(DNS.NOERROR, send(new Update().delete(del)));
+		assertTrue(new Zone(zoneFile).exactRecords("7.up.test").isEmpty());
+	}
+
+	@Test
 	public void ordinaryNamesStillWork() throws Exception {
 		assertEquals(DNS.NOERROR, send(new Update().add(a("_dmarc-x.host-1.up.test", "10.1.1.5"))));
 		assertEquals(1, new Zone(zoneFile).exactRecords("_dmarc-x.host-1.up.test").size());
