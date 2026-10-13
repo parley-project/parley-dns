@@ -243,4 +243,72 @@ public class TestTcpConnections {
 		assertEquals(0, TCPProsessor.getActiveConnections());
 		s.close();
 	}
+
+	// ------------------------------------------------------------ pending (framework plan, chunks 1 and 3)
+
+	@Test
+	@org.junit.jupiter.api.Disabled("Round 5 #78: chunks 1 and 3 (a deadline for the whole message)")
+	public void aClientSendingOneByteAtATimeLosesItsSlot() throws Exception {
+		try(Listener l = new Listener(1, 300)) {
+			try(Socket s = idleClient(l.port)) {
+				OutputStream out = s.getOutputStream();
+				out.write(new byte[] {0, 40});
+				//  one byte every 200 ms: never idle for 300 ms, never a whole message
+				for(int i=0; i < 10; i++ ) {
+					Thread.sleep(200);
+					try {
+						out.write(0);
+						out.flush();
+					} catch(IOException closed) {
+						break;
+					}
+				}
+				//  the slot used to be held for as long as bytes kept coming
+				Message m = query(l.port, "www.tcp.test");
+				assertEquals(1, m.getAnswerCount());
+			}
+		}
+	}
+
+	@Test
+	@org.junit.jupiter.api.Disabled("Round 5 #72: chunks 1 and 3 (a connection limit per client address)")
+	public void oneAddressCantTakeEverySlot() throws Exception {
+		InetAddress other = InetAddress.getByName("127.0.0.2");
+		try(Socket probe = new Socket()) {
+			probe.bind(new java.net.InetSocketAddress(other, 0));
+		} catch(IOException ex) {
+			//  macOS has only 127.0.0.1 on lo0 unless an alias is added
+			org.junit.jupiter.api.Assumptions.assumeTrue(false, "127.0.0.2 not available: "+ex);
+		}
+		try(Listener l = new Listener(8, 10000)) {
+			List<Socket> idle = new ArrayList<Socket>();
+			try {
+				for(int i=0; i < 8; i++ ) {
+					idle.add(idleClient(l.port));
+				}
+				Thread.sleep(200);
+				//  a query from another address still gets a slot
+				try(Socket s = new Socket()) {
+					s.bind(new java.net.InetSocketAddress(other, 0));
+					s.connect(new java.net.InetSocketAddress(InetAddress.getLoopbackAddress(), l.port), 3000);
+					s.setSoTimeout(3000);
+					Message q = new Message();
+					q.setQuestion("www.tcp.test", DNS.A, DNS.IN);
+					byte [] b = q.toByteArray();
+					OutputStream out = s.getOutputStream();
+					out.write(new byte[] {(byte)(b.length >> 8), (byte)b.length});
+					out.write(b);
+					out.flush();
+					InputStream in = s.getInputStream();
+					int hi = in.read();
+					int lo = in.read();
+					assertTrue(hi >= 0 && lo >= 0, "the server closed the connection: every slot was taken by 127.0.0.1");
+				}
+			} finally {
+				for(Socket s : idle) {
+					s.close();
+				}
+			}
+		}
+	}
 }
