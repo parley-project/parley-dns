@@ -246,4 +246,53 @@ public class TestResolverQueue {
 		assertEquals(cap, ResolverThread.clearBacklog());
 		assertEquals(0, ResolverThread.getBacklog());
 	}
+
+	@Test
+	public void waitersGetServfailWhenTheLookupFails() throws Exception {
+		ResolverThread.setMaxQueueAge(200);
+		int savedTimeout = ServerA.QUERY_TIMEOUT;
+		long savedResolve = Resolver.getResolveTimeout();
+		int dead;
+		try(DatagramSocket s = new DatagramSocket(0, LOOPBACK)) {
+			dead = s.getLocalPort();
+		}
+		try(DatagramSocket client = new DatagramSocket(0, LOOPBACK)) {
+			ServerA.QUERY_TIMEOUT = 400;
+			Resolver.setResolveTimeout(600);
+			useUpstream(dead);
+			client.setSoTimeout(5000);
+			startThreads(3);
+			int n = 4;
+			for(int i=0; i < n; i++ ) {
+				assertTrue(ResolverThread.addQuery(new QueryData(LOOPBACK, client.getLocalPort(), request("dead.queue.test", 200+i))));
+			}
+			//  the lookup takes longer than the queue age: the waiters must still be answered
+			for(int i=0; i < n; i++ ) {
+				assertEquals(DNS.SERVER_ERROR, receive(client).getResponseCode());
+			}
+		} finally {
+			ServerA.QUERY_TIMEOUT = savedTimeout;
+			Resolver.setResolveTimeout(savedResolve);
+		}
+	}
+
+	@Test
+	public void stopLetsALookupInProgressFinish() throws Exception {
+		ResolverThread.setMaxQueueAge(0);
+		try(SlowUpstream up = new SlowUpstream(400); DatagramSocket client = new DatagramSocket(0, LOOPBACK)) {
+			useUpstream(up.port());
+			client.setSoTimeout(5000);
+			startThreads(1);
+			assertTrue(ResolverThread.addQuery(new QueryData(LOOPBACK, client.getLocalPort(), request("finish.queue.test", 9))));
+			long end = System.currentTimeMillis()+3000;
+			while( up.received.get() == 0 && System.currentTimeMillis() < end ) {
+				Thread.sleep(5);
+			}
+			threads.get(0).stop();
+			Message m = receive(client);
+			assertEquals(DNS.NOERROR, m.getResponseCode(), "answered, not cut off by the interrupt");
+			assertEquals(1, m.getAnswerCount());
+			assertTrue(threads.get(0).join(2000), "and then the thread stops");
+		}
+	}
 }

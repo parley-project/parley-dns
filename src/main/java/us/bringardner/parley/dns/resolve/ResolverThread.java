@@ -50,9 +50,12 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 	private static final class Queued {
 		final QueryData query;
 		final long at;
-		Queued(QueryData query, long at) {
+		//  Queued again after waiting for the same lookup: not coalesced or aged again
+		final boolean again;
+		Queued(QueryData query, long at, boolean again) {
 			this.query = query;
 			this.at = at;
+			this.again = again;
 		}
 	}
 
@@ -62,11 +65,15 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 	private static volatile long maxQueueAge = DEFAULT_MAX_QUEUE_AGE;
 	private static volatile boolean virtualThreads = true;
 	//  Round 4 #59: lookups in progress (see coalesceKey); later askers wait for the first
-	private static final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<Void>> inFlight =
-			new java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<Void>>();
+	//  (completed with true if the lookup found an answer)
+	private static final java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<Boolean>> inFlight =
+			new java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.CompletableFuture<Boolean>>();
 	private static final java.util.concurrent.atomic.AtomicLong stale = new java.util.concurrent.atomic.AtomicLong();
 	private static final java.util.concurrent.atomic.AtomicLong coalesced = new java.util.concurrent.atomic.AtomicLong();
 	private volatile Thread thread;
+	//  Waiting for the queue: only then does stop() interrupt (an interrupted virtual
+	//  thread's socket fails at once, which would count against the upstream servers)
+	private volatile boolean waiting = false;
 	//  Set to false by stop() from another thread
 	private volatile boolean running = false;
 
@@ -97,7 +104,7 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 	 * and the client waited for its own timeout.
 	 */
 	public static boolean addQuery(QueryData query) {
-		return enqueue(new Queued(query, System.currentTimeMillis()));
+		return enqueue(new Queued(query, System.currentTimeMillis(), false));
 	}
 
 	private static boolean enqueue(Queued q) {
@@ -370,10 +377,23 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 		while( running ) {
 			try {
 				setState("Waiting on fifo");
-				Queued q = fifo.take();
+				waiting = true;
+				if( !running ) {
+					break;
+				}
+				Queued q;
+				try {
+					q = fifo.take();
+				} finally {
+					waiting = false;
+					if( running ) {
+						//  an interrupt that came just as the wait ended
+						Thread.interrupted();
+					}
+				}
 				setState("Returned on fifo");
 				if( running ) {
-					serve(q, !again.remove(q));
+					serve(q);
 				}
 			} catch(InterruptedException ex) {
 				//  stop() interrupts the wait on the queue
@@ -398,17 +418,16 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 	}
 
 	/**
-	 * Resolve a queued query and answer it.
-	 *
-	 * @param coalesce if the same lookup is in progress, wait for it (without holding
-	 *  this thread) and answer from the cache it fills; false for a query that already
-	 *  waited once
+	 * Resolve a queued query and answer it. If the same lookup is in progress, the
+	 * query waits for it (without holding this thread) and is answered from the cache
+	 * it fills; a query that already waited once resolves on its own.
 	 */
-	private void serve(Queued q, boolean coalesce) {
+	private void serve(Queued q) {
 		QueryData question = q.query;
+		boolean coalesce = !q.again;
 		long age = System.currentTimeMillis()-q.at;
 		long maxAge = maxQueueAge;
-		if( maxAge > 0 && age > maxAge ) {
+		if( coalesce && maxAge > 0 && age > maxAge ) {
 			//  Round 4 #58: the client gave up long ago; resolving it only delays the rest
 			stale.incrementAndGet();
 			return;
@@ -416,14 +435,15 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 		Section toResolve = question.getResolveQuestion();
 		boolean cd = question.getMessage().getHeader().getCD();
 		String key = coalesceKey(toResolve, cd);
-		java.util.concurrent.CompletableFuture<Void> mine = new java.util.concurrent.CompletableFuture<Void>();
-		java.util.concurrent.CompletableFuture<Void> first = coalesce ? inFlight.putIfAbsent(key, mine) : null;
+		java.util.concurrent.CompletableFuture<Boolean> mine = new java.util.concurrent.CompletableFuture<Boolean>();
+		java.util.concurrent.CompletableFuture<Boolean> first = coalesce ? inFlight.putIfAbsent(key, mine) : null;
 		if( first != null ) {
 			//  Round 4 #59: the same lookup is in progress; answer when it is done
 			coalesced.incrementAndGet();
-			first.whenComplete((v, ex) -> afterLookup(q));
+			first.whenComplete((found, ex) -> afterLookup(q, Boolean.TRUE.equals(found)));
 			return;
 		}
+		boolean found = false;
 		try {
 			setState("Call Resolver", question);
 			Message msg = null;
@@ -436,12 +456,13 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 				logError("Resolver failed for "+toResolve, ex);
 			}
 			setState("Returned from resolver");
+			found = msg != null;
 			respond(question, msg, validated);
 		} finally {
 			if( coalesce ) {
 				inFlight.remove(key, mine);
 			}
-			mine.complete(null);
+			mine.complete(found);
 		}
 	}
 
@@ -449,33 +470,28 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 	 * A query that waited for the same lookup: answered from the cache at once if the
 	 * lookup filled it, else queued again (it then resolves on its own).
 	 */
-	private void afterLookup(Queued q) {
+	private void afterLookup(Queued q, boolean found) {
 		try {
 			QueryData question = q.query;
+			if( !found ) {
+				//  The lookup failed (or was BOGUS): the same answer, SERVFAIL (or the
+				//  CNAME chain without its target), rather than another failing lookup
+				respond(question, null, null);
+				return;
+			}
 			Section toResolve = question.getResolveQuestion();
 			Resolver.Answer a = cachedFor(question, toResolve);
 			if( a != null && a.msg != null ) {
 				respond(question, a.msg, a.result);
 				return;
 			}
-			if( !requeue(q) ) {
+			//  Found but not cached (e.g. TTL 0): resolve it on its own
+			if( !enqueue(new Queued(question, q.at, true)) ) {
 				respond(question, null, null);
 			}
 		} catch(RuntimeException ex) {
 			logError("Unexpected error answering a coalesced query", ex);
 		}
-	}
-
-	//  Queued again after waiting for a lookup: not coalesced a second time
-	private static final java.util.Set<Queued> again = java.util.concurrent.ConcurrentHashMap.newKeySet();
-
-	private static boolean requeue(Queued q) {
-		again.add(q);
-		if( enqueue(q) ) {
-			return true;
-		}
-		again.remove(q);
-		return false;
 	}
 
 	/** Answer the client: the resolved message, a completed CNAME chain, or SERVFAIL. */
@@ -544,10 +560,14 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 		}
 	}
 	
+	/**
+	 * Stop after the current query (a lookup in progress is finished and answered); a
+	 * thread waiting for a query stops at once.
+	 */
 	public void stop() {
 		running = false;
 		Thread t = thread;
-		if( t != null ) {
+		if( t != null && waiting ) {
 			t.interrupt();
 		}
 	}
