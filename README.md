@@ -53,7 +53,7 @@ The zone file is never rewritten. Changes are appended to a journal next to it, 
 
 A zone is signed when the key directory (`JDns.dnssecKeyDir`, by default the zone directory) has keys for it. The server signs it when it loads it, after every dynamic update or dynamic entry change, and again before the signatures expire; nothing needs to be run by hand after the keys exist.
 
-1. Make a key: `java -cp parley-dns.jar:parley-core.jar:parley-io.jar us.bringardner.parley.dns.dnssec.DnssecKeyTool keygen -d zones example.com`. This writes `Kexample.com.+013+<tag>.key` and `.private` (keep that one secret) and prints the DS record. One key (ECDSA P-256, a combined signing key) is all a zone needs; `-ksk` / `-zsk` make separate key and zone signing keys, `-a` picks the algorithm: ECDSAP256SHA256 (default), ECDSAP384SHA384, ED25519 (Java 15 or later), RSASHA256, RSASHA512. Keys made with BIND's `dnssec-keygen` work too.
+1. Make a key: `java -cp parley-dns.jar:parley-core.jar:parley-io.jar:parley-net.jar us.bringardner.parley.dns.dnssec.DnssecKeyTool keygen -d zones example.com`. This writes `Kexample.com.+013+<tag>.key` and `.private` (keep that one secret) and prints the DS record. One key (ECDSA P-256, a combined signing key) is all a zone needs; `-ksk` / `-zsk` make separate key and zone signing keys, `-a` picks the algorithm: ECDSAP256SHA256 (default), ECDSAP384SHA384, ED25519 (Java 15 or later), RSASHA256, RSASHA512. Keys made with BIND's `dnssec-keygen` work too.
 2. Start (or wait for the next reload): the zone is served signed.
 3. Give the DS record to the parent zone (your registrar). `DnssecKeyTool ds -d zones example.com` prints it again. Until the parent has it, validators treat the zone as unsigned; once it does, they reject answers that don't verify.
 
@@ -94,7 +94,8 @@ With `JDns.dnssecValidation=true` the resolver validates the answers it fetches 
  
 Dependencies:  
 + [parley-core](https://github.com/tony-bringardner/parley-core)  
-+ [parley-io](https://github.com/tony-bringardner/parley-io)
++ [parley-io](https://github.com/tony-bringardner/parley-io)  
++ [parley-net](https://github.com/tony-bringardner/parley-net) (TCP and admin servers, upstream health tracking)
  			
 
 # SSH host keys in DNS (SSHFP)
@@ -130,7 +131,7 @@ switch( r.getStatus() ) {
 `us.bringardner.parley.dns.util.NsLookup` works like the Linux (ISC BIND 9) `nslookup`: the same command line, interactive commands, options, output and exit status. Its output was checked line by line against `nslookup` 9.18 (`TestNsLookupOffline` replays the recorded output).
 
 ```
-java -cp parley-dns.jar:parley-core.jar:parley-io.jar us.bringardner.parley.dns.util.NsLookup [-option ...] [host [server]]
+java -cp parley-dns.jar:parley-core.jar:parley-io.jar:parley-net.jar us.bringardner.parley.dns.util.NsLookup [-option ...] [host [server]]
 java ... NsLookup -type=mx example.com 192.0.2.53
 java ... NsLookup -port=5353 -debug www.example.com 127.0.0.1
 java ... NsLookup 192.0.2.1              # an address: its PTR record
@@ -156,7 +157,7 @@ The old options `-s SERVER` and `-p PORT` are gone: use `nslookup host SERVER` a
 `us.bringardner.parley.dns.util.NsUpdate` works like the ISC BIND 9 `nsupdate` (RFC 2136 dynamic update): the same command line, commands, output (`show`, `answer`, `-d`), messages and exit status. It was checked against `nsupdate` 9.18 on the same scripts and server, output and resulting zone (`TestNsUpdate` replays 64 recorded cases).
 
 ```
-java -cp parley-dns.jar:parley-core.jar:parley-io.jar us.bringardner.parley.dns.util.NsUpdate [options] [script]
+java -cp parley-dns.jar:parley-core.jar:parley-io.jar:parley-net.jar us.bringardner.parley.dns.util.NsUpdate [options] [script]
 ```
 
 ```
@@ -181,7 +182,7 @@ Run the server under a supervisor (systemd, launchd, a container runtime) that r
 ```
 java -Xmx256m -XX:+ExitOnOutOfMemoryError \
      -DJDns.properties=/data/services/dns/config/JDns.properties \
-     -cp parley-dns.jar:parley-core.jar:parley-io.jar us.bringardner.parley.dns.server.DnsServer
+     -cp parley-dns.jar:parley-core.jar:parley-io.jar:parley-net.jar us.bringardner.parley.dns.server.DnsServer
 ```
 
 `DnsServer.main` also installs `FatalErrorHandler`: any thread that dies from an uncaught error is logged, and on a JVM error (e.g. `OutOfMemoryError`) the process halts with exit code 1 so the supervisor starts a clean one. Set `-DJDns.exitOnFatalError=false` to only log. Applications that embed the server can call `FatalErrorHandler.install(true)` (`us.bringardner.parley.net.FatalErrorHandler`, from parley-net).
@@ -226,6 +227,8 @@ A bind address of `localhost` means this host's own name (its network address), 
 | `JDns.exitOnFatalError` | true (standalone) | Halt the process on a JVM error (see above) |
 
 ### Network
+
+TCP is served by parley-net's `NioServer` (a few reactor threads read and write every connection; requests are answered on a worker pool), with per-client limits and an idle / frame deadline. UDP stays in parley-dns. Upstream server hold-off uses parley-net's `UpstreamHealth`.
 
 | Property | Default | Meaning |
 |---|---|---|
