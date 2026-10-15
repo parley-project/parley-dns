@@ -93,9 +93,9 @@ With `JDns.dnssecValidation=true` the resolver validates the answers it fetches 
    
  
 Dependencies:  
-+ [parley-core](https://github.com/tony-bringardner/parley-core)  
-+ [parley-io](https://github.com/tony-bringardner/parley-io)  
-+ [parley-net](https://github.com/tony-bringardner/parley-net) (TCP and admin servers, upstream health tracking)
++ [parley-core](https://github.com/parley-project/parley-core)  
++ [parley-io](https://github.com/parley-project/parley-io)  
++ [parley-net](https://github.com/parley-project/parley-net) (TCP and admin servers, upstream health tracking)
  			
 
 # SSH host keys in DNS (SSHFP)
