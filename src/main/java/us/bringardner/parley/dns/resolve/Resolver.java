@@ -925,6 +925,5 @@ public class Resolver  extends DnsBaseClass
 		for(int i=0; resolvers != null && i< resolvers.length; i++ ) {
 			resolvers[i].stop();
 		}
-		//ResolverThread.notifyThreads();
 	}
 }

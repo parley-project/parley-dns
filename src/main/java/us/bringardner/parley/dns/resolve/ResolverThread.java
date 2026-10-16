@@ -355,11 +355,6 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 		fifo = new java.util.concurrent.ArrayBlockingQueue<Queued>(Math.max(1, maxBacklog));
 	}
 	
-	/** Nothing to do: the queue wakes one thread per query. */
-	@Deprecated
-	public static void notifyThreads() {
-	}
-	
 	/**
 	 * When an object implementing interface <code>Runnable</code> is used 
 	 * to create a thread, starting the thread causes the object's 

@@ -42,7 +42,6 @@ public  class ByteBuffer extends WireBuffer {
 	private final Map<String, Integer> lables = new HashMap<String, Integer>();
 
 	private int rdlengthPos = 0;
-	private int inc = DNS.MAXUDPLEN;
 
 	//  DNSSEC canonical form (RFC 4034 6.2): names lower case and never compressed
 	private boolean canonical = false;
@@ -92,19 +91,6 @@ public  class ByteBuffer extends WireBuffer {
 		return new DnsFormatException(message);
 	}
 
-	/**
-		Check to see if there is a pointer at the current position (a pointer is described in RFC 1035)
-		@return A ByteBuffer representing the current position with pointers dereferenced
-	 **/
-	@Deprecated // No loop protection. Name parsing now follows pointers itself with bounds checks (see Name.init).
-	public ByteBuffer chkPointer() {
-		if( remaining() == 0 || (peekU8()&DNS.POINTER) == 0 ) {
-			return this;
-		}
-		int newPos = nextShort();
-		return new ByteBuffer(getBuf(),(newPos&0x3FFF));
-	}
-	
 	/**
 	Dump the ByteBuffer showing the position, hex value, binary value and character of each byte (use to debug)
 	 **/
@@ -383,14 +369,6 @@ ARCOUNT         an unsigned 16 bit integer specifying the number of
 	}
 	
 	/**
-		The array now grows by doubling; kept for compatibility.
-	 **/
-	@Deprecated
-	public int getInc() { 
-		return inc;
-	}
-	
-	/**
 		Get the posistion of the read pointer
 	 **/
 	public int getReadPos() {
@@ -523,14 +501,6 @@ ARCOUNT         an unsigned 16 bit integer specifying the number of
 	 **/
 	public void setBytes(byte [] b) {
 		putBytes(b);
-	}
-	
-	/**
-		The array now grows by doubling; kept for compatibility.
-	 **/
-	@Deprecated
-	public void setInc(int i) {
-		inc = i;
 	}
 	
 	/**

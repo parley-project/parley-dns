@@ -132,6 +132,11 @@ BjlDns 1.0.1-SNAPSHOT; only names changed.
 
 ### Removed
 
+- `us.bringardner.parley.dns.server.AddressMatcher`: use `us.bringardner.parley.core.util.AddressMatcher`
+  (parley-core), which it only wrapped.
+- `ByteBuffer.chkPointer()` (no protection against pointer loops; name parsing follows
+  pointers itself), `ByteBuffer.getInc()` / `setInc(int)` (the buffer grows by doubling) and
+  `ResolverThread.notifyThreads()` (did nothing).
 - `us.bringardner.parley.dns.dynamic.DynamicDns`. Nothing in the library used it, and when its
   `JDns.jdbc*` properties were missing it fell back to a built-in database host and login.
   Dynamic records are kept by `DnsServer` (`dynamic.txt` or the `JDns.jdbc*` database).

@@ -54,6 +54,7 @@ import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Soa;
 import us.bringardner.parley.dns.resolve.QueryData;
+import us.bringardner.parley.core.util.AddressMatcher;
 
 /**
  * Zone transfers (AXFR, RFC 5936) and NOTIFY (RFC 1996) (rec #41).
