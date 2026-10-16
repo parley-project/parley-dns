@@ -24,11 +24,11 @@ package us.bringardner.parley.dns.server;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
-import java.io.File;
 
 import org.junit.jupiter.api.Test;
 
 import us.bringardner.parley.dns.DNS;
+import us.bringardner.parley.dns.Fixtures;
 
 /** The zone files used by TestDns must load. */
 public class TestZoneFixtures {
@@ -36,7 +36,7 @@ public class TestZoneFixtures {
 	@Test
 	public void fixtureZonesLoad() throws Exception {
 		for(String z : new String[] {"foo.com","bar.com"}) {
-			Zone zone = new Zone(new File("src/test/java/resources/TestFiles/zones/"+z+".txt"));
+			Zone zone = new Zone(Fixtures.file("TestFiles/zones/"+z+".txt"));
 			assertNotNull(zone.getSoa(), z+" SOA");
 			assertNotNull(zone.getMatchingRR("ns1."+z, DNS.A), z+" ns1 A record");
 		}

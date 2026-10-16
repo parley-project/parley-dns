@@ -79,7 +79,7 @@ public class TestPropertyNames {
 
 	@Test
 	public void everyPropertyIsInTheReadme() throws Exception {
-		String readme = new String(Files.readAllBytes(new File("README.md").toPath()), StandardCharsets.UTF_8);
+		String readme = new String(Files.readAllBytes(new File(Fixtures.projectDir(), "README.md").toPath()), StandardCharsets.UTF_8);
 		for(String n : propertyNames()) {
 			String value = n.substring(n.indexOf('=')+1);
 			assertTrue(readme.contains("`"+value+"`"), value+" ("+n.substring(0, n.indexOf('='))+") is not in README.md");
@@ -91,7 +91,7 @@ public class TestPropertyNames {
 		//  Literal names passed to the property readers (NsLookup excluded)
 		Pattern p = Pattern.compile("(?:getProperty|stringProperty|intProperty|RenamedProperty\\.get)\\(\\s*\"([^\"]+)\"");
 		List<String> found = new ArrayList<String>();
-		for(File f : sources(new File("src/main/java"))) {
+		for(File f : sources(new File(Fixtures.projectDir(), "src/main/java"))) {
 			if( f.getName().equals("NsLookup.java") ) {
 				continue;
 			}

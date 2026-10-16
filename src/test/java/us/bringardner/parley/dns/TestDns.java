@@ -108,7 +108,10 @@ public class TestDns implements DNS {
 	@BeforeAll
 	public static void setUp() throws Exception {
 
-		System.setProperty(DnsServer.PROP_DNS_PROPERTIES, "TestFiles/TestDns.properties");
+		System.setProperty(DnsServer.PROP_DNS_PROPERTIES, Fixtures.file("TestFiles/TestDns.properties").getPath());
+		//  System properties win over the properties file: point the server at the fixtures on the class path
+		System.setProperty(DnsServer.PROP_DNS_DIR, Fixtures.file("TestFiles").getPath());
+		System.setProperty(DnsServer.PROP_ZONE_DIR, Fixtures.file("TestFiles/zones").getPath());
 		System.setProperty("LogLevel","ERROR");
 		System.setProperty("JDns.useDataBase","false");
 		//  The server rewrites the dynamic file on every admin change, so work on a
@@ -117,7 +120,7 @@ public class TestDns implements DNS {
 		//  testDynamic failed with "No such file or directory".)
 		dynamicDir = Files.createTempDirectory("testdns").toFile();
 		File dynamicCopy = new File(dynamicDir,"dynamic.txt");
-		Files.copy(new File("src/test/java/resources/TestFiles/dynamic.txt").toPath(), dynamicCopy.toPath(), StandardCopyOption.REPLACE_EXISTING);
+		Files.copy(Fixtures.file("TestFiles/dynamic.txt").toPath(), dynamicCopy.toPath(), StandardCopyOption.REPLACE_EXISTING);
 		savedDynamicFile = System.getProperty(DnsServer.PROP_DYNAMIC);
 		System.setProperty(DnsServer.PROP_DYNAMIC, dynamicCopy.getAbsolutePath());
 

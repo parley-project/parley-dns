@@ -55,6 +55,7 @@ import us.bringardner.parley.dns.server.DnsServer;
 import us.bringardner.parley.dns.server.TCPProsessor;
 import us.bringardner.parley.dns.server.UDPProsessor;
 import us.bringardner.parley.dns.server.Zone;
+import us.bringardner.parley.dns.Fixtures;
 
 /**
  * NsLookup against a DnsServer on the loopback, so it runs without the
@@ -64,7 +65,7 @@ import us.bringardner.parley.dns.server.Zone;
  */
 public class TestNsLookupOffline {
 
-	private static final File FIXTURES = new File("src/test/java/resources/TestFiles/nslookup");
+	private static final File FIXTURES = Fixtures.file("TestFiles/nslookup");
 
 	private static int port;
 

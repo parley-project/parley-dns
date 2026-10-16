@@ -39,6 +39,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import us.bringardner.parley.dns.Name;
+import us.bringardner.parley.dns.Fixtures;
 
 /**
  * Offline tests: the indexed zone lookup returns exactly what the original
@@ -71,7 +72,7 @@ public class TestZoneIndex {
 			w.write(z.toString());
 		}
 		big = new Zone(f);
-		fixture = new Zone(new File("src/test/java/resources/TestFiles/zones/foo.com.txt"));
+		fixture = new Zone(Fixtures.file("TestFiles/zones/foo.com.txt"));
 	}
 
 	@AfterAll

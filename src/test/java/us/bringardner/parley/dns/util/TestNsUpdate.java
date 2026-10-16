@@ -57,6 +57,7 @@ import us.bringardner.parley.dns.server.DnsServer;
 import us.bringardner.parley.dns.server.TCPProsessor;
 import us.bringardner.parley.dns.server.UDPProsessor;
 import us.bringardner.parley.dns.server.Zone;
+import us.bringardner.parley.dns.Fixtures;
 
 /**
  * NsUpdate against a DnsServer on the loopback. The expected output and
@@ -66,7 +67,7 @@ import us.bringardner.parley.dns.server.Zone;
  */
 public class TestNsUpdate {
 
-	private static final File FIXTURES = new File("src/test/java/resources/TestFiles/nsupdate");
+	private static final File FIXTURES = Fixtures.file("TestFiles/nsupdate");
 	private static final String BIND_VERSION = "9.18.39-0ubuntu0.24.04.7-Ubuntu";
 
 	private static DnsServer server;

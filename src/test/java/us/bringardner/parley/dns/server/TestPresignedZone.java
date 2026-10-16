@@ -56,6 +56,7 @@ import us.bringardner.parley.dns.dnssec.Algorithm;
 import us.bringardner.parley.dns.dnssec.Canonical;
 import us.bringardner.parley.dns.dnssec.DnssecKey;
 import us.bringardner.parley.dns.resolve.QueryData;
+import us.bringardner.parley.dns.Fixtures;
 
 /**
  * Zones signed elsewhere: the fixtures were signed by BIND's
@@ -65,7 +66,7 @@ import us.bringardner.parley.dns.resolve.QueryData;
 public class TestPresignedZone {
 
 	private static final InetAddress LOOPBACK = InetAddress.getLoopbackAddress();
-	private static final File FIXTURES = new File("src/test/java/resources/TestFiles/presigned");
+	private static final File FIXTURES = Fixtures.file("TestFiles/presigned");
 
 	private DnsServer server;
 	private File dir;
