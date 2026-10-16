@@ -225,12 +225,20 @@ public class TestResolverQueue {
 		java.lang.reflect.Field f = ResolverThread.class.getDeclaredField("thread");
 		f.setAccessible(true);
 		Thread t = (Thread)f.get(threads.get(0));
-		boolean virtual = (Boolean)Thread.class.getMethod("isVirtual").invoke(t);
-		assertEquals(feature >= 21, virtual);
+		assertEquals(feature >= 21, isVirtual(t));
 		ResolverThread.setVirtualThreads(false);
 		startThreads(1);
 		t = (Thread)f.get(threads.get(1));
-		assertEquals(false, (Boolean)Thread.class.getMethod("isVirtual").invoke(t));
+		assertEquals(false, isVirtual(t));
+	}
+
+	/** Thread.isVirtual() only exists from Java 21; before that no thread is virtual. */
+	private static boolean isVirtual(Thread t) throws Exception {
+		try {
+			return (Boolean)Thread.class.getMethod("isVirtual").invoke(t);
+		} catch(NoSuchMethodException e) {
+			return false;
+		}
 	}
 
 	@Test

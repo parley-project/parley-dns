@@ -67,6 +67,7 @@ import us.bringardner.parley.net.server.Permission;
  * filled again by every new connection, so a command's output went to the
  * newest connection, even one that hadn't logged in (round 5 #73).
  */
+@SuppressWarnings("serial") // the processor and its commands are Serializable through their interfaces, but never serialized
 public class DnsAdminProcessor extends AbstractCommandProcessor implements DnsAdminConstants {
 
 	/** Default for JDns.adminMaxLine: longest admin line in bytes. */

@@ -443,7 +443,6 @@ public class Name implements DNS
 	public void setName(String n) {
 		myLables = new ArrayList<Label>();
 		chrCount = 0;
-		String tmp = null;
 		n = stripRootDot(n);
 		if( n.isEmpty() ) {
 			//  "" or "." is the root: no labels, one zero octet on the wire

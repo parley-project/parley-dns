@@ -57,7 +57,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import us.bringardner.parley.dns.ByteBuffer;
-import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.Mx;
 import us.bringardner.parley.dns.Ns;
@@ -153,11 +152,6 @@ public class NsUpdate extends Utility {
 
 	private static void println(PrintStream ps, Object o) {
 		ps.print(o);
-		ps.print('\n');
-	}
-
-	private static void println(PrintStream ps, char [] chars) {
-		ps.print(chars);
 		ps.print('\n');
 	}
 

@@ -215,11 +215,6 @@ public class NsLookup extends Utility {
 		ps.print('\n');
 	}
 
-	private static void println(PrintStream ps, char [] chars) {
-		ps.print(chars);
-		ps.print('\n');
-	}
-
 	static PrintStream out = System.out;
 	static PrintStream err = System.err;
 	static BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
