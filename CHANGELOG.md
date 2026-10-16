@@ -1,6 +1,6 @@
 # Changelog
 
-## parley-dns 1.0.0 (unreleased)
+## parley-dns 1.0.0 (2026-10-16)
 
 BjlDns is now **parley-dns**, part of the Parley library family. The code is the same as
 BjlDns 1.0.1-SNAPSHOT; only names changed.
