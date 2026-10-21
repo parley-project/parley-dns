@@ -55,7 +55,7 @@ public class TestServerConfig {
 		p.put(DnsServer.PROP_ADMIN_PORT, "0");
 		p.put(DnsServer.PROP_UDP_PROC_COUNT, "1");
 		p.put(DnsServer.PROP_TCP_PROC_COUNT, "1");
-		p.put("JDns.resolvers", "1");
+		p.put("parley.dns.resolvers", "1");
 		return p;
 	}
 
@@ -126,7 +126,7 @@ public class TestServerConfig {
 
 	@Test
 	public void udpTimeoutIsUsedForUdpOnly() throws Exception {
-		// JDns.udpTimeout used to overwrite the general timeout: UDP kept the
+		// parley.dns.udpTimeout used to overwrite the general timeout: UDP kept the
 		// general value and TCP got the UDP one.
 		withServer(props(DnsServer.PROP_TIMEOUT,"5000", DnsServer.PROP_UDP_TIMEOUT,"1234"), s -> {
 			assertEquals(1234, UDPProsessor.getSock().getSoTimeout());
@@ -144,7 +144,7 @@ public class TestServerConfig {
 
 	@Test
 	public void tcpBindAddressIsUsed() throws Exception {
-		// JDns.tcpBindAddress used to be read and then ignored
+		// parley.dns.tcpBindAddress used to be read and then ignored
 		withServer(props(DnsServer.PROP_BIND_ADDRESS,"127.0.0.1", DnsServer.PROP_TCP_BIND_ADDRESS,"0.0.0.0"), s -> {
 			assertTrue(UDPProsessor.getSock().getLocalAddress().isLoopbackAddress());
 			assertTrue(TCPProsessor.getServerSocket().getInetAddress().isAnyLocalAddress(),

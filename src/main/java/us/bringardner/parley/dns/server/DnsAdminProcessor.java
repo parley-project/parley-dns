@@ -56,7 +56,7 @@ import us.bringardner.parley.net.server.Permission;
  * '-' (refused or failed), other lines are output. The session starts with a
  * greeting:
  * <ul>
- * <li>JDns.adminSecret set: {@code +JDns admin ready auth=hmac-sha256 challenge=<c>}.
+ * <li>parley.dns.adminSecret set: {@code +JDns admin ready auth=hmac-sha256 challenge=<c>}.
  *     Nothing but {@code auth <answer>} (see {@link AdminAuth}) or {@code quit}
  *     is accepted until the client has answered the challenge.</li>
  * <li>No secret: only clients on this machine (loopback) are accepted.</li>
@@ -70,9 +70,9 @@ import us.bringardner.parley.net.server.Permission;
 @SuppressWarnings("serial") // the processor and its commands are Serializable through their interfaces, but never serialized
 public class DnsAdminProcessor extends AbstractCommandProcessor implements DnsAdminConstants {
 
-	/** Default for JDns.adminMaxLine: longest admin line in bytes. */
+	/** Default for parley.dns.adminMaxLine: longest admin line in bytes. */
 	public static final int DEFAULT_MAX_LINE = 8*1024;
-	/** Default for JDns.adminAuthTimeout: ms a client has to authenticate. */
+	/** Default for parley.dns.adminAuthTimeout: ms a client has to authenticate. */
 	public static final int DEFAULT_AUTH_TIMEOUT = 30*1000;
 
 	/** Everything an admin may do (there is one kind of admin: who knows the secret, or is local) */
@@ -159,7 +159,7 @@ public class DnsAdminProcessor extends AbstractCommandProcessor implements DnsAd
 		return s == null ? null : s.getInetAddress();
 	}
 
-	/** JDns.adminSecret, or null if not set */
+	/** parley.dns.adminSecret, or null if not set */
 	private String adminSecret() {
 		String s = server.getProperty(DnsServer.PROP_ADMIN_SECRET);
 		if( s != null ) {
@@ -230,7 +230,7 @@ public class DnsAdminProcessor extends AbstractCommandProcessor implements DnsAd
 			stop();
 		} else if( cmd[0].equals("auth") ) {
 			server.log("Admin authentication failed from "+peer());
-			//  Slow down guessing (LoginFailureDelay, 1 s by default)
+			//  Slow down guessing (loginFailureDelay, 1 s by default)
 			loginFailedDelay();
 			reply("-Authentication failed");
 			stop();

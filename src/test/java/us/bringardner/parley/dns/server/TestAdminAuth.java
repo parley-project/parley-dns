@@ -42,7 +42,7 @@ import us.bringardner.parley.dns.Name;
 
 /**
  * Offline tests for admin port security: challenge-response authentication
- * (JDns.adminSecret), local-only access without a secret, and the limit on
+ * (parley.dns.adminSecret), local-only access without a secret, and the limit on
  * concurrent admin sessions.
  */
 public class TestAdminAuth {

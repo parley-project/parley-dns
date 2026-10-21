@@ -53,11 +53,11 @@ import us.bringardner.parley.io.IoUtils;
 
 public class Resolver  extends DnsBaseClass
 {
-	private static final String PROP_MAX_DNS_CACHE_AGE = "JDns.maxCacheAge";
+	private static final String PROP_MAX_DNS_CACHE_AGE = "parley.dns.maxCacheAge";
 
-	private static final String PROP_RESOLVER_COUNT = "JDns.resolvers";
-	public static final String PROP_MAX_CACHE_ENTRIES = "JDns.maxCacheEntries";
-	public static final String PROP_CACHE_SWEEP_SECONDS = "JDns.cacheSweepSeconds";
+	private static final String PROP_RESOLVER_COUNT = "parley.dns.resolvers";
+	public static final String PROP_MAX_CACHE_ENTRIES = "parley.dns.maxCacheEntries";
+	public static final String PROP_CACHE_SWEEP_SECONDS = "parley.dns.cacheSweepSeconds";
 	//  Periodically removes expired cache entries
 	private static java.util.concurrent.ScheduledExecutorService cacheSweeper;
 
@@ -70,21 +70,21 @@ public class Resolver  extends DnsBaseClass
 	//  so that we don't always use the same one (spread the load)
 	//private static int current=0;
 	//private static int sbeltSize;
-	public static final String PROP_MAX_DELEGATIONS = "JDns.maxDelegations";
+	public static final String PROP_MAX_DELEGATIONS = "parley.dns.maxDelegations";
 	/** Total time (ms) for one resolution, including referrals and CNAME hops (default 4000). */
-	public static final String PROP_RESOLVE_TIMEOUT = "JDns.resolveTimeout";
+	public static final String PROP_RESOLVE_TIMEOUT = "parley.dns.resolveTimeout";
 	private static volatile long resolveTimeout = 4000;
 	/** seconds, default 10800 (3 hours) */
-	public static final String PROP_MAX_NEGATIVE_TTL = "JDns.maxNegativeTtl";
-	public static final String PROP_DELEGATION_MAX_AGE = "JDns.delegationMaxAge";
+	public static final String PROP_MAX_NEGATIVE_TTL = "parley.dns.maxNegativeTtl";
+	public static final String PROP_DELEGATION_MAX_AGE = "parley.dns.delegationMaxAge";
 	/** Seconds an upstream address is skipped after repeated failures (first hold-off, doubled for each further failure). */
-	public static final String PROP_UPSTREAM_HOLD_OFF_MIN = "JDns.upstreamHoldOffMin";
+	public static final String PROP_UPSTREAM_HOLD_OFF_MIN = "parley.dns.upstreamHoldOffMin";
 	/** Longest hold-off (seconds) for an upstream address that keeps failing. */
-	public static final String PROP_UPSTREAM_HOLD_OFF_MAX = "JDns.upstreamHoldOffMax";
+	public static final String PROP_UPSTREAM_HOLD_OFF_MAX = "parley.dns.upstreamHoldOffMax";
 	/** Validate the answers of recursive queries with DNSSEC (default false). */
-	public static final String PROP_DNSSEC_VALIDATION = "JDns.dnssecValidation";
-	/** File of trust anchors (DS or DNSKEY records); relative to JDns.dnsDir. Default: the root zone's keys, built in. */
-	public static final String PROP_DNSSEC_TRUST_ANCHORS = "JDns.dnssecTrustAnchors";
+	public static final String PROP_DNSSEC_VALIDATION = "parley.dns.dnssecValidation";
+	/** File of trust anchors (DS or DNSKEY records); relative to parley.dns.dnsDir. Default: the root zone's keys, built in. */
+	public static final String PROP_DNSSEC_TRUST_ANCHORS = "parley.dns.dnssecTrustAnchors";
 
 	//  DNSSEC validation (null: off)
 	private static volatile Validator validator;
@@ -326,7 +326,7 @@ public class Resolver  extends DnsBaseClass
 	/**
 	 * 
 	 * Creation date: (10/16/2003 9:53:14 AM)
-	 * @return JDns.resolve.ResolverThread[]
+	 * @return parley.dns.resolve.ResolverThread[]
 	 */
 	public static us.bringardner.parley.dns.resolve.ResolverThread[] getResolvers() {
 		return resolvers;

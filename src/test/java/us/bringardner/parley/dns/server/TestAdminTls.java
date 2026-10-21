@@ -30,7 +30,7 @@ import javax.net.ssl.SSLServerSocketFactory;
 
 import org.junit.jupiter.api.Test;
 
-/** JDns.adminTls picks the TLS server socket factory for the admin port. */
+/** parley.dns.adminTls picks the TLS server socket factory for the admin port. */
 public class TestAdminTls {
 
 	@Test

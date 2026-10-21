@@ -145,7 +145,7 @@ public void setUdp(boolean udp) {
 /**
  * Insert the method's description here.
  * Creation date: (10/16/2003 7:29:26 AM)
- * @return JDns.Section
+ * @return parley.dns.Section
  */
 public us.bringardner.parley.dns.Section getQuestion() {
 	return question;
@@ -153,7 +153,7 @@ public us.bringardner.parley.dns.Section getQuestion() {
 /**
  * Insert the method's description here.
  * Creation date: (10/16/2003 7:29:26 AM)
- * @return JDns.Section
+ * @return parley.dns.Section
  */
 public void setQuestion(Section myQuestion) 
 {

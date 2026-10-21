@@ -45,7 +45,7 @@ public class DnsAdminClient implements DnsAdminConstants {
 	private String adminHost;
 	private int adminPort;
 	private int timeout = 2000;
-	//  Shared secret for servers that require authentication (default: JDns.adminSecret property)
+	//  Shared secret for servers that require authentication (default: parley.dns.adminSecret property)
 	private String secret = System.getProperty(DnsServer.PROP_ADMIN_SECRET);
 
 	/**
@@ -57,7 +57,7 @@ public class DnsAdminClient implements DnsAdminConstants {
 
 	public static void main(String args[]) throws IOException  {
 
-		String name = us.bringardner.parley.core.util.RenamedProperty.get(DnsServer.PROP_ADMIN_HOST, "name");
+		String name = System.getProperty(DnsServer.PROP_ADMIN_HOST);
 		if( args.length>0) {
 			name = args[0];
 		}
@@ -69,7 +69,7 @@ public class DnsAdminClient implements DnsAdminConstants {
 		}
 
 		int port = DnsServer.getAdminPort();
-		String tmp = us.bringardner.parley.core.util.RenamedProperty.get(DnsServer.PROP_ADMIN_PORT, "port");
+		String tmp = System.getProperty(DnsServer.PROP_ADMIN_PORT);
 		if( tmp == null && args.length>1) {
 			tmp = args[1];
 		}
@@ -137,7 +137,7 @@ public class DnsAdminClient implements DnsAdminConstants {
 		this.adminPort = adminPort;
 	}
 
-	/** Shared secret used to answer the server's challenge (JDns.adminSecret on the server). */
+	/** Shared secret used to answer the server's challenge (parley.dns.adminSecret on the server). */
 	public void setSecret(String secret) {
 		this.secret = secret;
 	}

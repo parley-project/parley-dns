@@ -112,11 +112,11 @@ public class TestDns implements DNS {
 		//  System properties win over the properties file: point the server at the fixtures on the class path
 		System.setProperty(DnsServer.PROP_DNS_DIR, Fixtures.file("TestFiles").getPath());
 		System.setProperty(DnsServer.PROP_ZONE_DIR, Fixtures.file("TestFiles/zones").getPath());
-		System.setProperty("LogLevel","ERROR");
-		System.setProperty("JDns.useDataBase","false");
+		System.setProperty("logLevel","ERROR");
+		System.setProperty("parley.dns.useDatabase","false");
 		//  The server rewrites the dynamic file on every admin change, so work on a
 		//  copy instead of the checked-in TestFiles/dynamic.txt. (The properties
-		//  file's path was also resolved twice against JDns.dnsDir, so
+		//  file's path was also resolved twice against parley.dns.dnsDir, so
 		//  testDynamic failed with "No such file or directory".)
 		dynamicDir = Files.createTempDirectory("testdns").toFile();
 		File dynamicCopy = new File(dynamicDir,"dynamic.txt");

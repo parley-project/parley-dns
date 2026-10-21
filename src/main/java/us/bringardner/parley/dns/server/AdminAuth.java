@@ -35,7 +35,7 @@ import javax.crypto.spec.SecretKeySpec;
  * <p>
  * The server greets with a random challenge; the client answers
  * {@code auth <hex(HMAC-SHA256(secret, challenge))>}. The shared secret
- * (JDns.adminSecret) never crosses the network and a recorded answer is
+ * (parley.dns.adminSecret) never crosses the network and a recorded answer is
  * useless for the next connection (new challenge each time).
  * <p>
  * Note: after authentication the admin commands themselves are still plain

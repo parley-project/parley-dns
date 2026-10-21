@@ -47,7 +47,7 @@ import us.bringardner.parley.dns.resolve.QueryData;
  */
 public class UDPProsessor extends DnsRequestProcessor implements Runnable
 {
-	private static final String PROP_UDP_DUMP_FILE = "JDns.dump.file";
+	private static final String PROP_UDP_DUMP_FILE = "parley.dns.udpDumpFile";
 
 	//  Used for syncronization of the UDP Socket
 	private static DatagramSocket sock;
@@ -75,7 +75,7 @@ public class UDPProsessor extends DnsRequestProcessor implements Runnable
 
 	/**
 	 * Largest UDP response for a request: the EDNS size (client's size, at
-	 * most JDns.ednsUdpSize) when it sent an OPT, otherwise maxResponseSize.
+	 * most parley.dns.ednsUdpSize) when it sent an OPT, otherwise maxResponseSize.
 	 */
 	public static int udpLimit(Edns.Request edns) {
 		if( edns != null && edns.isPresent() ) {
@@ -271,7 +271,7 @@ public static byte [] buildFormatError(byte [] packet, int length) {
 /**
  * Insert the method's description here.
  * Creation date: (8/26/2001 10:41:48 AM)
- * @param msg JDns.Message
+ * @param msg parley.dns.Message
  */
 public void sendResponse(Message msg) 
 {

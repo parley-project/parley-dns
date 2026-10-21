@@ -49,7 +49,7 @@ import us.bringardner.parley.dns.RR;
 
 /**
  * EDNS(0) (RFC 6891): clients that send an OPT record get UDP answers up to
- * their size (at most JDns.ednsUdpSize) instead of a truncated answer and a
+ * their size (at most parley.dns.ednsUdpSize) instead of a truncated answer and a
  * TCP retry, and an OPT record back.
  */
 public class TestEdns {

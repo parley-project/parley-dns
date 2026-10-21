@@ -212,7 +212,7 @@ public class TestTsigServer {
 
 	@Test
 	public void transferAllowedByKey() throws Exception {
-		//  127.0.0.1 is not in JDns.axfrAllow; the key is in JDns.axfrKeys
+		//  127.0.0.1 is not in parley.dns.axfrAllow; the key is in parley.dns.axfrKeys
 		Tsig.Session c = Tsig.Session.client(KEYS.get("xfr"));
 		List<byte[]> msgs = tcp(c.signRequest(query("tsig.test", DNS.AXFR, 6)), TestTsigServer::ended);
 		assertTrue(msgs.size() > 3, "messages: "+msgs.size());

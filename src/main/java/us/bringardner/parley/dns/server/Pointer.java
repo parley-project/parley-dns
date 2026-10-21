@@ -91,7 +91,7 @@ public class Pointer {
 	/**
 	 * Insert the method's description here.
 	 * Creation date: (10/13/2001 10:10:59 AM)
-	 * @return JDns.Ptr
+	 * @return parley.dns.Ptr
 	 */
 	public us.bringardner.parley.dns.Ptr getPtr() {
 		return ptr;

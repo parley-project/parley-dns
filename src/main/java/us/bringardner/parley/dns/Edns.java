@@ -37,7 +37,7 @@ import java.util.List;
  * EDNS options are ignored.
  * <p>
  * The default server size is 1232 bytes (the DNS Flag Day 2020 value, which
- * avoids IP fragmentation); property JDns.ednsUdpSize, 512 turns the larger
+ * avoids IP fragmentation); property parley.dns.ednsUdpSize, 512 turns the larger
  * size off (an OPT is still echoed).
  */
 public final class Edns implements DNS {

@@ -805,7 +805,7 @@ public class Zone implements DNS {
 	/**
 	 * Insert the method's description here.
 	 * Creation date: (6/17/2003 8:42:12 AM)
-	 * @return JDns.Soa
+	 * @return parley.dns.Soa
 	 */
 	public us.bringardner.parley.dns.Soa getSoa() {
 		return soa;
@@ -1291,7 +1291,7 @@ public class Zone implements DNS {
 			}
 			if( !isPresigned() && (!presignedNsec3.isEmpty() || hasDnssecRecords()) ) {
 				throw new IOException(masterFile.getName()+" has DNSSEC records (DNSKEY, NSEC, NSEC3...) but no RRSIG:"
-						+" load a complete signed zone, or remove them and let the server sign the zone (keys in JDns.dnssecKeyDir)");
+						+" load a complete signed zone, or remove them and let the server sign the zone (keys in parley.dns.dnssecKeyDir)");
 			}
 			replayJournal();
 		} finally {
@@ -1866,7 +1866,7 @@ public class Zone implements DNS {
 	/**
 	 * Insert the method's description here.
 	 * Creation date: (6/17/2003 8:42:12 AM)
-	 * @param newSoa JDns.Soa
+	 * @param newSoa parley.dns.Soa
 	 */
 	public void setSoa(us.bringardner.parley.dns.Soa newSoa)  {
 

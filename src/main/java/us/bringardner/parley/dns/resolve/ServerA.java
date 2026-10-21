@@ -56,9 +56,9 @@ import us.bringardner.parley.net.client.UpstreamHealth;
  */
 public class ServerA  extends DnsBaseClass
 {
-	/** Longest hold-off (ms) for a server that keeps failing (default 10 minutes, JDns.upstreamHoldOffMax). */
+	/** Longest hold-off (ms) for a server that keeps failing (default 10 minutes, parley.dns.upstreamHoldOffMax). */
 	public static volatile long DEACTIVATE=10*60*1000L;
-	/** First hold-off (ms) after MAX_TRIES+1 failures in a row (default 5 s, JDns.upstreamHoldOffMin). */
+	/** First hold-off (ms) after MAX_TRIES+1 failures in a row (default 5 s, parley.dns.upstreamHoldOffMin). */
 	public static volatile long HOLD_OFF_MIN=5*1000L;
 	/** A server that is held off is probed at most this often (ms) when no server of its zone is available. */
 	public static volatile long PROBE_INTERVAL=1000L;

@@ -36,10 +36,10 @@ import us.bringardner.parley.net.server.Server;
  * per session.
  * <p>
  * The framework does what DnsServer used to do by hand: the accept loop, a
- * thread per session, the session limit (JDns.adminMaxConnections, answered
- * "-Too many admin connections"), the idle timeout (JDns.adminIdleTimeout), the
- * line length limit (JDns.adminMaxLine), the time to log in (JDns.adminAuthTimeout)
- * and the delay after a failed login. TLS (JDns.adminTls) comes from the server
+ * thread per session, the session limit (parley.dns.adminMaxConnections, answered
+ * "-Too many admin connections"), the idle timeout (parley.dns.adminIdleTimeout), the
+ * line length limit (parley.dns.adminMaxLine), the time to log in (parley.dns.adminAuthTimeout)
+ * and the delay after a failed login. TLS (parley.dns.adminTls) comes from the server
  * socket factory DnsServer gives it.
  */
 public class DnsAdminServer extends Server {
@@ -50,10 +50,11 @@ public class DnsAdminServer extends Server {
 	/**
 	 * @param dns the DNS server the sessions administer
 	 * @param port the admin port (0: any free port)
-	 * @param bind the address to listen on (loopback unless JDns.adminBindAddress says otherwise)
+	 * @param bind the address to listen on (loopback unless parley.dns.adminBindAddress says otherwise)
 	 */
 	public DnsAdminServer(DnsServer dns, int port, InetAddress bind) {
 		super(port, "DnsAdmin");
+		setPropertyPrefix("parley.dns.admin");
 		this.dns = dns;
 		setBindAddr(bind);
 		setServerBusyMessage("-Too many admin connections");
@@ -67,7 +68,7 @@ public class DnsAdminServer extends Server {
 		Connection c = new Connection(socket, true) {
 			@Override
 			public SSLContext getSSLContext(String sslOrTls) throws IOException {
-				//  no STARTTLS: TLS from the first byte (JDns.adminTls) or none
+				//  no STARTTLS: TLS from the first byte (parley.dns.adminTls) or none
 				return null;
 			}
 		};
@@ -75,7 +76,7 @@ public class DnsAdminServer extends Server {
 		return c;
 	}
 
-	/** @return the longest line a client may send, in bytes (JDns.adminMaxLine) */
+	/** @return the longest line a client may send, in bytes (parley.dns.adminMaxLine) */
 	public int getMaxLine() {
 		return maxLine;
 	}
@@ -91,7 +92,7 @@ public class DnsAdminServer extends Server {
 		return max <= 0 ? Integer.MAX_VALUE : Math.max(0, max-getActiveClients().size());
 	}
 
-	/** Only with JDns.adminSecret: without one, local clients are logged in from the start. */
+	/** Only with parley.dns.adminSecret: without one, local clients are logged in from the start. */
 	@Override
 	protected boolean isLoginRequired() {
 		String s = dns.getProperty(DnsServer.PROP_ADMIN_SECRET);

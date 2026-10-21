@@ -65,7 +65,7 @@ public final class Tsig {
 
 	/**
 	 * Default fudge: how many seconds the signer's clock and ours may differ
-	 * (RFC 8945 recommends 300). The server setting is JDns.tsigFudge.
+	 * (RFC 8945 recommends 300). The server setting is parley.dns.tsigFudge.
 	 */
 	public static final int DEFAULT_FUDGE = 300;
 

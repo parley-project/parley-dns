@@ -45,8 +45,8 @@ public class TestResolverRestart {
 
 	@Test
 	public void secondInitStopsTheFirstThreads() throws Exception {
-		String saved = System.getProperty("JDns.resolvers");
-		System.setProperty("JDns.resolvers", "3");
+		String saved = System.getProperty("parley.dns.resolvers");
+		System.setProperty("parley.dns.resolvers", "3");
 		try {
 			Resolver.initResolver();
 			Resolver.initResolver();
@@ -61,9 +61,9 @@ public class TestResolverRestart {
 			assertEquals(0, liveResolverThreads(), "no resolver thread left running");
 		} finally {
 			if( saved == null ) {
-				System.clearProperty("JDns.resolvers");
+				System.clearProperty("parley.dns.resolvers");
 			} else {
-				System.setProperty("JDns.resolvers", saved);
+				System.setProperty("parley.dns.resolvers", saved);
 			}
 		}
 	}

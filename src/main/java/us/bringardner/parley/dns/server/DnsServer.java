@@ -85,102 +85,102 @@ import us.bringardner.parley.io.IoUtils;
  */
 public class DnsServer  extends DnsBaseClass implements Runnable
 {
-	public static final String PROP_DEFAULT_ZONE = "JDns.master.zone";
-	public static final String PROP_DNS_PROPERTIES = "JDns.properties";
+	public static final String PROP_DEFAULT_ZONE = "parley.dns.masterZone";
+	public static final String PROP_DNS_PROPERTIES = "parley.dns.configFile";
 	private static final String DEFAULT_PROPERTIES_FILE_NAME = "JDns.properties";
-	public static final String PROP_ADMIN_PORT = "JDns.adminPort";
-	public static final String PROP_DEBUG = "JDns.debug";
-	public static final String PROP_JDNS_RA = "JDns.ra";
+	public static final String PROP_ADMIN_PORT = "parley.dns.adminPort";
+	public static final String PROP_DEBUG = "parley.dns.debug";
+	public static final String PROP_JDNS_RA = "parley.dns.recursionAvailable";
 
-	public static final String PROP_PORT = "JDns.dnsPort";	
-	public static final String PROP_BIND_ADDRESS = "JDns.bindAddress";
-	public static final String PROP_TIMEOUT = "JDns.timeout";
+	public static final String PROP_PORT = "parley.dns.port";	
+	public static final String PROP_BIND_ADDRESS = "parley.dns.bindAddress";
+	public static final String PROP_TIMEOUT = "parley.dns.timeout";
 
-	public static final String PROP_UDP_BIND_ADDRESS = "JDns.udp.bindAddress";
-	public static final String PROP_UDP_PORT = "JDns.udpPort";
-	public static final String PROP_UDP_TIMEOUT = "JDns.udpTimeout";
+	public static final String PROP_UDP_BIND_ADDRESS = "parley.dns.udpBindAddress";
+	public static final String PROP_UDP_PORT = "parley.dns.udpPort";
+	public static final String PROP_UDP_TIMEOUT = "parley.dns.udpTimeout";
 	/** Largest UDP response in bytes (default 512, RFC 1035). Larger answers are truncated. */
-	public static final String PROP_UDP_MAX_RESPONSE = "JDns.udpMaxResponse";
-	public static final String PROP_EDNS_UDP_SIZE = "JDns.ednsUdpSize";
-	public static final String PROP_ZONE_CUT_REFERRALS = "JDns.zoneCutReferrals";
+	public static final String PROP_UDP_MAX_RESPONSE = "parley.dns.udpMaxResponse";
+	public static final String PROP_EDNS_UDP_SIZE = "parley.dns.ednsUdpSize";
+	public static final String PROP_ZONE_CUT_REFERRALS = "parley.dns.zoneCutReferrals";
 
-	public static final String PROP_TCP_PORT = "JDns.tcpPort";	
-	public static final String PROP_TCP_BIND_ADDRESS = "JDns.tcpBindAddress";
-	public static final String PROP_TCP_BACKLOG = "JDns.tcpBacklog";
-	public static final String PROP_TCP_TIMEOUT = "JDns.tcpTimeout";
+	public static final String PROP_TCP_PORT = "parley.dns.tcpPort";	
+	public static final String PROP_TCP_BIND_ADDRESS = "parley.dns.tcpBindAddress";
+	public static final String PROP_TCP_BACKLOG = "parley.dns.tcpBacklog";
+	public static final String PROP_TCP_TIMEOUT = "parley.dns.tcpTimeout";
 	/** Most TCP connections served at once (default 64). */
-	public static final String PROP_TCP_MAX_CONNECTIONS = "JDns.tcpMaxConnections";
+	public static final String PROP_TCP_MAX_CONNECTIONS = "parley.dns.tcpMaxConnections";
 	/** An idle TCP connection is closed after this many ms (default 10000). */
-	public static final String PROP_TCP_IDLE_TIMEOUT = "JDns.tcpIdleTimeout";
+	public static final String PROP_TCP_IDLE_TIMEOUT = "parley.dns.tcpIdleTimeout";
 	/** Most TCP connections from one client address (default 8, 0 for no limit). */
-	public static final String PROP_TCP_MAX_CONNECTIONS_PER_CLIENT = "JDns.tcpMaxConnectionsPerClient";
+	public static final String PROP_TCP_MAX_CONNECTIONS_PER_CLIENT = "parley.dns.tcpMaxConnectionsPerClient";
 	/** Address the admin port listens on. Default: loopback only. Use 0.0.0.0 for all interfaces. */
-	public static final String PROP_ADMIN_BIND_ADDRESS = "JDns.adminBindAddress";
-	public static final String PROP_JDBC_URL = "JDns.jdbcURL";
+	public static final String PROP_ADMIN_BIND_ADDRESS = "parley.dns.adminBindAddress";
+	public static final String PROP_JDBC_URL = "parley.dns.jdbcUrl";
 	/** JDBC driver class to load (optional with JDBC 4 drivers). */
-	public static final String PROP_JDBC_CLASS = "JDns.jdbcClass";
-	public static final String PROP_JDBC_USER = "JDns.jdbcUser";
-	public static final String PROP_JDBC_PASSWORD = "JDns.jdbcPassword";
+	public static final String PROP_JDBC_CLASS = "parley.dns.jdbcDriver";
+	public static final String PROP_JDBC_USER = "parley.dns.jdbcUser";
+	public static final String PROP_JDBC_PASSWORD = "parley.dns.jdbcPassword";
 	/**
 	 * Shared secret for the admin port (challenge-response, see AdminAuth).
 	 * Without it only clients on this machine may use the admin port.
 	 */
-	public static final String PROP_ADMIN_SECRET = "JDns.adminSecret";
+	public static final String PROP_ADMIN_SECRET = "parley.dns.adminSecret";
 	/**
 	 * true: the admin port uses TLS (SSLServerSocketFactory.getDefault(),
 	 * configured with the standard javax.net.ssl.keyStore / keyStorePassword
 	 * properties). DnsAdminClient reads the same property and then uses
 	 * SSLSocketFactory.getDefault() (javax.net.ssl.trustStore).
 	 */
-	public static final String PROP_ADMIN_TLS = "JDns.adminTls";
+	public static final String PROP_ADMIN_TLS = "parley.dns.adminTls";
 	/** Most admin sessions at once (default 8). */
-	public static final String PROP_ADMIN_MAX_CONNECTIONS = "JDns.adminMaxConnections";
+	public static final String PROP_ADMIN_MAX_CONNECTIONS = "parley.dns.adminMaxConnections";
 	/** An idle admin session is closed after this many ms (default 600000). */
-	public static final String PROP_ADMIN_IDLE_TIMEOUT = "JDns.adminIdleTimeout";
+	public static final String PROP_ADMIN_IDLE_TIMEOUT = "parley.dns.adminIdleTimeout";
 	/** Longest admin command line in bytes (default 8192); a longer one ends the session. */
-	public static final String PROP_ADMIN_MAX_LINE = "JDns.adminMaxLine";
-	/** With JDns.adminSecret set, a session that has not authenticated after this many ms is closed (default 30000). */
-	public static final String PROP_ADMIN_AUTH_TIMEOUT = "JDns.adminAuthTimeout";
+	public static final String PROP_ADMIN_MAX_LINE = "parley.dns.adminMaxLine";
+	/** With parley.dns.adminSecret set, a session that has not authenticated after this many ms is closed (default 30000). */
+	public static final String PROP_ADMIN_AUTH_TIMEOUT = "parley.dns.adminAuthTimeout";
 
 
 
 
-	public static final String PROP_DNS_DIR = "JDns.dnsDir";
-	public static final String PROP_DYNAMIC = "JDns.dynamicFileName";
-	public static final String PROP_ZONE_DIR = "JDns.zone.dir";
+	public static final String PROP_DNS_DIR = "parley.dns.dnsDir";
+	public static final String PROP_DYNAMIC = "parley.dns.dynamicFileName";
+	public static final String PROP_ZONE_DIR = "parley.dns.zoneDir";
 	/** Addresses / networks allowed to transfer zones (AXFR), e.g. "192.0.2.2, 10.0.0.0/8". Default: none. */
-	public static final String PROP_AXFR_ALLOW = "JDns.axfrAllow";
+	public static final String PROP_AXFR_ALLOW = "parley.dns.axfrAllow";
 	/** Secondaries to send NOTIFY to when a zone is loaded or its serial changes, e.g. "192.0.2.2, [2001:db8::2]:53". */
-	public static final String PROP_NOTIFY = "JDns.notify";
+	public static final String PROP_NOTIFY = "parley.dns.notify";
 	/** TSIG keys (RFC 8945): "name:algorithm:base64secret" entries, e.g. "xfr.example:hmac-sha256:c2VjcmV0..." */
-	public static final String PROP_TSIG_KEYS = "JDns.tsigKeys";
+	public static final String PROP_TSIG_KEYS = "parley.dns.tsigKeys";
 	/** A file of TSIG keys, one "name algorithm base64secret" per line (keeps secrets out of the properties). */
-	public static final String PROP_TSIG_KEY_FILE = "JDns.tsigKeyFile";
+	public static final String PROP_TSIG_KEY_FILE = "parley.dns.tsigKeyFile";
 	/** TSIG keys (names) whose signed requests may transfer zones, from any address. */
-	public static final String PROP_AXFR_KEYS = "JDns.axfrKeys";
+	public static final String PROP_AXFR_KEYS = "parley.dns.axfrKeys";
 	/** Largest clock difference (seconds) accepted in a TSIG signed request, and the fudge we sign with (default 300). */
-	public static final String PROP_TSIG_FUDGE = "JDns.tsigFudge";
+	public static final String PROP_TSIG_FUDGE = "parley.dns.tsigFudge";
 	/** TSIG keys (names) whose signed UPDATE requests may change zones (RFC 2136). */
-	public static final String PROP_UPDATE_KEYS = "JDns.updateKeys";
+	public static final String PROP_UPDATE_KEYS = "parley.dns.updateKeys";
 	/** Addresses / networks allowed to send unsigned UPDATE requests (default: none; prefer keys). */
-	public static final String PROP_UPDATE_ALLOW = "JDns.updateAllow";
+	public static final String PROP_UPDATE_ALLOW = "parley.dns.updateAllow";
 	/** TSIG key (name) to sign NOTIFY messages with. */
-	public static final String PROP_NOTIFY_KEY = "JDns.notifyKey";
+	public static final String PROP_NOTIFY_KEY = "parley.dns.notifyKey";
 	/** Attempts per NOTIFY (default 5). */
-	public static final String PROP_NOTIFY_RETRIES = "JDns.notifyRetries";
+	public static final String PROP_NOTIFY_RETRIES = "parley.dns.notifyRetries";
 	/** First wait (ms) for a NOTIFY answer, doubled after each attempt (default 2000). */
-	public static final String PROP_NOTIFY_TIMEOUT = "JDns.notifyTimeout";
-	public static final String PROP_USE_DATABASE = "JDns.useDataBase";
+	public static final String PROP_NOTIFY_TIMEOUT = "parley.dns.notifyTimeout";
+	public static final String PROP_USE_DATABASE = "parley.dns.useDatabase";
 	/** Directory of the zones' DNSSEC keys (K&lt;zone&gt;.+alg+tag.key and .private). Default: the zone directory. A zone with keys is signed. */
-	public static final String PROP_DNSSEC_KEY_DIR = "JDns.dnssecKeyDir";
+	public static final String PROP_DNSSEC_KEY_DIR = "parley.dns.dnssecKeyDir";
 	/** How long DNSSEC signatures are valid, e.g. 14d (the default); zones are signed again when a quarter of it is left. */
-	public static final String PROP_DNSSEC_VALIDITY = "JDns.dnssecValidity";
+	public static final String PROP_DNSSEC_VALIDITY = "parley.dns.dnssecValidity";
 	/** Zones to sign with NSEC3 instead of NSEC: a list of zone names, or * for all. Default: none. */
-	public static final String PROP_DNSSEC_NSEC3 = "JDns.dnssecNsec3";
+	public static final String PROP_DNSSEC_NSEC3 = "parley.dns.dnssecNsec3";
 	/** NSEC3 extra hash iterations (default 0, as RFC 9276 recommends; at most 100). */
-	public static final String PROP_DNSSEC_NSEC3_ITERATIONS = "JDns.dnssecNsec3Iterations";
+	public static final String PROP_DNSSEC_NSEC3_ITERATIONS = "parley.dns.dnssecNsec3Iterations";
 	/** NSEC3 salt in hex, or - for none (the default, as RFC 9276 recommends). */
-	public static final String PROP_DNSSEC_NSEC3_SALT = "JDns.dnssecNsec3Salt";
+	public static final String PROP_DNSSEC_NSEC3_SALT = "parley.dns.dnssecNsec3Salt";
 
 	public static final String STATUS_ACTIVE = "active";
 	public static final String STATUS_DELETED = "deleted";
@@ -193,17 +193,17 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	private static final int POS_STATUS = 3;
 	private static final int POS_NAME = 4;
 	/** UDP listener threads (was UDPProcCount, still read). */
-	public static final String PROP_UDP_PROC_COUNT = "JDns.udpProcCount";
+	public static final String PROP_UDP_PROC_COUNT = "parley.dns.udpProcCount";
 	/** TCP reactor threads, which read and write the connections (was TCPProcCount, still read). */
-	public static final String PROP_TCP_PROC_COUNT = "JDns.tcpProcCount";
+	public static final String PROP_TCP_PROC_COUNT = "parley.dns.tcpProcCount";
 	/** Host DnsAdminClient connects to (was the system property "name", still read). */
-	public static final String PROP_ADMIN_HOST = "JDns.adminHost";
+	public static final String PROP_ADMIN_HOST = "parley.dns.adminHost";
 	/**
 	 * "false": a JVM error (OutOfMemoryError...) in any thread is logged but doesn't stop the
 	 * process. By default main() halts it so a supervisor can start a clean one (parley-net's
 	 * FatalErrorHandler).
 	 */
-	public static final String PROP_EXIT_ON_FATAL_ERROR = "JDns.exitOnFatalError";
+	public static final String PROP_EXIT_ON_FATAL_ERROR = "parley.dns.exitOnFatalError";
 	public static final String DEFAULT_DNS_DIR = "/data/services/dns/config";
 
 
@@ -211,7 +211,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	private static volatile int adminPort = 9999;
 	//  Where the admin port listens (set in initServer, default loopback)
 	private volatile InetAddress adminBindAddress = InetAddress.getLoopbackAddress();
-	//  The most admin sessions at once (JDns.adminMaxConnections)
+	//  The most admin sessions at once (parley.dns.adminMaxConnections)
 	private volatile int adminMaxConnections = 8;
 	//  The admin port (parley-net Server), while the server runs
 	private volatile DnsAdminServer adminServer;
@@ -280,7 +280,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 * change replaces the entry (see putDynamic).
 	 */
 	private final Map<String, List<A>> dynamic = new ConcurrentHashMap<String, List<A>>();
-	//  Zone transfer allow-list (JDns.axfrAllow) and NOTIFY sender (JDns.notify)
+	//  Zone transfer allow-list (parley.dns.axfrAllow) and NOTIFY sender (parley.dns.notify)
 	private volatile AddressMatcher axfrAllow = AddressMatcher.NONE;
 	private volatile Tsig.KeyRing tsigKeys = Tsig.KeyRing.EMPTY;
 	private volatile int tsigFudge = Tsig.DEFAULT_FUDGE;
@@ -305,11 +305,11 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	private volatile boolean running = false;
 
 	//  TCP reactor threads (NioServer). Requests are answered on a separate
-	//  pool (JDns.tcpMaxConnections threads), so one is enough; it was 4.
+	//  pool (parley.dns.tcpMaxConnections threads), so one is enough; it was 4.
 	private int TCPProcCount = 1;
 
 	//  Answer names at or below a delegation (NS records below the apex)
-	//  with a referral. JDns.zoneCutReferrals=false restores the old
+	//  with a referral. parley.dns.zoneCutReferrals=false restores the old
 	//  behaviour for zones that list NS records on ordinary hosts.
 	private volatile boolean zoneCutReferrals = true;
 
@@ -321,7 +321,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		zoneCutReferrals = on;
 	}
 
-	/** Number of TCP reactor threads (property JDns.tcpProcCount). */
+	/** Number of TCP reactor threads (property parley.dns.tcpProcCount). */
 	public int getTcpProcCount() {
 		return TCPProcCount;
 	}	
@@ -430,7 +430,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 * Factory because the connection will not remain open
 	 */
 	/**
-	 * Open a JDBC connection from JDns.jdbcClass / jdbcURL / jdbcUser / jdbcPassword.
+	 * Open a JDBC connection from parley.dns.jdbcDriver / jdbcUrl / jdbcUser / jdbcPassword.
 	 * @throws SQLException if it can't be opened. (It used to log and return
 	 * null, and every caller then failed with a NullPointerException.)
 	 */
@@ -660,7 +660,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		if( (tmp=stringProperty(PROP_UDP_BIND_ADDRESS)) != null) {
 			udpAddress = createBindAddress(tmp);
 		}
-		//  (JDns.udpTimeout used to overwrite the general timeout instead of
+		//  (parley.dns.udpTimeout used to overwrite the general timeout instead of
 		//  setting the UDP one, so it changed the TCP timeout and not UDP's)
 		int udpTimeout = intProperty(PROP_UDP_TIMEOUT, alltimeout);
 		UDPProsessor.setMaxResponseSize(intProperty(PROP_UDP_MAX_RESPONSE, UDPProsessor.getMaxResponseSize()));
@@ -672,7 +672,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 		UDPProcs = new UDPProsessor[UDPProcCount];
 		Thread t = null;
-		log("UDP BindAddress = "+udpAddress+":"+udpPort+" timeout="+udpTimeout+" maxResponse="+UDPProsessor.getMaxResponseSize());
+		log("UDP bindAddress = "+udpAddress+":"+udpPort+" timeout="+udpTimeout+" maxResponse="+UDPProsessor.getMaxResponseSize());
 		UDPProsessor.initUDPProsessor(udpPort,udpAddress,udpTimeout);
 
 		for(int i=0; i< UDPProcs.length; i++ ) {
@@ -688,7 +688,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		TCPProcs = new TCPProsessor[1];
 		int tcpPort = intProperty(PROP_TCP_PORT, dnsPort);
 		int backlog = intProperty(PROP_TCP_BACKLOG, 10);
-		//  (JDns.tcpBindAddress used to be read and then ignored)
+		//  (parley.dns.tcpBindAddress used to be read and then ignored)
 		InetAddress tcpAddress = bindAddress;
 		if( (tmp=stringProperty(PROP_TCP_BIND_ADDRESS)) != null) {
 			tcpAddress = createBindAddress(tmp);
@@ -698,7 +698,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		int tcpIdleTimeout = intProperty(PROP_TCP_IDLE_TIMEOUT, TCPProsessor.DEFAULT_IDLE_TIMEOUT);
 		int tcpMaxPerClient = intProperty(PROP_TCP_MAX_CONNECTIONS_PER_CLIENT, TCPProsessor.DEFAULT_MAX_CONNECTIONS_PER_CLIENT);
 
-		log("TCP BindAddress = "+tcpAddress+":"+tcpPort+" backlog="+backlog+" timeout="+tcpTimeout
+		log("TCP bindAddress = "+tcpAddress+":"+tcpPort+" backlog="+backlog+" timeout="+tcpTimeout
 				+" maxConnections="+tcpMaxConnections+" maxConnectionsPerClient="+tcpMaxPerClient
 				+" idleTimeout="+tcpIdleTimeout+" reactors="+TCPProcCount);
 		TCPProsessor.initTCPProsessor(tcpPort,backlog,tcpAddress,tcpTimeout,tcpMaxConnections,tcpIdleTimeout,
@@ -770,13 +770,13 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		return adminBindAddress;
 	}
 
-	/** Where the next admin server listens (initServer reads JDns.adminBindAddress). */
+	/** Where the next admin server listens (initServer reads parley.dns.adminBindAddress). */
 	void setAdminBindAddress(InetAddress bind) {
 		adminBindAddress = bind;
 	}
 
 	/**
-	 * The admin server for this DNS server, set up from the JDns.admin* settings
+	 * The admin server for this DNS server, set up from the parley.dns.admin* settings
 	 * (port, bind address, TLS, session limit, idle time, line length, time to log in).
 	 * Not started.
 	 * @param port the port, 0 for any free port
@@ -796,7 +796,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 	/**
 	 * Start the admin server (see {@link #createAdminServer(int)}); run() does this on
-	 * JDns.adminPort.
+	 * parley.dns.adminPort.
 	 * @throws IOException if it can't listen (port in use, a TLS key store problem...)
 	 */
 	public DnsAdminServer startAdminServer(int port) throws IOException {
@@ -829,7 +829,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 	}
 
-	/** Longest admin line in bytes (initServer reads JDns.adminMaxLine). */
+	/** Longest admin line in bytes (initServer reads parley.dns.adminMaxLine). */
 	void setAdminMaxLine(int maxLine) {
 		adminMaxLine = maxLine;
 		DnsAdminServer a = adminServer;
@@ -838,12 +838,12 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 	}
 
-	/** ms an idle admin session stays open (initServer reads JDns.adminIdleTimeout); for the next admin server. */
+	/** ms an idle admin session stays open (initServer reads parley.dns.adminIdleTimeout); for the next admin server. */
 	void setAdminIdleTimeout(int ms) {
 		adminIdleTimeout = ms;
 	}
 
-	/** ms an admin client has to authenticate (initServer reads JDns.adminAuthTimeout). */
+	/** ms an admin client has to authenticate (initServer reads parley.dns.adminAuthTimeout). */
 	void setAdminAuthTimeout(int ms) {
 		adminAuthTimeout = Math.max(1, ms);
 		DnsAdminServer a = adminServer;
@@ -852,10 +852,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 	}
 
-	//  JDns.notifyKey (applied by setNotifyTargets)
+	//  parley.dns.notifyKey (applied by setNotifyTargets)
 	private volatile String notifyKeyName;
 
-	/** The TSIG keys (initServer reads JDns.tsigKeys and JDns.tsigKeyFile). */
+	/** The TSIG keys (initServer reads parley.dns.tsigKeys and parley.dns.tsigKeyFile). */
 	public Tsig.KeyRing getTsigKeys() {
 		return tsigKeys;
 	}
@@ -875,7 +875,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		return tsigReplays;
 	}
 
-	/** Largest clock difference (seconds) for TSIG, 1-65535 (initServer reads JDns.tsigFudge). */
+	/** Largest clock difference (seconds) for TSIG, 1-65535 (initServer reads parley.dns.tsigFudge). */
 	public int getTsigFudge() {
 		return tsigFudge;
 	}
@@ -884,17 +884,17 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		tsigFudge = Tsig.checkFudge(seconds);
 	}
 
-	/** TSIG keys whose signed requests may transfer zones (initServer reads JDns.axfrKeys). */
+	/** TSIG keys whose signed requests may transfer zones (initServer reads parley.dns.axfrKeys). */
 	public void setAxfrKeys(String list) {
 		axfrKeys = keyNames(list, PROP_AXFR_KEYS);
 	}
 
-	/** TSIG keys whose signed UPDATE requests may change zones (initServer reads JDns.updateKeys). */
+	/** TSIG keys whose signed UPDATE requests may change zones (initServer reads parley.dns.updateKeys). */
 	public void setUpdateKeys(String list) {
 		updateKeys = keyNames(list, PROP_UPDATE_KEYS);
 	}
 
-	/** Who may send unsigned UPDATE requests (initServer reads JDns.updateAllow). */
+	/** Who may send unsigned UPDATE requests (initServer reads parley.dns.updateAllow). */
 	public void setUpdateAllow(String list) {
 		updateAllow = AddressMatcher.parse(list);
 	}
@@ -920,7 +920,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		notifyKeyName = name;
 	}
 
-	/** Who may transfer zones (initServer reads JDns.axfrAllow). */
+	/** Who may transfer zones (initServer reads parley.dns.axfrAllow). */
 	public void setAxfrAllow(String list) {
 		axfrAllow = AddressMatcher.parse(list);
 		if( !axfrAllow.isEmpty() ) {
@@ -928,7 +928,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 	}
 
-	/** Where to send NOTIFY (initServer reads JDns.notify); null or empty: nowhere. */
+	/** Where to send NOTIFY (initServer reads parley.dns.notify); null or empty: nowhere. */
 	public void setNotifyTargets(String list, int retries, int timeoutMs) {
 		ZoneNotifier old = notifier;
 		Tsig.Key key = null;
@@ -946,12 +946,12 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 	}
 
-	/** The NOTIFY sender, or null if JDns.notify is not set. */
+	/** The NOTIFY sender, or null if parley.dns.notify is not set. */
 	public ZoneNotifier getNotifier() {
 		return notifier;
 	}
 
-	/** Set the most admin sessions at once (initServer reads JDns.adminMaxConnections). */
+	/** Set the most admin sessions at once (initServer reads parley.dns.adminMaxConnections). */
 	void setAdminMaxConnections(int max) {
 		adminMaxConnections = Math.max(1, max);
 		DnsAdminServer a = adminServer;
@@ -994,7 +994,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			if( keyFile != null ) {
 				File f = new File(keyFile);
 				if( !f.isAbsolute() ) {
-					//  Relative to JDns.dnsDir, like the other files
+					//  Relative to parley.dns.dnsDir, like the other files
 					f = new File(getProperty(PROP_DNS_DIR,DEFAULT_DNS_DIR), keyFile);
 				}
 				keys = keys.with(Tsig.KeyRing.load(f));
@@ -1031,12 +1031,12 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 		dnsDir=new File(getProperty(PROP_DNS_DIR,DEFAULT_DNS_DIR));
 
-		if( (tmp=us.bringardner.parley.core.util.RenamedProperty.get(PROP_UDP_PROC_COUNT, "UDPProcCount")) != null)  {
+		if( (tmp=System.getProperty(PROP_UDP_PROC_COUNT)) != null)  {
 			try { UDPProcCount =Integer.parseInt(tmp.trim()); } catch(Exception ex) {
 				logError("Invalid number for "+PROP_UDP_PROC_COUNT+": '"+tmp+"', using "+UDPProcCount);
 			}
 		}
-		if( (tmp=us.bringardner.parley.core.util.RenamedProperty.get(PROP_TCP_PROC_COUNT, "TCPProcCount")) != null)  {
+		if( (tmp=System.getProperty(PROP_TCP_PROC_COUNT)) != null)  {
 			try { TCPProcCount =Integer.parseInt(tmp.trim()); } catch(Exception ex) {
 				logError("Invalid number for "+PROP_TCP_PROC_COUNT+": '"+tmp+"', using "+TCPProcCount);
 			}
@@ -1241,8 +1241,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	}
 
 	/**
-	 * JDns.useDataBase=true/false decides. If it is not set, the database is
-	 * used only when JDns.jdbcURL is configured. (The old default was 'true',
+	 * parley.dns.useDatabase=true/false decides. If it is not set, the database is
+	 * used only when parley.dns.jdbcUrl is configured. (The old default was 'true',
 	 * so a server without a database tried to connect on every dynamic update
 	 * and reload, logged errors and hit NullPointerExceptions.)
 	 */
@@ -1302,7 +1302,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		return ret;
 	}
 
-	/** The dynamic entries file (JDns.dynamicFileName, relative to the DNS directory). */
+	/** The dynamic entries file (parley.dns.dynamicFileName, relative to the DNS directory). */
 	private File dynamicFilePath() {
 		String fileName = getProperty(PROP_DYNAMIC,"dynamic.txt");
 		File ret = new File(fileName);
@@ -1919,7 +1919,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 * @param newServerSocketFactory javax.net.ServerSocketFactory
 	 */
 	/**
-	 * The admin listener's factory: JDns.adminTls=true replaces the default
+	 * The admin listener's factory: parley.dns.adminTls=true replaces the default
 	 * (plain) factory with SSLServerSocketFactory.getDefault(); a factory set
 	 * with setServerSocketFactory is kept.
 	 */
@@ -2506,8 +2506,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 	/**
 	 * A zone transfer (AXFR, RFC 5936; IXFR is answered with the whole zone,
-	 * as RFC 1995 4 allows). Only for clients in JDns.axfrAllow or requests
-	 * signed with a TSIG key in JDns.axfrKeys, only over TCP,
+	 * as RFC 1995 4 allows). Only for clients in parley.dns.axfrAllow or requests
+	 * signed with a TSIG key in parley.dns.axfrKeys, only over TCP,
 	 * and only for the name of a zone we serve; otherwise REFUSED.
 	 * <p>
 	 * The answer is the SOA, every record of the zone (dynamic entries
@@ -2522,7 +2522,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		List<Message> ret = new ArrayList<Message>();
 		Zone zone = getZone(question.getName());
 		boolean tcp = req.getPort() < 0;
-		//  By address (JDns.axfrAllow) or by TSIG key (JDns.axfrKeys, from anywhere)
+		//  By address (parley.dns.axfrAllow) or by TSIG key (parley.dns.axfrKeys, from anywhere)
 		String key = req.getTsigKey();
 		boolean allowed = axfrAllow.matches(req.getClient()) || (key != null && axfrKeys.contains(key));
 		if( zone == null || !allowed || (!tcp && question.getType() == DNS.AXFR) ) {
@@ -2614,7 +2614,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 	/**
 	 * A dynamic update (RFC 2136). Allowed for requests signed with a key in
-	 * JDns.updateKeys, or from an address in JDns.updateAllow; REFUSED
+	 * parley.dns.updateKeys, or from an address in parley.dns.updateAllow; REFUSED
 	 * otherwise. The changes are appended to the zone's journal (the zone
 	 * file is never rewritten) before the new zone is published; the serial
 	 * goes up and the secondaries get a NOTIFY.

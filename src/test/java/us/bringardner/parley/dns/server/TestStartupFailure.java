@@ -80,7 +80,7 @@ public class TestStartupFailure {
 		set(DnsServer.PROP_ADMIN_PORT, "0");
 		set(DnsServer.PROP_UDP_PROC_COUNT, "1");
 		set(DnsServer.PROP_TCP_PROC_COUNT, "1");
-		set("JDns.resolvers", "1");
+		set("parley.dns.resolvers", "1");
 		for(String k : new String[] {DnsServer.PROP_USE_DATABASE, DnsServer.PROP_JDBC_URL, DnsServer.PROP_BIND_ADDRESS,
 				DnsServer.PROP_UDP_BIND_ADDRESS, DnsServer.PROP_TCP_BIND_ADDRESS, DnsServer.PROP_ADMIN_BIND_ADDRESS,
 				DnsServer.PROP_UDP_PORT, DnsServer.PROP_TCP_PORT}) {

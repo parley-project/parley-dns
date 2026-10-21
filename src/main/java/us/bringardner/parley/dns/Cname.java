@@ -67,7 +67,7 @@ public Cname(String name, int dnsClass)
 	dirty = true;
 }
 	/**
-	Construct a 'Cname' record from an RR record (the RDATA should represent a JDns.Name of an alias)
+	Construct a 'Cname' record from an RR record (the RDATA should represent a parley.dns.Name of an alias)
 	**/
 		public Cname(RR rr) {
 				super(rr);

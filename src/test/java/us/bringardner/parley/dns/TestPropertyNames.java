@@ -42,7 +42,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Property naming rules: every property has a PROP_ constant whose value
- * starts with "JDns.", and every one is listed in README.md. (NsLookup, a
+ * starts with "parley.dns.", and every one is listed in README.md. (NsLookup, a
  * separate tool, is not covered.)
  */
 public class TestPropertyNames {
@@ -73,7 +73,7 @@ public class TestPropertyNames {
 		List<String> names = propertyNames();
 		assertTrue(names.size() > 60, names.toString());
 		for(String n : names) {
-			assertTrue(n.substring(n.indexOf('=')+1).startsWith("JDns."), n);
+			assertTrue(n.substring(n.indexOf('=')+1).startsWith("parley.dns."), n);
 		}
 	}
 
@@ -121,7 +121,7 @@ public class TestPropertyNames {
 
 	@Test
 	public void oldNamesStillWork() {
-		String name = "JDns.testRenamed";
+		String name = "parley.dns.testRenamed";
 		String old = "TestRenamedOld";
 		try {
 			assertNull(RenamedProperty.get(name, old));

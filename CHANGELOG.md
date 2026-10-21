@@ -1,5 +1,20 @@
 # Changelog
 
+## parley-dns 2.0.0 (unreleased)
+
+### Changed (needs a configuration change)
+
+- **Property names** (Parley 2.0.0; the old names are no longer read): `JDns.*` is `parley.dns.*`. Most keep
+  the rest of their name; `JDns.dnsPort` is `parley.dns.port`, `JDns.master.zone` `parley.dns.masterZone`,
+  `JDns.zone.dir` `parley.dns.zoneDir`, `JDns.udp.bindAddress` `parley.dns.udpBindAddress`, `JDns.dump.file`
+  `parley.dns.udpDumpFile`, `JDns.ra` `parley.dns.recursionAvailable`, `JDns.jdbcURL` / `JDns.jdbcClass`
+  `parley.dns.jdbcUrl` / `parley.dns.jdbcDriver`, `JDns.useDataBase` `parley.dns.useDatabase`, `JDns.properties`
+  `parley.dns.configFile` (the default file is still `JDns.properties`), and NsLookup's `echoCommand`
+  `parley.dns.nslookup.echoCommand`. See the README's table.
+- The names 1.0.0 still read with a warning (`UDPProcCount`, `TCPProcCount`, `Resolver.maxBacklog`, and
+  `name` / `port` for DnsAdminClient) are no longer read.
+- The admin server's prefix is `parley.dns.admin`, the TCP listener's `parley.dns.tcp`.
+
 ## parley-dns 1.0.0 (2026-10-16)
 
 BjlDns is now **parley-dns**, part of the Parley library family. The code is the same as

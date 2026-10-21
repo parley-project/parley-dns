@@ -116,7 +116,7 @@
 
 
 		<!--
-			MySQL driver for the optional database (JDns.jdbcURL). It was test scope,
+			MySQL driver for the optional database (parley.dns.jdbcUrl). It was test scope,
 			so it was missing at run time; mysql:mysql-connector-java is also the old
 			coordinate (relocated to com.mysql:mysql-connector-j). Optional: projects
 			that use this jar as a DNS library don't get MySQL transitively.

@@ -105,7 +105,7 @@ import us.bringardner.parley.core.util.Hex;
 public class NsLookup extends Utility {
 
 	/** resolv.conf to read the default servers and search list from. */
-	public static final String PROP_RESOLV_CONF = "JDns.resolvConf";
+	public static final String PROP_RESOLV_CONF = "parley.dns.resolvConf";
 	public static final String DEFAULT_RESOLV_CONF = "/etc/resolv.conf";
 
 	/** Seconds per try when no timeout is set (as dig/nslookup). */
@@ -332,7 +332,7 @@ public class NsLookup extends Utility {
 	 */
 	public static int run(String[] args) {
 		reset();
-		echoCommand = echoCommand || Boolean.getBoolean("echoCommand");
+		echoCommand = echoCommand || Boolean.getBoolean("parley.dns.nslookup.echoCommand");
 		loadResolvConf();
 
 		String lookup = null;

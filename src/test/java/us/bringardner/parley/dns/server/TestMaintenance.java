@@ -54,7 +54,7 @@ public class TestMaintenance {
 		System.setProperty(DnsServer.PROP_ADMIN_PORT, "0");
 		System.setProperty(DnsServer.PROP_UDP_PROC_COUNT, "1");
 		System.setProperty(DnsServer.PROP_TCP_PROC_COUNT, "1");
-		System.setProperty("JDns.resolvers", "1");
+		System.setProperty("parley.dns.resolvers", "1");
 		for(String k : new String[] {DnsServer.PROP_USE_DATABASE, DnsServer.PROP_JDBC_URL, DnsServer.PROP_BIND_ADDRESS,
 				DnsServer.PROP_UDP_BIND_ADDRESS, DnsServer.PROP_TCP_BIND_ADDRESS, DnsServer.PROP_ADMIN_BIND_ADDRESS,
 				DnsServer.PROP_UDP_PORT, DnsServer.PROP_TCP_PORT}) {

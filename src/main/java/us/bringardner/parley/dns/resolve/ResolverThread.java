@@ -38,12 +38,12 @@ import us.bringardner.parley.dns.*;
 public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass implements Runnable 
 {
 	/** Queued recursive queries (was Resolver.maxBacklog, still read). */
-	public static final String PROP_RESOLVER_BACKLOG = "JDns.resolverMaxBacklog";
+	public static final String PROP_RESOLVER_BACKLOG = "parley.dns.resolverMaxBacklog";
 	/** A queued query older than this (ms) is dropped instead of resolved (default 3000, 0: never). */
-	public static final String PROP_RESOLVER_MAX_QUEUE_AGE = "JDns.resolverMaxQueueAge";
+	public static final String PROP_RESOLVER_MAX_QUEUE_AGE = "parley.dns.resolverMaxQueueAge";
 	/** Resolver threads are virtual threads where the JVM has them (Java 21+; default true). */
-	public static final String PROP_RESOLVER_VIRTUAL_THREADS = "JDns.resolverVirtualThreads";
-	/** Default for JDns.resolverMaxQueueAge: stub resolvers give up after 1 to 5 s. */
+	public static final String PROP_RESOLVER_VIRTUAL_THREADS = "parley.dns.resolverVirtualThreads";
+	/** Default for parley.dns.resolverMaxQueueAge: stub resolvers give up after 1 to 5 s. */
 	public static final long DEFAULT_MAX_QUEUE_AGE = 3000;
 
 	/** A queued query and when it was queued (round 4 #58). */
@@ -148,7 +148,7 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 		return fifo.drainTo(new java.util.ArrayList<Queued>());
 	}
 
-	/** Queued queries dropped because they waited longer than JDns.resolverMaxQueueAge (round 4 #58). */
+	/** Queued queries dropped because they waited longer than parley.dns.resolverMaxQueueAge (round 4 #58). */
 	public static long getStale() {
 		return stale.get();
 	}
@@ -336,7 +336,7 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 	}
 	
 	/**
-	 * Default for JDns.resolverMaxBacklog. It was 20: a short burst of cache
+	 * Default for parley.dns.resolverMaxBacklog. It was 20: a short burst of cache
 	 * misses (e.g. a page load that looks up 30 names) already overflowed it.
 	 */
 	public static final int DEFAULT_MAX_BACKLOG = 200;
@@ -344,7 +344,7 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 	private static void initResolverThread() {
 		int maxBacklog = DEFAULT_MAX_BACKLOG;
 
-		String tmp = us.bringardner.parley.core.util.RenamedProperty.get(PROP_RESOLVER_BACKLOG, "Resolver.maxBacklog");
+		String tmp = System.getProperty(PROP_RESOLVER_BACKLOG);
 
 		if( tmp != null ) {
 			try {
@@ -511,7 +511,7 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 	/**
 	 * 
 	 * Creation date: (8/26/2001 10:41:48 AM)
-	 * @param msg JDns.Message
+	 * @param msg parley.dns.Message
 	 */
 	public void sendResponse(Message msg, QueryData query) {
 

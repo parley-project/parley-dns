@@ -56,7 +56,7 @@ public class TestDefaults {
 		ResolverThread.resetBacklogWarning();
 		String first = ResolverThread.backlogFullWarning();
 		assertNotNull(first);
-		assertTrue(first.contains("JDns.resolverMaxBacklog"), first);
+		assertTrue(first.contains("parley.dns.resolverMaxBacklog"), first);
 		for(int i=0; i < 1000; i++ ) {
 			assertNull(ResolverThread.backlogFullWarning(), "no message per query");
 		}

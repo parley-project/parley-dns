@@ -65,10 +65,10 @@ public class TestThreadSafeState {
 
 	@BeforeAll
 	public static void setup() throws IOException {
-		System.setProperty("JDns.useDataBase","false");
+		System.setProperty("parley.dns.useDatabase","false");
 		dir = Files.createTempDirectory("dyn").toFile();
 		//  Without this the dynamic file went to the working directory (the server
-		//  has no JDns.dnsDir here), leaving a dynamic.txt in the project.
+		//  has no parley.dns.dnsDir here), leaving a dynamic.txt in the project.
 		savedDynamicFile = System.getProperty(DnsServer.PROP_DYNAMIC);
 		System.setProperty(DnsServer.PROP_DYNAMIC, new File(dir,"dynamic.txt").getAbsolutePath());
 		File zone = new File(dir,"dyn.test.txt");

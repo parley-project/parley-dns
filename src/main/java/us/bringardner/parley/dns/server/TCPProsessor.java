@@ -74,7 +74,7 @@ import us.bringardner.parley.net.nio.NioServer;
  * <p>
  * The static methods are the API DnsServer and the tests used before (initTCPProsessor,
  * getServerSocket, shutdownConnections...). One TCPProsessor runs the server's accept
- * loop in its own thread; JDns.tcpProcCount is now the number of reactor threads.
+ * loop in its own thread; parley.dns.tcpProcCount is now the number of reactor threads.
  * 
  * Creation date: (8/26/2001 10:41:48 AM)
  * @author: Tony Bringardner
@@ -301,6 +301,7 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 
 		TcpServer() {
 			super(0, "DnsTcp");
+			setPropertyPrefix("parley.dns.tcp");
 		}
 
 		boolean claim() {

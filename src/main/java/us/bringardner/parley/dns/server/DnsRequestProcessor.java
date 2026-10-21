@@ -160,7 +160,7 @@ public abstract class DnsRequestProcessor  extends DnsBaseClass implements DNS
 /**
  * Insert the method's description here.
  * Creation date: (8/26/2001 7:03:38 AM)
- * @param msg JDns.Message
+ * @param msg parley.dns.Message
  */
 public abstract void sendResponse(Message msg);
 }
