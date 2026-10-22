@@ -87,7 +87,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 {
 	public static final String PROP_DEFAULT_ZONE = "parley.dns.masterZone";
 	public static final String PROP_DNS_PROPERTIES = "parley.dns.configFile";
-	private static final String DEFAULT_PROPERTIES_FILE_NAME = "JDns.properties";
+	private static final String DEFAULT_PROPERTIES_FILE_NAME = "parley-dns.properties";
 	public static final String PROP_ADMIN_PORT = "parley.dns.adminPort";
 	public static final String PROP_DEBUG = "parley.dns.debug";
 	public static final String PROP_JDNS_RA = "parley.dns.recursionAvailable";

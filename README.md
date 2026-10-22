@@ -181,7 +181,7 @@ Run the server under a supervisor (systemd, launchd, a container runtime) that r
 
 ```
 java -Xmx256m -XX:+ExitOnOutOfMemoryError \
-     -Dparley.dns.configFile=/data/services/dns/config/JDns.properties \
+     -Dparley.dns.configFile=/data/services/dns/config/parley-dns.properties \
      -cp parley-dns.jar:parley-core.jar:parley-io.jar:parley-net.jar us.bringardner.parley.dns.server.DnsServer
 ```
 
@@ -199,7 +199,7 @@ Description=parley-dns
 After=network-online.target
 
 [Service]
-ExecStart=/usr/bin/java -Xmx256m -XX:+ExitOnOutOfMemoryError -Dparley.dns.configFile=/data/services/dns/config/JDns.properties -cp /opt/parley-dns/lib/* us.bringardner.parley.dns.server.DnsServer
+ExecStart=/usr/bin/java -Xmx256m -XX:+ExitOnOutOfMemoryError -Dparley.dns.configFile=/data/services/dns/config/parley-dns.properties -cp /opt/parley-dns/lib/* us.bringardner.parley.dns.server.DnsServer
 Restart=on-failure
 RestartSec=2
 
@@ -217,7 +217,7 @@ A bind address of `localhost` means this host's own name (its network address), 
 
 | Property | Default | Meaning |
 |---|---|---|
-| `parley.dns.configFile` | `JDns.properties` (current directory) | The properties file to load at startup |
+| `parley.dns.configFile` | `parley-dns.properties` (current directory) | The properties file to load at startup |
 | `parley.dns.dnsDir` | `/data/services/dns/config` | Directory for the dynamic entries file, the TSIG key file and the root hints (`sbelt.prop`) |
 | `parley.dns.zoneDir` | `zones` | Directory of the zone files (`<zone>.txt`); a changed file is reloaded |
 | `parley.dns.masterZone` | required | The default zone: answers for the common domains (see Major Features) come from it |
@@ -339,7 +339,7 @@ Most keep the rest of their name (`JDns.adminPort` is `parley.dns.adminPort`); t
 | `JDns.ra` | `parley.dns.recursionAvailable` |
 | `JDns.jdbcURL`, `JDns.jdbcClass` | `parley.dns.jdbcUrl`, `parley.dns.jdbcDriver` |
 | `JDns.useDataBase` | `parley.dns.useDatabase` |
-| `JDns.properties` | `parley.dns.configFile` |
+| `JDns.properties` | `parley.dns.configFile`; the default file is now `parley-dns.properties` (was `JDns.properties`) |
 | `echoCommand` (NsLookup) | `parley.dns.nslookup.echoCommand` |
 
 The older names 1.0.0 still read with a warning (`UDPProcCount`, `TCPProcCount`, `Resolver.maxBacklog`, and

@@ -9,7 +9,7 @@
   `JDns.zone.dir` `parley.dns.zoneDir`, `JDns.udp.bindAddress` `parley.dns.udpBindAddress`, `JDns.dump.file`
   `parley.dns.udpDumpFile`, `JDns.ra` `parley.dns.recursionAvailable`, `JDns.jdbcURL` / `JDns.jdbcClass`
   `parley.dns.jdbcUrl` / `parley.dns.jdbcDriver`, `JDns.useDataBase` `parley.dns.useDatabase`, `JDns.properties`
-  `parley.dns.configFile` (the default file is still `JDns.properties`), and NsLookup's `echoCommand`
+  `parley.dns.configFile`, and the default config file `JDns.properties` is `parley-dns.properties`, and NsLookup's `echoCommand`
   `parley.dns.nslookup.echoCommand`. See the README's table.
 - The names 1.0.0 still read with a warning (`UDPProcCount`, `TCPProcCount`, `Resolver.maxBacklog`, and
   `name` / `port` for DnsAdminClient) are no longer read.
