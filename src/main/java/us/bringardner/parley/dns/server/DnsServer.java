@@ -1585,36 +1585,49 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 * Creation date: (8/26/2001 12:39:33 PM)
 	 * @param args java.lang.String[]
 	 */
-	public static void main(String[] args) {
+	public static void main(String[] args) throws Exception {
 		//  Log dead threads; on a JVM error (e.g. OutOfMemoryError) stop the
 		//  process so a supervisor restarts it (see FatalErrorHandler)
 		us.bringardner.parley.net.FatalErrorHandler.install(!"false".equalsIgnoreCase(
 				System.getProperty(PROP_EXIT_ON_FATAL_ERROR,"true").trim()));
 
-		us.bringardner.parley.dns.server.DnsServer svr = new DnsServer();
-		svr.start(true);
-		try {
-			svr.awaitStarted(0);
-		} catch (StartupException e) {
-			//  Only the program's entry point decides to end the process
-			//  (a non-zero code, so a supervisor can restart it).
-			svr.logError("Exiting with "+e.getExitCode());
-			System.exit(e.getExitCode());
-		} catch (IOException | InterruptedException e) {
-			svr.logError("Exiting with -1", e);
-			System.exit(-1);
-		}
+		us.bringardner.parley.net.server.ServerMain.run("DnsServer", args, PROP_DNS_PROPERTIES, DEFAULT_PROPERTIES_FILE_NAME, () -> {
+			DnsServer svr = new DnsServer();
+			return java.util.Collections.singletonList(new us.bringardner.parley.net.server.ServerMain.Service() {
+				@Override
+				public String name() {
+					return "DnsServer";
+				}
 
-		while(svr.isRunning()) {
-			try {
-				Thread.sleep(1000);
-			} catch (Exception e) {
-				svr.logError("Fatal server error",e);
-			}
-		}
+				@Override
+				public void startAndWait(long timeoutMillis) throws IOException {
+					svr.start(true);
+					try {
+						svr.awaitStarted(timeoutMillis);
+					} catch (InterruptedException e) {
+						Thread.currentThread().interrupt();
+						throw new IOException("Interrupted while the DNS server started", e);
+					}
+				}
 
-		svr.log("Exiting DNsServer.main shutdown="+DnsServer.isShutdown());
+				@Override
+				public int port() {
+					return Integer.getInteger(PROP_PORT, Message.DNSPORT);
+				}
 
+				@Override
+				public void stop(long timeoutMillis) throws InterruptedException {
+					svr.stopAndWait(timeoutMillis);
+				}
+
+				@Override
+				public void awaitStop() throws InterruptedException {
+					while( svr.isRunning() ) {
+						Thread.sleep(1000);
+					}
+				}
+			});
+		});
 	}
 
 	public List<Message> query(QueryData req) {

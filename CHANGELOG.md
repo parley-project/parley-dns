@@ -2,6 +2,12 @@
 
 ## parley-dns 2.0.0 (unreleased)
 
+### Changed
+
+- **`DnsServer.main` runs the server as a service** with parley-net's `ServerMain.run`: settings from the command
+  line (which wins) and `parley-dns.properties` in Parley's administrator folder (`/etc/parley`, or the file the server's
+  `configFile` property names); it stops on SIGTERM; with its fatal-error handler as before; a failed start exits with 1 (was -1 or -2).
+
 ### Changed (needs a configuration change)
 
 - **Property names** (Parley 2.0.0; the old names are no longer read): `JDns.*` is `parley.dns.*`. Most keep
