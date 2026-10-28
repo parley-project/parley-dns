@@ -57,8 +57,16 @@ own SOA).
     inherited at its name, and an inherited CNAME is left out where the domain has records of its own.
  +  The primary's SOA and DNSSEC records are not inherited. The SOA served is the domain's, with the sum of
     the two serials, so it goes up when either zone changes and secondaries transfer the domain again.
+ +  An inherited NS record below the apex (a delegation) is left out where the domain has records of its
+    own at or below its name, so it doesn't send them elsewhere.
  +  Dynamic updates of the domain change its own records (and its journal); an update or edit of the
     primary reaches every domain that inherits from it. Only one level: a primary can't inherit itself.
+    An update sees only the domain's own records: deleting an inherited record changes nothing (override
+    it with a record of its own instead), a prerequisite on an inherited record fails, and an SOA
+    prerequisite compares the domain's own serial.
+ +  When the primary isn't served (its file removed or broken), the domain keeps serving what it served
+    with it; at a start without the primary it serves only its own records. A serial that goes down (the
+    `$INHERIT` line removed, say) is logged: raise the zone file's serial above the one served.
  +  Inheriting zones are not signed (DNSSEC keys for them are not used).
 
 # Management (JMX)
@@ -69,10 +77,10 @@ marked own or inherited, the zone files that failed to load, `reload()`, and `cr
 which writes the domain's zone file (an `$INHERIT` line and an SOA like the primary's) and loads it. Records are
 changed with dynamic updates signed with a key in `parley.dns.updateKeys`, sent to its TCP port.
 
-`DnsServer.main` registers the bean on the platform MBean server (reach it with the JVM's
-`com.sun.management.jmxremote.*` settings). In parley-net's launcher, as `dns` in `parley.servers`
-(`DnsServerProvider`), the server is also `us.bringardner.parley:type=Server,name=dns`, like every Parley
-server, and its `Dns` bean is registered while it runs. One DNS server runs in a JVM.
+`DnsServer.main` runs parley-net's launcher with the DNS server (`DnsServerProvider`, `dns` in
+`parley.servers`), as the other Parley servers' main methods do: on the platform MBean server (reach it with
+the JVM's `com.sun.management.jmxremote.*` settings) the server is `us.bringardner.parley:type=Server,name=dns`,
+like every Parley server, and its `Dns` bean is registered while it runs. One DNS server runs in a JVM.
 
 # Dynamic update (RFC 2136)
 

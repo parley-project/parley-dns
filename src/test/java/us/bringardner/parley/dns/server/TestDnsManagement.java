@@ -150,6 +150,10 @@ public class TestDnsManagement {
 		assertEquals("ns1.primary.test", served.getSoa().getMname());
 
 		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("new.example", "primary.test"));
+		// an old journal of the name would be replayed into the new zone: refused
+		write("old.example.txt.jnl", "base 1\nbegin\nadd ghost.old.example. 300 IN A 6.6.6.6\nend\n");
+		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("old.example", "primary.test"));
+		assertFalse(new File(dir, "old.example.txt").exists());
 		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("other.example", "nowhere.test"));
 		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("../evil", "primary.test"));
 		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("bad_name.example", "primary.test"));

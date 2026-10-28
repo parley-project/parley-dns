@@ -157,6 +157,8 @@ public class Zone implements DNS {
 	 *     its own TXT at the apex replaces every inherited TXT there).</li>
 	 * <li>A CNAME can't share its name (RFC 1034 3.6.2): an own CNAME hides everything inherited at its
 	 *     name, and an inherited CNAME is left out where this zone has records of its own.</li>
+	 * <li>An inherited NS record below the apex (a delegation) is left out where this zone has records
+	 *     of its own at or below its name, which it would otherwise hide.</li>
 	 * <li>The parent's SOA and DNSSEC records are never inherited. Record data is copied as written:
 	 *     names in it (an MX's mail server, a CNAME's target) are not renamed, so they keep pointing at
 	 *     the parent's hosts.</li>
@@ -167,6 +169,19 @@ public class Zone implements DNS {
 	 * @param parent the zone it inherits from, unsigned
 	 * @return a new zone; {@link #getOwn()} gives 'own' back
 	 */
+	private static boolean ownAtOrBelow(java.util.Map<String, java.util.Set<Integer>> ownTypes, String name) {
+		if( ownTypes.containsKey(name) ) {
+			return true;
+		}
+		String suffix = "."+name;
+		for(String k : ownTypes.keySet()) {
+			if( k.endsWith(suffix) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	public static Zone inherit(Zone own, Zone parent) {
 		Zone z = own.copyForUpdate();
 		z.own = own;
@@ -195,10 +210,17 @@ public class Zone implements DNS {
 			} else {
 				continue;
 			}
-			java.util.Set<Integer> types = ownTypes.get(target.toLowerCase(java.util.Locale.ROOT));
+			String targetKey = target.toLowerCase(java.util.Locale.ROOT);
+			java.util.Set<Integer> types = ownTypes.get(targetKey);
+			//  An inherited NS below the apex is a delegation: it would send everything at and below
+			//  its name elsewhere, the zone's own records there too, so it isn't inherited over them
+			boolean ownAtOrBelow = !targetKey.equals(apex.toLowerCase(java.util.Locale.ROOT)) && ownAtOrBelow(ownTypes, targetKey);
 			for(RR rr : parent.rrs.get(i)) {
 				int t = rr.getType();
 				if( isNotInherited(t) ) {
+					continue;
+				}
+				if( t == NS && ownAtOrBelow ) {
 					continue;
 				}
 				if( types != null && (types.contains(CNAME) || t == CNAME || types.contains(t)) ) {

@@ -1595,6 +1595,16 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				}
 			}
 
+			//  A serial that went down (an edited zone file, or a zone that stopped inheriting) looks
+			//  older to the secondaries: they keep the zone they have
+			for(Zone z : zones.values()) {
+				Zone before = old.zones.get(z.getName().toLowerCase());
+				if( before != null && serialBefore(z.getSoa().getSerial(), before.getSoa().getSerial()) ) {
+					logError("Zone "+z.getName()+": its serial went down, from "+Integer.toUnsignedString(before.getSoa().getSerial())
+							+" to "+Integer.toUnsignedString(z.getSoa().getSerial())+"; secondaries won't transfer it. Raise the serial in its zone file"
+							+(z.isInherited() || before.isInherited() ? " (an inheriting zone serves its own serial plus its primary's)" : ""));
+				}
+			}
 			//  NOTIFY secondaries about new zones and changed serials (RFC 1996)
 			ZoneNotifier n = notifier;
 			if( n != null ) {
@@ -1626,12 +1636,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		us.bringardner.parley.net.FatalErrorHandler.install(!"false".equalsIgnoreCase(
 				System.getProperty(PROP_EXIT_ON_FATAL_ERROR,"true").trim()));
 
-		us.bringardner.parley.net.server.ServerMain.run("DnsServer", args, PROP_DNS_PROPERTIES, DEFAULT_PROPERTIES_FILE_NAME, () -> {
-			DnsServer svr = new DnsServer();
-			javax.management.MBeanServer mbeans = java.lang.management.ManagementFactory.getPlatformMBeanServer();
-			return java.util.Collections.singletonList(service(svr, "DnsServer",
-					bean -> svr.registerManagement(mbeans, "DnsServer"), n -> svr.unregisterManagement()));
-		});
+		//  A launcher with the DNS server (DnsServerProvider), as the other Parley servers' main methods:
+		//  JMX shows it as type=Server,name=dns (start, stop, restart) with its Dns bean, so a management
+		//  tool such as parley-mail-admin finds it like any other Parley server
+		us.bringardner.parley.net.server.ServerMain.launch("DnsServer", args, "dns");
 	}
 
 	/** Registers the management bean it is given; returns its name. */
@@ -2883,6 +2891,11 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		zoneSet = new ZoneSet(Collections.unmodifiableMap(zones), def, Collections.unmodifiableMap(byFile));
 	}
 
+	/** RFC 1982 serial arithmetic: is a before b? */
+	static boolean serialBefore(int a, int b) {
+		return a != b && (b - a) > 0;
+	}
+
 	/** When it started serving (ms since the epoch), or 0 */
 	public long getStartedAt() {
 		return running ? startedAt : 0;
@@ -2966,6 +2979,15 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		Zone parent = zones.get(from);
 		String key = "zone "+own.getName().toLowerCase();
 		if( parent == null ) {
+			//  The last version built with the primary is served while it's gone (its own records
+			//  alone would have a lower serial, which secondaries take for an older zone)
+			Zone last = zoneSet.zones.get(own.getName().toLowerCase());
+			if( last != null && last.isInherited() && last.getOwn() == own ) {
+				String why = "inherits from "+from+", which is not served: still serving the version built with it";
+				logError("Zone "+own.getName()+" "+why);
+				zoneErrors.put(key, why);
+				return last;
+			}
 			String why = "inherits from "+from+", which is not served: serving only its own records";
 			logError("Zone "+own.getName()+" "+why);
 			zoneErrors.put(key, why);

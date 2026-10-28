@@ -11,7 +11,12 @@
   serials and records), each zone's records marked own or inherited, load errors, reload, and making an
   inheriting zone for a new domain. `DnsServer.main` registers it on the platform MBean server.
 - **`DnsServerProvider`**: `dns` in parley-net's launcher (`parley.servers`), so DNS runs and is managed
-  like every Parley server (`us.bringardner.parley:type=Server,name=dns`), with its `Dns` bean while it runs.
+  like every Parley server (`us.bringardner.parley:type=Server,name=dns`), with its `Dns` bean while it runs;
+  `DnsServer.main` runs that launcher.
+
+### Fixed
+
+- The resolver's root servers (`sbelt.prop`) were added again at every start in the same JVM.
 
 ### Changed
 

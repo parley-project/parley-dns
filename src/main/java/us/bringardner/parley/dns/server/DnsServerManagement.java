@@ -3,7 +3,6 @@ package us.bringardner.parley.dns.server;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -121,7 +120,14 @@ class DnsServerManagement implements DnsServerMXBean {
 	}
 
 	@Override
-	public synchronized void createInheritingZone(String zone, String inheritFrom) throws Exception {
+	public void createInheritingZone(String zone, String inheritFrom) throws Exception {
+		//  (the server's lock: every bean of this server, and its reloads, take it)
+		synchronized(server) {
+			create(zone, inheritFrom);
+		}
+	}
+
+	private void create(String zone, String inheritFrom) throws Exception {
 		String name = zone == null ? "" : strip(zone.trim()).toLowerCase(Locale.ROOT);
 		String from = inheritFrom == null ? "" : strip(inheritFrom.trim()).toLowerCase(Locale.ROOT);
 		if( !DOMAIN.matcher(name).matches() ) {
@@ -142,6 +148,11 @@ class DnsServerManagement implements DnsServerMXBean {
 		if( file.exists() ) {
 			throw new IllegalArgumentException("The zone file "+file+" exists already");
 		}
+		File journal = new File(file.getPath()+".jnl");
+		if( journal.exists() ) {
+			//  It would be replayed into the new zone (an earlier zone of this name, made the same way)
+			throw new IllegalArgumentException("An old journal of the zone is there: "+journal+"; move it away first");
+		}
 		Soa soa = parent.getOwn().getSoa();
 		String text = "; "+name+": the records of "+from+", with this zone's own added or overriding them (by name and type)\n"
 				+"$INHERIT "+from+".\n"
@@ -150,13 +161,22 @@ class DnsServerManagement implements DnsServerMXBean {
 		File tmp = File.createTempFile("."+name, ".tmp", dir);
 		try {
 			Files.write(tmp.toPath(), text.getBytes(StandardCharsets.UTF_8));
-			Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE);
+			//  A link appears whole and fails if the file is there by now (a move would replace it)
+			Files.createLink(file.toPath(), tmp.toPath());
+		} catch(java.nio.file.FileAlreadyExistsException e) {
+			throw new IllegalArgumentException("The zone file "+file+" exists already");
 		} finally {
 			tmp.delete();
 		}
-		server.loadZones();
+		try {
+			server.loadZones();
+		} catch(Exception e) {
+			file.delete();
+			throw e;
+		}
 		if( server.getZone(name) == null ) {
-			throw new IllegalStateException("Made "+file+" but the zone didn't load; see the server's errors");
+			file.delete();
+			throw new IllegalStateException("Made "+file+" but the zone didn't load (removed again); see the server's errors");
 		}
 	}
 

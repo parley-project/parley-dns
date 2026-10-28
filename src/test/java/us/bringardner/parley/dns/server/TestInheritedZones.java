@@ -271,6 +271,40 @@ public class TestInheritedZones {
 	}
 
 	@Test
+	public void anInheritedDelegationDoesNotHideOwnRecords() throws Exception {
+		write("primary.test.txt", primary(11, "lab\tIN\tNS\tns.elsewhere.example.\nsub\tIN\tNS\tns.elsewhere.example.\n"));
+		write("child.test.txt", child(6, "lab\tIN\tA\t10.1.0.9\nhost.lab\tIN\tA\t10.1.0.10\n"));
+		server.loadZones();
+		assertTrue(data("child.test", "lab.child.test", DNS.NS).isEmpty(), "not inherited over own records");
+		Message m = ask("host.lab.child.test", DNS.A);
+		assertTrue(m.getHeader().getAA());
+		assertEquals("[host.lab.child.test A 10.1.0.10]", answers(m).toString());
+		assertEquals("[lab.child.test A 10.1.0.9]", answers(ask("lab.child.test", DNS.A)).toString());
+		// where the zone has nothing of its own, the delegation is inherited
+		assertEquals("[ns.elsewhere.example.]", data("child.test", "sub.child.test", DNS.NS).toString());
+	}
+
+	@Test
+	public void withoutItsPrimaryTheLastVersionIsKept() throws Exception {
+		assertEquals(15, server.getZone("child.test").getSoa().getSerial());
+		new File(dir, "primary.test.txt").delete();
+		write("other.test.txt", "@ IN SOA ns1 postmaster ( 1 3600 1800 1209600 300 )\n");
+		System.setProperty(DnsServer.PROP_DEFAULT_ZONE, "other.test");
+		server.loadZones();
+		Zone z = server.getZone("child.test");
+		assertEquals(15, z.getSoa().getSerial(), "its serial doesn't go down");
+		assertEquals("[10.0.0.25]", data("child.test", "mx1.child.test", DNS.A).toString());
+	}
+
+	@Test
+	public void serialArithmetic() {
+		assertTrue(DnsServer.serialBefore(5, 15));
+		assertFalse(DnsServer.serialBefore(15, 5));
+		assertFalse(DnsServer.serialBefore(5, 5));
+		assertTrue(DnsServer.serialBefore(0xfffffff0, 3), "wraps (RFC 1982)");
+	}
+
+	@Test
 	public void directiveRules() throws Exception {
 		String soa = "@\tIN\tSOA\tns1 postmaster ( 1 3600 1800 1209600 300 )\n";
 		assertThrows(IOException.class, () -> zone("twice.test", "$INHERIT a.test\n$INHERIT b.test\n"+soa));
