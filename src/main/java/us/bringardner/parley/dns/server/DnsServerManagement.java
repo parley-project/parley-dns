@@ -68,7 +68,7 @@ class DnsServerManagement implements DnsServerMXBean {
 			File f = own.getMasterFile();
 			ret.add(new DnsZoneInfo(strip(z.getName()), z.isInherited() ? own.getInheritFrom() : null,
 					Integer.toUnsignedLong(z.getSoa().getSerial()), Integer.toUnsignedLong(own.getSoa().getSerial()),
-					count(z.getUnsigned()), count(own), z.getSigned() != null, f == null ? null : f.getPath()));
+					count(z.getUnsigned()), count(own), z.getSigned() != null, f == null || own.isVirtual() ? null : f.getPath()));
 		}
 		return ret.toArray(new DnsZoneInfo[0]);
 	}
@@ -133,7 +133,12 @@ class DnsServerManagement implements DnsServerMXBean {
 		if( !DOMAIN.matcher(name).matches() ) {
 			throw new IllegalArgumentException("Not a domain name: "+zone);
 		}
-		if( server.getZone(name) != null ) {
+		Zone existing = server.getZone(name);
+		if( existing != null && existing.getOwn().isVirtual() ) {
+			throw new IllegalArgumentException("Zone "+name+" is served already: it is a mail domain, inheriting from "
+					+existing.getOwn().getInheritFrom()+"; its zone file is written when one of its records is changed");
+		}
+		if( existing != null ) {
 			throw new IllegalArgumentException("Zone "+name+" exists already");
 		}
 		Zone parent = server.getZone(from);
@@ -154,10 +159,7 @@ class DnsServerManagement implements DnsServerMXBean {
 			throw new IllegalArgumentException("An old journal of the zone is there: "+journal+"; move it away first");
 		}
 		Soa soa = parent.getOwn().getSoa();
-		String text = "; "+name+": the records of "+from+", with this zone's own added or overriding them (by name and type)\n"
-				+"$INHERIT "+from+".\n"
-				+"@\t"+soa.getTTL()+"\tIN\tSOA\t"+dot(soa.getMname())+" "+dot(soa.getRname())+" ( 1 "
-				+soa.getRefreash()+" "+soa.getRetry()+" "+soa.getExpire()+" "+soa.getMinimum()+" )\n";
+		String text = Zone.inheritingText(name, from, soa);
 		File tmp = File.createTempFile("."+name, ".tmp", dir);
 		try {
 			Files.write(tmp.toPath(), text.getBytes(StandardCharsets.UTF_8));
@@ -184,7 +186,4 @@ class DnsServerManagement implements DnsServerMXBean {
 		return n.endsWith(".") ? n.substring(0, n.length()-1) : n;
 	}
 
-	private static String dot(String n) {
-		return n.endsWith(".") ? n : n+".";
-	}
 }

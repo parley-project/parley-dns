@@ -278,6 +278,47 @@ public class Zone implements DNS {
 	}
 
 	/**
+	 * A zone read from text instead of its file: a mail domain's inheriting zone (see
+	 * DnsServer.loadZones), served with no zone file until one of its records is changed. Then
+	 * {@link #getVirtualText()} is written to masterFile, and the change to its journal beside it.
+	 * @param masterFile the file the zone will have (it does not exist)
+	 */
+	Zone(File masterFile, String text) throws IOException {
+		this();
+		this.masterFile = masterFile;
+		this.virtualText = text;
+		readZoneInfo();
+	}
+
+	//  The text of a zone that has no file yet (null for a zone read from its file)
+	private String virtualText;
+
+	/** Whether this zone was read from text and has no zone file (a mail domain's inheriting zone). */
+	public boolean isVirtual() {
+		return virtualText != null;
+	}
+
+	/** The text of a zone that has no file yet, or null. */
+	String getVirtualText() {
+		return virtualText;
+	}
+
+	/**
+	 * The zone file of a domain inheriting from another zone: a $INHERIT line and an SOA like the
+	 * other zone's, serial 1. The domain serves the other zone's records until it adds or overrides some.
+	 */
+	static String inheritingText(String name, String from, us.bringardner.parley.dns.Soa soa) {
+		return "; "+name+": the records of "+from+", with this zone's own added or overriding them (by name and type)\n"
+				+"$INHERIT "+from+".\n"
+				+"@\t"+soa.getTTL()+"\tIN\tSOA\t"+dot(soa.getMname())+" "+dot(soa.getRname())+" ( 1 "
+				+soa.getRefreash()+" "+soa.getRetry()+" "+soa.getExpire()+" "+soa.getMinimum()+" )\n";
+	}
+
+	private static String dot(String n) {
+		return n.endsWith(".") ? n : n+".";
+	}
+
+	/**
 	 * Add a resource record based on the info in this list.
 	 * the list represents a line from a master file
 	 **/
@@ -1208,7 +1249,9 @@ public class Zone implements DNS {
 		if( !includeStack.add(canonical) ) {
 			throw new IOException("$INCLUDE loop: "+file+" includes itself");
 		}
-		try(BufferedReader in = new BufferedReader(new FileReader(file))) {
+		//  (a zone with no file yet is read from its text; what it includes is read from files)
+		try(BufferedReader in = new BufferedReader(virtualText != null && depth == 0
+				? new java.io.StringReader(virtualText) : new FileReader(file))) {
 			LineSource src = new LineSource(in);
 			ZoneLine zl;
 			while( true ) {
@@ -1439,7 +1482,10 @@ public class Zone implements DNS {
 				throw new IOException(masterFile.getName()+" has DNSSEC records (DNSKEY, NSEC, NSEC3...) but no RRSIG:"
 						+" load a complete signed zone, or remove them and let the server sign the zone (keys in parley.dns.dnssecKeyDir)");
 			}
-			replayJournal();
+			if( virtualText == null ) {
+				//  (a zone with no file has no journal: an old one is refused when the file is written)
+				replayJournal();
+			}
 		} finally {
 			includeStack = null;
 		}

@@ -69,6 +69,29 @@ own SOA).
     `$INHERIT` line removed, say) is logged: raise the zone file's serial above the one served.
  +  Inheriting zones are not signed (DNSSEC keys for them are not used).
 
+# Mail domains (parley.dns.mailSettings)
+
+With `parley.dns.mailSettings` naming the mail servers' shared settings (the mail queue's `queue.properties`,
+which parley-mail-admin's Domains page edits), the mail domains need no zone files:
+
+ +  Each domain in its `domains` that has no zone of its own is served as a zone inheriting from
+    `parley.dns.masterZone` (as with `$INHERIT` above, with an SOA like the master's, serial 1), made in memory.
+    A domain added there is served within the maintenance round; one removed is no longer served.
+ +  Its zone file is written only when one of its records is changed (a dynamic update, e.g. from
+    parley-mail-admin's DNS page), so the change can be journaled beside it; from then on it is a zone with a
+    file, its own records overriding the master's, and it stays served if the domain leaves the list.
+    Writing it is refused while an old journal of that zone is there.
+ +  Each key in its `dkim.keys` (`domain:selector:keyfile`) is served at `selector._domainkey.domain`, from
+    the record text parley-mail-admin keeps beside the key (`keyfile.txt`), or made from the key itself
+    (an RSA key in PKCS#8 PEM), unless the zone has records at that name. A new key is served once the
+    settings or the key's files change.
+ +  The master zone answers `domain._report._dmarc.master` with `v=DMARC1` for each listed domain outside
+    the master's own (RFC 7489 7.1), so the reports an inherited DMARC record asks for, at an address in the
+    master domain, are sent.
+ +  Problems (a name that isn't a domain, a key that can't be read) are logged and reported with the zone
+    errors (JMX `getErrors`); the rest is served.
+ +  These records are not part of zone transfers: a secondary gets the zones' own and inherited records.
+
 # Management (JMX)
 
 `us.bringardner.parley:type=Dns,name=…` (`DnsServerMXBean`, an MXBean any JMX client can read) gives the
@@ -260,6 +283,7 @@ A bind address of `localhost` means this host's own name (its network address), 
 | `parley.dns.dnsDir` | `/data/services/dns/config` | Directory for the dynamic entries file, the TSIG key file and the root hints (`sbelt.prop`) |
 | `parley.dns.zoneDir` | `zones` | Directory of the zone files (`<zone>.txt`); a changed file is reloaded |
 | `parley.dns.masterZone` | required | The default zone: answers for the common domains (see Major Features) come from it |
+| `parley.dns.mailSettings` | none | The mail servers' shared settings (the mail queue's `queue.properties`): its domains are served from the master zone with no zone files, and its DKIM keys' records (see Mail domains) |
 | `parley.dns.dynamicFileName` | `dynamic.txt` | Dynamic entries file, relative to `parley.dns.dnsDir` (used without a database) |
 | `parley.dns.debug` | true | Debug logging checks; false skips the work of building debug messages |
 | `parley.dns.recursionAvailable` | true | Recursion available: resolve names that are not in our zones for clients that ask for it |

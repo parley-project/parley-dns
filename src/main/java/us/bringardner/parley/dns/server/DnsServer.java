@@ -171,6 +171,12 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	/** First wait (ms) for a NOTIFY answer, doubled after each attempt (default 2000). */
 	public static final String PROP_NOTIFY_TIMEOUT = "parley.dns.notifyTimeout";
 	public static final String PROP_USE_DATABASE = "parley.dns.useDatabase";
+	/**
+	 * The mail servers' shared settings (the mail queue's queue.properties, which parley-mail-admin
+	 * edits): its domains are served as zones inheriting from the master zone, with no zone file, and
+	 * its DKIM keys' records are served. Default: none. See {@link MailDomains}.
+	 */
+	public static final String PROP_MAIL_SETTINGS = "parley.dns.mailSettings";
 	/** Directory of the zones' DNSSEC keys (K&lt;zone&gt;.+alg+tag.key and .private). Default: the zone directory. A zone with keys is signed. */
 	public static final String PROP_DNSSEC_KEY_DIR = "parley.dns.dnssecKeyDir";
 	/** How long DNSSEC signatures are valid, e.g. 14d (the default); zones are signed again when a quarter of it is left. */
@@ -272,6 +278,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 	//  lower case domain -> domain. Read by query threads, written by admin threads.
 	private final Map<String, String> common = new ConcurrentHashMap<String, String>();
+	//  The mail domains (parley.dns.mailSettings), or null
+	private volatile MailDomains mailDomains;
 
 	/**
 	 * Dynamic A records: lower case name -> unmodifiable list holding one A.
@@ -1467,7 +1475,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		if( zoneDir == null || seen == null ) {
 			return true;
 		}
-		return !currentZoneFiles().equals(seen) || dnssecKeysChanged();
+		MailDomains md = mailDomains;
+		return !currentZoneFiles().equals(seen) || dnssecKeysChanged() || (md != null && md.changed());
 	}
 
 	/**
@@ -1487,6 +1496,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 		Map<String, Long> seen = new HashMap<String, Long>();
 		reloadDnssecKeys();
+		MailDomains md = readMailDomains();
 		try {
 			if( !zoneDir.exists() ) {
 				throw new IOException(PROP_ZONE_DIR+" ="+zoneDir+" does not exist!!! exiting from "+getClass().getName());
@@ -1545,6 +1555,9 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				}
 			}
 
+			//  The mail domains with no zone of their own: zones inheriting from the master zone, with no file
+			List<Zone> virtual = mailDomainZones(md, zones);
+
 			//  DNSSEC: sign the zones that have keys (a zone whose data, keys and
 			//  dynamic entries did not change keeps its signatures)
 			Map<String, Zone> unsignedByName = new HashMap<String, Zone>();
@@ -1579,6 +1592,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 						zones.put(k, served);
 					}
 				}
+			}
+
+			for(Zone v : virtual) {
+				zones.put(v.getName().toLowerCase(), withInherited(v, zones));
 			}
 
 			Zone def = zones.get(defaultZoneName.toLowerCase());
@@ -1619,6 +1636,121 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			//  Remember what we looked at, even on failure, so we only try again when something changes
 			lastSeenZoneFiles = seen;
 		}
+	}
+
+	/** The mail domains (parley.dns.mailSettings) read again if they changed, or null when not set. */
+	private MailDomains readMailDomains() {
+		String name = getProperty(PROP_MAIL_SETTINGS, null);
+		if( name == null || name.trim().isEmpty() ) {
+			mailDomains = null;
+			return null;
+		}
+		File f = new File(name.trim());
+		MailDomains md = mailDomains;
+		if( md == null || !md.getFile().equals(f) ) {
+			md = new MailDomains(f);
+			mailDomains = md;
+		}
+		if( md.reload() ) {
+			MailDomains.Snapshot s = md.get();
+			log(PROP_MAIL_SETTINGS+"="+f+": domains "+s.domains+", DKIM records at "+new java.util.TreeSet<String>(s.dkim.keySet()));
+		}
+		return md;
+	}
+
+	/**
+	 * The zones of the mail domains with no zone of their own: each inherits from the master zone and
+	 * has an SOA like its, serial 1, as {@link DnsServerManagement#createInheritingZone} would write;
+	 * no file is written until one of its records is changed.
+	 */
+	private List<Zone> mailDomainZones(MailDomains md, Map<String, Zone> zones) {
+		zoneErrors.keySet().removeIf(k -> k.startsWith("mail domains"));
+		List<Zone> ret = new ArrayList<Zone>();
+		if( md == null ) {
+			return ret;
+		}
+		MailDomains.Snapshot s = md.get();
+		for(String e : s.errors) {
+			zoneErrors.put("mail domains "+e, e);
+			logError(PROP_MAIL_SETTINGS+": "+e);
+		}
+		String master = defaultZoneName.toLowerCase();
+		Zone parent = zones.get(master);
+		if( parent == null || parent.getInheritFrom() != null ) {
+			return ret;
+		}
+		for(String d : s.domains) {
+			if( zones.containsKey(d) ) {
+				continue;
+			}
+			try {
+				Zone v = new Zone(new File(zoneDir, d+".txt"), Zone.inheritingText(d, master, parent.getSoa()));
+				zones.put(d, v);
+				ret.add(v);
+			} catch(IOException | RuntimeException e) {
+				zoneErrors.put("mail domains "+d, String.valueOf(e.getMessage()));
+				logError("Can't serve the mail domain "+d, e);
+			}
+		}
+		return ret;
+	}
+
+	/** Whether the mail domains' settings changed (for tests). */
+	boolean mailDomainsChanged() {
+		MailDomains md = mailDomains;
+		return md != null && md.changed();
+	}
+
+	/** A mail domain's DKIM record, or a DMARC report authorization, at a name the zone has no records at. */
+	private List<RR> mailRecords(String target, Zone zone) {
+		MailDomains md = mailDomains;
+		if( md == null ) {
+			return null;
+		}
+		boolean master = zone == zoneSet.defaultZone;
+		String text = md.txt(target, master ? defaultZoneName : null);
+		if( text == null || !(stripDot(target).toLowerCase().equals(stripDot(zone.getName()).toLowerCase())
+				|| stripDot(target).toLowerCase().endsWith("."+stripDot(zone.getName()).toLowerCase())) ) {
+			return null;
+		}
+		us.bringardner.parley.dns.Txt txt = new us.bringardner.parley.dns.Txt(stripDot(target));
+		txt.setText(text);
+		txt.setTTL(zone.getSoa().getMinimum() > 0 ? Math.max(300, zone.getSoa().getMinimum()) : 3600);
+		List<RR> ret = new ArrayList<RR>();
+		ret.add(txt);
+		return ret;
+	}
+
+	private boolean mailNamesBelow(String target, Zone zone) {
+		MailDomains md = mailDomains;
+		return md != null && md.hasNamesBelow(target, zone == zoneSet.defaultZone ? defaultZoneName : null);
+	}
+
+	/**
+	 * Write the zone file of a mail domain's zone (it had none), so a change to its records can be
+	 * journaled beside it. From then on it is a zone with a file like any other.
+	 */
+	private void writeZoneFile(Zone own) throws IOException {
+		File file = own.getMasterFile();
+		if( file.exists() ) {
+			return;
+		}
+		File journal = new File(file.getPath()+".jnl");
+		if( journal.exists() ) {
+			//  It would be replayed into the zone (an earlier zone of this name)
+			throw new IOException("An old journal of the zone is there: "+journal+"; move it away first");
+		}
+		File tmp = File.createTempFile("."+file.getName(), ".tmp", file.getParentFile());
+		try {
+			java.nio.file.Files.write(tmp.toPath(), own.getVirtualText().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			//  A link appears whole and fails if the file is there by now
+			java.nio.file.Files.createLink(file.toPath(), tmp.toPath());
+		} catch(java.nio.file.FileAlreadyExistsException e) {
+			//  written meanwhile
+		} finally {
+			tmp.delete();
+		}
+		log("Wrote the zone file of the mail domain "+own.getName()+": "+file);
 	}
 
 	public Zone getDefaultZone() {
@@ -2297,6 +2429,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			//  No dynamic entry then do a normal search.
 			list = zone.getMatchingRRs(targetName);
 		}
+		if( list == null ) {
+			//  A mail domain's DKIM record, or a DMARC report authorization (parley.dns.mailSettings)
+			list = mailRecords(target, zone);
+		}
 		//  ANY at the apex includes the SOA (the zone keeps it apart from the
 		//  other records, so it was left out); the apex exists even when the
 		//  SOA is its only record
@@ -2314,7 +2450,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			//  non-terminal (has names below it), which exists: NODATA.
 			//  Either way the SOA goes in the authority section (RFC 2308 3).
 			//  After a CNAME this also sets the final RCODE (RFC 6604).
-			if( signedName ? zone.getSigned().isEmptyNonTerminal(target) : zone.hasNamesBelow(target) ) {
+			if( signedName ? zone.getSigned().isEmptyNonTerminal(target)
+					: (zone.hasNamesBelow(target) || mailNamesBelow(target, zone)) ) {
 				//  (in a signed zone a name with only a wildcard below it exists too, RFC 4592 2.2.2)
 				ret.setResponseCodeNoError();
 			} else {
@@ -2779,6 +2916,16 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			//  An UPDATE changes the zone's own records: a zone with $INHERIT is built from them and its
 			//  primary's again (a signed zone is updated without its DNSSEC records, then signed again)
 			Zone own = zone.getOwn();
+			if( own.isVirtual() ) {
+				//  A mail domain's zone has no file until its records change: write it now, for the journal
+				try {
+					writeZoneFile(own);
+				} catch(IOException ex) {
+					logError("UPDATE of "+zone.getName()+" not made: can't write its zone file", ex);
+					ret.setResponseCodeServerFailure();
+					return ret;
+				}
+			}
 			try {
 				r = ZoneUpdater.apply(own, reqMsg);
 			} catch(RuntimeException ex) {
