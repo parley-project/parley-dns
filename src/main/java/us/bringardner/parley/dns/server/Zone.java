@@ -568,26 +568,32 @@ public class Zone implements DNS {
 		Name name = rr.getNameAsName();
 		name.setDoWildCard(false);
 
-		List<RR> v = getMatchingRRs(name);
-		if( v == null ) {
+		//  The entry at exactly this name, a wildcard name included: never one a
+		//  wildcard matches (RFC 4592 matching is for queries, not for loading)
+		java.util.Map<String,Integer> exact = exactIndex;
+		java.util.Set<String> anc = ancestorIndex;
+		if( exact == null || anc == null ) {
+			buildIndex();
+			exact = exactIndex;
+			anc = ancestorIndex;
+		}
+		String key = indexKey(name);
+		Integer at = exact.get(key);
+		List<RR> v;
+		if( at != null ) {
+			v = rrs.get(at);
+		} else {
 			v = new ArrayList<RR>();
 			names.add(name);
-			//  The name was just appended and nothing before it matches it
-			//  (getMatchingRRs found nothing); indexOf() made loading quadratic
-			rrs.add(names.size()-1,v);
-			//  Keep the index current (rebuilding it per record would make
+			int i = names.size()-1;
+			rrs.add(i,v);
+			//  Keep the indexes current (rebuilding them per record would make
 			//  loading quadratic)
-			java.util.Map<String,Integer> exact = exactIndex;
-			List<Integer> wild = wildIndex;
-			java.util.Set<String> anc = ancestorIndex;
-			if( exact != null && wild != null && anc != null ) {
-				int i = names.size()-1;
-				if( name.hasWildCard() ) {
-					wild.add(i);
-				} else {
-					exact.putIfAbsent(indexKey(name), i);
-				}
-				addAncestors(anc, indexKey(name));
+			exact.putIfAbsent(key, i);
+			addAncestors(anc, key);
+			java.util.Map<String,Integer> pos = positionIndex;
+			if( pos != null ) {
+				pos.putIfAbsent(key, i);
 			}
 		}
 
@@ -694,17 +700,32 @@ public class Zone implements DNS {
 	}
 
 	//  Lookup index (rebuilt lazily after the names change):
-	//  lower-case exact name -> position of its first entry; positions of wildcard names in order
+	//  lower-case name (wildcard names too, as written) -> position of its first entry
 	private volatile java.util.Map<String,Integer> exactIndex;
-	private volatile List<Integer> wildIndex;
-	//  Every proper ancestor (lower case) of the names without a '*': the
-	//  names that have names below them (see hasNamesBelow)
+	//  Every proper ancestor (lower case) of every name: the names that have
+	//  names below them (see hasNamesBelow). A wildcard name counts: *.x.example
+	//  makes x.example exist (RFC 4592 2.2.2)
 	private volatile java.util.Set<String> ancestorIndex;
 
+	/**
+	 * Whether a name (lower case, no trailing dot) is a wildcard: its leftmost
+	 * label is '*' (RFC 4592 2.1.1). A '*' anywhere else is an ordinary label.
+	 */
+	static boolean isWildcardOwner(String key) {
+		return key.equals("*") || key.startsWith("*.");
+	}
+
+	/**
+	 * Whether a record found for a query name came from a wildcard (RFC 4592):
+	 * its owner is a wildcard name other than the query name itself. Such a
+	 * record is answered with the query name as its owner.
+	 */
+	public static boolean isFromWildcard(RR rr, String qname) {
+		String owner = stripDot(rr.getName()).toLowerCase(java.util.Locale.ROOT);
+		return isWildcardOwner(owner) && !owner.equals(stripDot(qname).toLowerCase(java.util.Locale.ROOT));
+	}
+
 	private static void addAncestors(java.util.Set<String> anc, String key) {
-		if( key.indexOf('*') >= 0 ) {
-			return;
-		}
 		for(int dot = key.indexOf('.'); dot >= 0; dot = key.indexOf('.', dot+1) ) {
 			if( !anc.add(key.substring(dot+1)) ) {
 				//  its ancestors are there already
@@ -720,20 +741,13 @@ public class Zone implements DNS {
 	/** Build the lookup index from names. */
 	private synchronized void buildIndex() {
 		java.util.Map<String,Integer> exact = new java.util.HashMap<String,Integer>();
-		List<Integer> wild = new ArrayList<Integer>();
 		java.util.Set<String> anc = java.util.concurrent.ConcurrentHashMap.newKeySet();
 		for(int i=0,sz=names.size(); i< sz; i++ ) {
-			Name n = names.get(i);
-			String key = indexKey(n);
-			if( n.hasWildCard() ) {
-				wild.add(i);
-			} else {
-				exact.putIfAbsent(key, i);
-			}
+			String key = indexKey(names.get(i));
+			exact.putIfAbsent(key, i);
 			addAncestors(anc, key);
 		}
 		ancestorIndex = anc;
-		wildIndex = wild;
 		exactIndex = exact;
 	}
 
@@ -748,7 +762,6 @@ public class Zone implements DNS {
 	 */
 	private void invalidateQueryIndex() {
 		exactIndex = null;
-		wildIndex = null;
 		ancestorIndex = null;
 	}
 
@@ -771,37 +784,6 @@ public class Zone implements DNS {
 			}
 			positionDuplicates = dups;
 			positionIndex = ret;
-		}
-		return ret;
-	}
-
-	/**
-	 * Position of the entry matching name: the first non-wildcard name equal
-	 * to it (case-insensitive), otherwise the last matching wildcard name,
-	 * otherwise -1. Uses a hash lookup plus the (few) wildcard names instead
-	 * of comparing against every name in the zone.
-	 */
-	private int getMatchingIndex(Name name){
-		if( name.hasWildCard() ) {
-			//  A query name with a '*' label matches differently: keep the scan
-			return linearMatchingIndex(name);
-		}
-		java.util.Map<String,Integer> exact = exactIndex;
-		List<Integer> wild = wildIndex;
-		if( exact == null || wild == null ) {
-			buildIndex();
-			exact = exactIndex;
-			wild = wildIndex;
-		}
-		Integer hit = exact.get(indexKey(name));
-		if( hit != null ) {
-			return hit;
-		}
-		int ret = -1;
-		for(int i : wild) {
-			if( names.get(i).equals(name) ) {
-				ret = i;
-			}
 		}
 		return ret;
 	}
@@ -859,29 +841,10 @@ public class Zone implements DNS {
 		return null;
 	}
 
-	/** The original linear scan (reference behaviour; used for '*' query names and by tests). */
-	int linearMatchingIndex(Name name){
-		int ret = -1;
-		int wild = -1;
-		Name n = null;
-		for(int i=0,sz=names.size(); i< sz && ret == -1; i++ ) {
-			n = (Name)names.get(i);
-			if( n.equals(name) ) {
-				if( n.hasWildCard() ) {
-					wild = i;
-				} else {
-					ret = i;
-				}
-			}
-		}
-
-		if( ret == -1 ) {
-			ret = wild;
-		}
-
-		return ret;
-	}
-
+	/**
+	 * The first record of a type at a name, wildcards matched (RFC 4592); a
+	 * record from a wildcard comes back as a copy with the name as its owner.
+	 */
 	public RR getMatchingRR(String name, int type){
 		RR ret = null;
 		List<RR> list = getMatchingRRs(name);
@@ -894,6 +857,10 @@ public class Zone implements DNS {
 					break;
 				}
 			}
+		}
+		if( ret != null && isFromWildcard(ret, name) ) {
+			ret = ret.copy();
+			ret.setName(stripDot(name));
 		}
 
 
@@ -908,19 +875,15 @@ public class Zone implements DNS {
 	}
 
 	/**
-	 * Name lookup with the wildcard rules of RFC 4592, used in signed zones
-	 * (validators check answers against them): a name that exists, even as
-	 * an empty non-terminal, is never matched by a wildcard; otherwise only
-	 * the wildcard directly below the closest encloser matches, however many
-	 * labels the name has below it.
+	 * Name lookup in a signed zone, with the wildcard rules of RFC 4592 (see
+	 * {@link #getMatchingRRs(Name)}), using the signed zone's names so the
+	 * answer agrees with its NSEC/NSEC3 proofs.
 	 */
 	private List<RR> strictMatchingRRs(String key, SignedZone sz) {
 		java.util.Map<String,Integer> exact = exactIndex;
-		List<Integer> wild = wildIndex;
-		if( exact == null || wild == null ) {
+		if( exact == null ) {
 			buildIndex();
 			exact = exactIndex;
-			wild = wildIndex;
 		}
 		Integer hit = exact.get(key);
 		if( hit != null ) {
@@ -929,37 +892,68 @@ public class Zone implements DNS {
 		if( sz.isEmptyNonTerminal(key) ) {
 			return null;
 		}
-		String source = "*."+sz.closestEncloser(key);
-		for(int i : wild) {
-			if( indexKey(names.get(i)).equals(source) ) {
-				return rrs.get(i);
-			}
+		Integer w = exact.get("*."+sz.closestEncloser(key));
+		return w == null ? null : rrs.get(w);
+	}
+
+	/**
+	 * Name lookup with the wildcard rules of RFC 4592, for every zone, signed
+	 * or not:
+	 * <ol>
+	 * <li>the records at the name itself, if it has any (a name with a '*'
+	 *     label is looked up as written, so *.example finds the wildcard);</li>
+	 * <li>none (null) if the name owns no records but names below it do: an
+	 *     empty non-terminal exists, so the answer is NODATA, not a wildcard;</li>
+	 * <li>otherwise the records of the wildcard directly below the closest
+	 *     encloser (the name's nearest ancestor that exists), however many
+	 *     labels the name has below it; an empty list if that wildcard exists
+	 *     only as an empty non-terminal;</li>
+	 * <li>otherwise null (NXDOMAIN).</li>
+	 * </ol>
+	 * Only a '*' that is the leftmost label is a wildcard; one anywhere else is
+	 * an ordinary label. Wildcards apply only to names below the zone's apex.
+	 * Records from a wildcard keep the wildcard as their owner: the caller
+	 * answers them under the query name (see {@link #isFromWildcard(RR, String)}).
+	 */
+	public List<RR> getMatchingRRs(Name name){
+		String key = indexKey(name);
+		SignedZone sz = signed;
+		if( sz != null && us.bringardner.parley.dns.dnssec.Canonical.isBelow(key, sz.apex, true) ) {
+			return strictMatchingRRs(key, sz);
+		}
+		java.util.Map<String,Integer> exact = exactIndex;
+		java.util.Set<String> anc = ancestorIndex;
+		if( exact == null || anc == null ) {
+			buildIndex();
+			exact = exactIndex;
+			anc = ancestorIndex;
+		}
+		Integer hit = exact.get(key);
+		if( hit != null ) {
+			return rrs.get(hit);
+		}
+		if( anc.contains(key) ) {
+			return null;
+		}
+		String apex = this.name == null ? "" : stripDot(this.name).toLowerCase(java.util.Locale.ROOT);
+		if( !key.endsWith("."+apex) ) {
+			//  The apex itself, or a name outside the zone: no wildcard applies
+			return null;
+		}
+		String ce = key;
+		do {
+			ce = ce.substring(ce.indexOf('.')+1);
+		} while( !ce.equals(apex) && !exact.containsKey(ce) && !anc.contains(ce) );
+		String source = "*."+ce;
+		Integer w = exact.get(source);
+		if( w != null ) {
+			return rrs.get(w);
+		}
+		if( anc.contains(source) ) {
+			//  The wildcard exists with nothing at it (only names below it): NODATA
+			return new ArrayList<RR>();
 		}
 		return null;
-	}
-
-	/** For tests: the entry the original linear scan finds, or null. */
-	List<RR> linearMatchingRRs(Name name){
-		int idx = linearMatchingIndex(name);
-		return idx >= 0 ? rrs.get(idx) : null;
-	}
-
-	public List<RR> getMatchingRRs(Name name){
-		SignedZone sz = signed;
-		if( sz != null && !name.hasWildCard() ) {
-			String key = indexKey(name);
-			if( us.bringardner.parley.dns.dnssec.Canonical.isBelow(key, sz.apex, true) ) {
-				return strictMatchingRRs(key, sz);
-			}
-		}
-		int idx = getMatchingIndex(name);
-
-		List<RR> ret = null;
-		if( idx >= 0 ) {
-			ret = rrs.get(idx);
-		}
-
-		return ret;
 	}
 
 	/**
@@ -1261,6 +1255,7 @@ public class Zone implements DNS {
 						break;
 					}
 					lineNumber = zl.lineNumber;
+					currentLine = lineNumber;
 					processLine(file, zl.text, depth);
 				} catch(ZoneFileException e) {
 					throw e;
@@ -1270,6 +1265,44 @@ public class Zone implements DNS {
 			}
 		} finally {
 			includeStack.remove(canonical);
+		}
+	}
+
+	//  The line processLine is reading (for warnings)
+	private transient int currentLine;
+	//  Warnings from loading the zone file, e.g. a '*' that isn't the leftmost label
+	private final List<String> loadWarnings = new ArrayList<String>();
+	//  Names already warned about (one warning per name, not per record)
+	private transient java.util.Set<String> warnedNames;
+
+	/** Warnings from loading the zone file (each was logged too); empty if none. */
+	public List<String> getLoadWarnings() {
+		return java.util.Collections.unmodifiableList(loadWarnings);
+	}
+
+	/**
+	 * A '*' label that isn't the leftmost one was a positional pattern before
+	 * RFC 4592 wildcards (e.g. *.*. for any 2-label name). It is now an ordinary
+	 * label, so the entry matches only that literal name: say so, once per name.
+	 */
+	private void warnIfPositional(File file, String owner) {
+		String abs = stripDot(absolute(owner));
+		String [] labels = abs.split("\\.");
+		for(int i=1; i < labels.length; i++ ) {
+			if( labels[i].equals("*") ) {
+				if( warnedNames == null ) {
+					warnedNames = new java.util.HashSet<String>();
+				}
+				if( warnedNames.add(abs.toLowerCase(java.util.Locale.ROOT)) ) {
+					String w = "Warning in "+file.getName()+" at line "+currentLine+": '"+owner
+							+"' has a '*' that isn't its leftmost label. Wildcards follow RFC 4592: only a leftmost '*'"
+							+" is a wildcard, so this entry is an ordinary name that matches only "+abs
+							+" (positional patterns such as *.*. are no longer supported)";
+					loadWarnings.add(w);
+					LOG.logWarn(w);
+				}
+				return;
+			}
 		}
 	}
 
@@ -1318,6 +1351,7 @@ public class Zone implements DNS {
 				list.remove(2);
 			}
 			addRR(list);
+			warnIfPositional(file, owner);
 		}
 		lastOwner = absolute(owner);
 	}
@@ -2039,7 +2073,7 @@ public class Zone implements DNS {
 		String suffix = "."+name.toLowerCase();
 		for(Name n : names) {
 			String s = n.toString().toLowerCase();
-			if( s.indexOf('*') < 0 && s.endsWith(suffix) ) {
+			if( s.endsWith(suffix) ) {
 				return true;
 			}
 		}

@@ -2451,8 +2451,9 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			//  Either way the SOA goes in the authority section (RFC 2308 3).
 			//  After a CNAME this also sets the final RCODE (RFC 6604).
 			if( signedName ? zone.getSigned().isEmptyNonTerminal(target)
-					: (zone.hasNamesBelow(target) || mailNamesBelow(target, zone)) ) {
-				//  (in a signed zone a name with only a wildcard below it exists too, RFC 4592 2.2.2)
+					: (zone.hasNamesBelow(target) || mailNamesBelow(target, zone) || isZoneApex(target, zone)) ) {
+				//  (a name with only a wildcard below it exists too, RFC 4592 2.2.2; so does a
+				//  zone apex, or a domain served by the default zone, which has its SOA)
 				ret.setResponseCodeNoError();
 			} else {
 				ret.setResponseCodeNameError();
@@ -2462,11 +2463,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 			//  Since we found the name it's not a name error even if we may not have the type
 			ret.setResponseCodeNoError();
-			//  A wildcard match in a signed zone (RFC 4592): the records get the
-			//  query name as owner, however many labels the '*' stands for; the
+			//  A wildcard match (RFC 4592): the records get the query name as
+			//  owner, however many labels the '*' stands for; in a signed zone the
 			//  wildcard's NSEC is not part of the answer
-			boolean fromWildcard = signedName && !list.isEmpty() && list.get(0).getNameAsName().hasWildCard()
-					&& !targetName.hasWildCard();
+			boolean fromWildcard = !list.isEmpty() && Zone.isFromWildcard(list.get(0), target);
 
 			for(int i=0,sz=list.size(); i< sz; i++ ) {
 				rr = (RR)list.get(i);
@@ -2474,9 +2474,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 					continue;
 				}
 				if( (myType=rr.getType()) == type || myType == DNS.CNAME || type == DNS.QTYPE_ALL)  {
-					//  Just in case the match is a wild card
 					RR realrr = rr.copy();
-					realrr.replaceWildCards(targetName);
 					if( fromWildcard ) {
 						realrr.setName(targetName.toString());
 					}
@@ -2537,14 +2535,15 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 					}
 				}  else if( myType == DNS.NS && type != DNS.A) {
 					RR realrr = rr.copy();
-					realrr.replaceWildCards(targetName);
+					if( fromWildcard ) {
+						realrr.setName(targetName.toString());
+					}
 					ret.addAuthority(realrr);
 					Ns ns = (Ns)realrr;
+					//  (a glue address from a wildcard comes back named after the server)
 					RR aa = zone.getMatchingRR(ns.getNs(),DNS.A);
 					if( aa != null ) {
-						realrr = aa.copy();
-						realrr.replaceWildCards(targetName);
-						ret.addAdditional(realrr);
+						ret.addAdditional(aa.copy());
 					}
 				}
 			}
@@ -2591,11 +2590,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		for(RR rr : cut) {
 			String host = ((Ns)rr).getNs();
 			for(int t : new int[] {DNS.A, DNS.AAAA}) {
+				//  (an address from a wildcard comes back named after the host)
 				RR glue = zone.getMatchingRR(host, t);
 				if( glue != null ) {
-					RR g = glue.copy();
-					g.replaceWildCards(new Name(host));
-					ret.addAdditional(g);
+					ret.addAdditional(glue.copy());
 				}
 			}
 		}
@@ -3248,7 +3246,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 	}
 
-	/** Copies of the records of a type at a name in a zone (wildcards expanded). */
+	/** Copies of the records of a type at a name in a zone (from a wildcard: named after the name, RFC 4592). */
 	private static List<RR> localRRs(Zone zone, Name name, int type) {
 		List<RR> ret = new ArrayList<RR>();
 		List<RR> list = zone.getMatchingRRs(name);
@@ -3256,7 +3254,9 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			for(RR rr : list) {
 				if( rr.getType() == type ) {
 					RR copy = rr.copy();
-					copy.replaceWildCards(name);
+					if( Zone.isFromWildcard(rr, name.toString()) ) {
+						copy.setName(name.toString());
+					}
 					ret.add(copy);
 				}
 			}

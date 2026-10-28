@@ -25,13 +25,14 @@ package us.bringardner.parley.dns.server;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
-import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.AfterAll;
@@ -39,12 +40,13 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import us.bringardner.parley.dns.Name;
+import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Fixtures;
 
 /**
- * Offline tests: the indexed zone lookup returns exactly what the original
- * linear scan returns (same entry object) for exact names, wildcards,
- * misses and mixed case; and it is faster on a large zone.
+ * Offline tests of the zone's lookup index: exact names, mixed case,
+ * wildcards (RFC 4592, see also TestRfc4592Wildcards) and misses; the
+ * empty non-terminal set agrees with a scan and is faster than one.
  */
 public class TestZoneIndex {
 
@@ -63,7 +65,6 @@ public class TestZoneIndex {
 				+"\t\tNS\tns1\n"
 				+"ns1\tIN\tA\t10.0.0.53\n"
 				+"*.wild\tIN\tA\t10.0.0.1\n"
-				+"*.*\tIN\tA\t10.0.0.2\n"
 				+"exact.wild\tIN\tA\t10.0.0.3\n");
 		for(int i=0; i< 5000; i++ ) {
 			z.append("h"+i+"\tIN\tA\t10.1."+(i/250)+"."+(1+i%250)+"\n");
@@ -83,41 +84,33 @@ public class TestZoneIndex {
 		dir.delete();
 	}
 
-	private static void assertSameAsScan(Zone z, String name) {
-		Name n = new Name(name);
-		assertSame(z.linearMatchingRRs(n), z.getMatchingRRs(n), name);
-	}
-
 	@Test
-	public void sameResultsAsTheScan() {
-		String [] names = {
-				"big.test", "ns1.big.test", "NS1.Big.Test", "h0.big.test", "h4999.big.test", "H2500.BIG.test",
-				"anything.wild.big.test", "exact.wild.big.test", "EXACT.wild.big.test",
-				"a.b.big.test", "x.y.z.big.test", "nope.big.test", "h5000.big.test", "big.testx"
-		};
-		for(String n : names) {
-			assertSameAsScan(big, n);
-		}
+	public void lookups() {
+		List<RR> wild = big.getMatchingRRs(new Name("*.wild.big.test"));
+		assertNotNull(wild, "a query for the wildcard itself finds it");
+		assertSame(wild, big.getMatchingRRs(new Name("anything.wild.big.test")));
+		assertSame(wild, big.getMatchingRRs(new Name("a.b.wild.big.test")), "a '*' stands for any number of labels");
+		List<RR> exact = big.getMatchingRRs(new Name("exact.wild.big.test"));
+		assertNotNull(exact);
+		assertNotSame(wild, exact, "an existing name is never matched by a wildcard");
+		assertSame(exact, big.getMatchingRRs(new Name("EXACT.Wild.big.test")));
+		assertNull(big.getMatchingRRs(new Name("wild.big.test")), "an empty non-terminal owns nothing");
+		assertNull(big.getMatchingRRs(new Name("below.exact.wild.big.test")), "no *.exact.wild.big.test");
 		assertNotNull(big.getMatchingRRs(new Name("h4999.big.test")));
+		assertSame(big.getMatchingRRs(new Name("h2500.big.test")), big.getMatchingRRs(new Name("H2500.BIG.test")));
 		assertNull(big.getMatchingRRs(new Name("nope.big.test")));
+		assertNull(big.getMatchingRRs(new Name("h5000.big.test")));
+		assertNull(big.getMatchingRRs(new Name("big.testx")));
 	}
 
 	@Test
-	public void sameResultsOnTheFixtureZone() {
-		// foo.com has several wildcard layers (*.*., *.*.*., dev.*.*., dns2.*.*.)
-		String [] names = {
-				"foo.com", "www.foo.com", "ns1.foo.com", "mail.foo.com", "_dmarc.foo.com",
-				"xxx.com", "www.xxx.com", "dev.xxx.com", "dns2.xxx.com", "a.b.c.d", "nothing.here.at.all.x"
-		};
-		for(String n : names) {
-			assertSameAsScan(fixture, n);
-		}
-	}
-
-	@Test
-	public void wildcardQueryNameUsesTheScan() {
-		assertSameAsScan(big, "*.wild.big.test");
-		assertSameAsScan(big, "*.big.test");
+	public void theOldPatternsAreOrdinaryNames() {
+		// foo.com's *.*., *.*.*., dev.*.*. and dns2.*.*. no longer match by label count
+		assertNotNull(fixture.getMatchingRRs(new Name("www.foo.com")));
+		assertNull(fixture.getMatchingRRs(new Name("xxx.com")));
+		assertNull(fixture.getMatchingRRs(new Name("dev.xxx.com")));
+		assertNull(fixture.getMatchingRRs(new Name("a.b.c.d")));
+		assertTrue(fixture.getLoadWarnings().size() > 0, "they load with a warning");
 	}
 
 	private static final String [] BELOW = {
@@ -169,23 +162,5 @@ public class TestZoneIndex {
 		assertEquals(true, indexed < scan, "the set lookup should beat the scan");
 	}
 
-	@Test
-	public void fasterOnALargeZone() {
-		List<Name> queries = new ArrayList<Name>();
-		for(int i=0; i< 2000; i++ ) {
-			queries.add(new Name("h"+(4999-i)+".big.test"));
-		}
-		long t0 = System.nanoTime();
-		for(Name n : queries) {
-			big.linearMatchingRRs(n);
-		}
-		long scan = System.nanoTime()-t0;
-		t0 = System.nanoTime();
-		for(Name n : queries) {
-			big.getMatchingRRs(n);
-		}
-		long indexed = System.nanoTime()-t0;
-		System.out.println("5000-name zone, 2000 lookups: scan "+(scan/1_000_000)+" ms, indexed "+(indexed/1_000_000)+" ms");
-		assertEquals(true, indexed < scan, "indexed lookup should beat the scan");
-	}
+
 }

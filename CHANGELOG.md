@@ -25,6 +25,17 @@
 
 ### Changed
 
+- **Wildcards follow RFC 4592 in every zone** (they did only in signed zones). Only a leftmost `*` is a wildcard,
+  and it stands for one or more labels below the closest encloser; a name that exists, or has names below it,
+  is never matched by a wildcard; records from a wildcard are answered with the query name as their owner
+  (additional and glue addresses too). Breaking: the positional patterns of earlier versions (`*.*.` for any
+  2-label name, `dev.*.*.` and the like, chosen by label count with the last match in the file winning) are
+  no longer supported, so the common domains are no longer answered from them (To-Do 13.9 redesigns that).
+  Zone files with them still load; each such name is logged as a warning with its file and line
+  (`Zone.getLoadWarnings`), and served as the ordinary name it now is. See Wildcards in the README.
+- A zone's apex, or a domain the default zone serves, is NODATA for a type it has no records of (was NXDOMAIN
+  when it had no other records, though its SOA was answered).
+
 - **`DnsServer.main` runs the server as a service** with parley-net's `ServerMain.run`: settings from the command
   line (which wins) and `parley-dns.properties` in Parley's administrator folder (`/etc/parley`, or the file the server's
   `configFile` property names); it stops on SIGTERM; with its fatal-error handler as before; a failed start exits with 1 (was -1 or -2).

@@ -22,7 +22,8 @@ The intent of this DNS code is to support a large number of domains with very li
  
 # Major Features:
  +  Supports unique configuration for any domain.
- +  Supports a common configuration that will be used for any domain that does not have a unique configuration.
+ +  Supports a common configuration that will be used for any domain that does not have a unique configuration. (What a common domain is answered with is being redesigned: the positional `*.*.` patterns it used are no longer supported; see Wildcards.)
+ +  Wildcards follow RFC 4592 in every zone, signed or not (see Wildcards)
  +  Domains may be in a database or file system
  +  Support Dynamic DNS (DDNS) with trivial configuration
  +  Zone file record types: SOA, NS, A, AAAA, CNAME, PTR, MX, TXT, SPF, HINFO, RP, SRV, CAA, HTTPS, SVCB, DS (other types are passed through unchanged when resolving)
@@ -42,6 +43,27 @@ Each `<zone>.txt` file in `parley.dns.zoneDir` is one zone, in the RFC 1035 mast
  +  TTLs can use units: `300`, `30m`, `1h30m`, `2d`, `1w`.
  +  Parentheses can span lines anywhere in a record, and `;` starts a comment except inside quotes.
  +  A zone file that fails to load is reported with the file name and line number (and the previous version keeps being served).
+
+# Wildcards
+
+Wildcards follow RFC 4592, in every zone, signed or not. A query for a name is answered:
+
+ 1. with the records at the name itself, if it has any;
+ 2. with NODATA if it has none but names below it do (an empty non-terminal exists, so no wildcard applies to it);
+ 3. otherwise from the wildcard directly below its closest encloser (its nearest ancestor that exists), with the
+    query name as the records' owner. `*.example.com` matches `a.example.com` and `a.b.example.com`, but not
+    `www.example.com` if that exists, nor anything below `sub.example.com` if that exists;
+ 4. otherwise with NXDOMAIN.
+
+Only a `*` that is the leftmost label is a wildcard; a `*` anywhere else is an ordinary label (`sub.*.example.com`
+is a name like any other, and `*.*.example.com` is the wildcard of the name `*.example.com`). Wildcards apply
+only to names inside the zone, and not below a delegation. A query for `*.example.com` finds the wildcard itself.
+Record data is not changed: an MX from `*.example.com` names the same mail server for every name.
+
+**Changed in 2.0.0:** older versions matched `*` by position, so `*.*.` stood for any 2-label name and `dev.*.*.`
+for any 3-label name starting with `dev`, with the last matching entry in the file winning. Those patterns are
+no longer supported. A zone file with them still loads: each such name is logged as a warning naming the file
+and line, and is served as the ordinary name it now is.
 
 # Inherited zones ($INHERIT)
 
@@ -135,10 +157,10 @@ Zones signed elsewhere (for example with BIND's `dnssec-signzone`, NSEC or NSEC3
  +  A zone file with DNSKEY, NSEC or NSEC3 records but no RRSIG is refused.
 
 In a signed zone:
- +  Wildcards follow RFC 4592, as validators expect: `*.example.com` also matches `a.b.example.com`, but never a name that exists or has names below it.
+ +  Wildcards follow RFC 4592, as in every zone (see Wildcards); the answer carries the proof validators expect.
  +  An SOA query for a name other than the apex gets NODATA (the made-up SOA the default zone gives other names can't be signed).
  +  DNSKEY, RRSIG, NSEC, NSEC3 and NSEC3PARAM records can't be added with UPDATE (DS can); in a zone file they make it a zone signed elsewhere.
- +  Names outside the zone itself (the `*.*.` patterns a default zone uses for other domains) are served unsigned.
+ +  Names outside the zone itself (other domains the default zone answers for) are served unsigned.
 
 ### Validating (resolver)
 

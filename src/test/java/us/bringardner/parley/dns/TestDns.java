@@ -215,11 +215,23 @@ public class TestDns implements DNS {
 
 	public void testDomain(Manager mgr) throws Exception {
 
-		//  When a domain is added all tests should pass
+		//  Once a domain is added the server answers for it. (It used to answer
+		//  every query type from the master zone's positional patterns, *.*. and
+		//  the like; since RFC 4592 wildcards those are ordinary names, and what
+		//  a listed domain is answered with is decided in To-Do 13.9. Until then
+		//  only its apex SOA, which needs no pattern, is checked.)
 		String domain = "flunky.bo";
 		//server.addDomain(domain);
 		mgr.doit(Action.Add, domain, null);
-		runTests(REFUSED_RCODE, localServerAddress, localServrPort,domain);
+		Message added = new Message();
+		added.setServer(localServerAddress);
+		added.setPort(localServrPort);
+		Message soa = added.query(domain, DNS.SOA, IN);
+		assertEquals(domain+" type=SOA should be answered rcode="+soa.getResponseCode(), 0, soa.getResponseCode());
+		Assertions.assertEquals(1, soa.getAnswerCount(), domain+" SOA answer");
+		//  its apex exists (it has an SOA): a type it has no records of is NODATA, not NXDOMAIN
+		Message a = added.query(domain, A, IN);
+		assertEquals(domain+" type=A should be NODATA rcode="+a.getResponseCode(), 0, a.getResponseCode());
 
 		// once a domain is removed the (non-recursive) server no longer answers
 		// for it: REFUSED, not NAME ERROR (it is not authoritative any more)
