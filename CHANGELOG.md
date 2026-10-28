@@ -4,6 +4,11 @@
 
 ### Added
 
+- **Mail domains** (`parley.dns.mailSettings`, the mail queue's `queue.properties`): each listed domain with no zone
+  of its own is served as a zone inheriting from the master zone, made in memory with no zone file; its file is
+  written only when it gets a record of its own. A mail domain's DKIM record is inherited like any other, for the
+  shared key (parley-smtp's `dkim.shared`); the keys in `dkim.keys` aren't served from the settings. The master
+  zone serves the listed domains' DMARC report authorizations. See the README.
 - **`$INHERIT zone`** in a zone file: the zone serves the records of another zone (the primary domain's) too,
   renamed into it, and its own records add to them or override them by name and type. Updates change the
   zone's own records; a change to the primary reaches every zone that inherits from it. See the README.

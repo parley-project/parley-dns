@@ -32,7 +32,8 @@ import us.bringardner.parley.dns.resolve.QueryData;
 
 /**
  * parley.dns.mailSettings: the mail domains are served as zones inheriting from the master zone with
- * no zone file, their DKIM keys' records are served, and so are their DMARC report authorizations.
+ * no zone file, they inherit the master zone's DKIM record (the shared key) while the DKIM keys in
+ * the settings aren't served, and their DMARC report authorizations are served.
  */
 public class TestMailDomains {
 
@@ -52,7 +53,7 @@ public class TestMailDomains {
 	public void setup() throws Exception {
 		dir = Files.createTempDirectory("maildomains").toFile();
 		keys = Files.createTempDirectory("maildkim").toFile();
-		write(new File(dir, "primary.test.txt"), TestInheritedZones.primary(10, ""));
+		write(new File(dir, "primary.test.txt"), TestInheritedZones.primary(10, "mx1._domainkey\tIN\tTXT\t\"v=DKIM1; k=rsa; p=SHARED\"\n"));
 		write(new File(dir, "child.test.txt"), TestInheritedZones.child(5, ""));
 		//  a key with the record text parley-mail-admin keeps beside it, and one without (made from the key)
 		write(new File(keys, "mail.example-sel1.pem"), "-----BEGIN PRIVATE KEY-----\nnot read\n-----END PRIVATE KEY-----\n");
@@ -193,27 +194,16 @@ public class TestMailDomains {
 	}
 
 	@Test
-	public void dkimRecordsAreServed() throws Exception {
-		// from the text beside the key
-		assertEquals("v=DKIM1; k=rsa; p=AAAA", txt(ask("sel1._domainkey.mail.example", DNS.TXT)));
-		// made from the key, in a zone with a file
-		String expect = "v=DKIM1; k=rsa; p="+Base64.getEncoder().encodeToString(key2.getPublic().getEncoded());
-		Message m = ask("s2._domainkey.child.test", DNS.TXT);
-		assertEquals(expect, txt(m));
-		assertTrue(((Txt) m.getAnswer().get(0)).getStrings().size() > 1, "split into strings of at most 255 bytes");
-		// the name above them exists (NODATA, not NXDOMAIN); another selector doesn't
-		Message above = ask("_domainkey.mail.example", DNS.TXT);
-		assertEquals(DNS.NOERROR, above.getResponseCode());
-		assertEquals(0, above.getAnswerCount());
-		assertEquals(NXDOMAIN, ask("nope._domainkey.mail.example", DNS.TXT).getResponseCode());
-		// a record in the zone wins: the master's own name for a selector isn't replaced
-		assertEquals(0, ask("sel1._domainkey.mail.example", DNS.A).getAnswerCount());
-
-		// a new key's record is served after the next reload (the maintenance round's)
+	public void theSharedKeysRecordIsInheritedAndTheSettingsKeysArentServed() throws Exception {
+		// every mail domain, with or without a zone file, inherits the master zone's DKIM record (the shared key)
+		assertEquals("v=DKIM1; k=rsa; p=SHARED", txt(ask("mx1._domainkey.primary.test", DNS.TXT)));
+		assertEquals("v=DKIM1; k=rsa; p=SHARED", txt(ask("mx1._domainkey.mail.example", DNS.TXT)));
+		assertEquals("v=DKIM1; k=rsa; p=SHARED", txt(ask("mx1._domainkey.child.test", DNS.TXT)));
+		// the keys in dkim.keys aren't served from the settings: a domain's own key goes in its own zone
+		assertEquals(NXDOMAIN, ask("sel1._domainkey.mail.example", DNS.TXT).getResponseCode());
+		assertEquals(NXDOMAIN, ask("s2._domainkey.child.test", DNS.TXT).getResponseCode());
+		// and a change to a key's files doesn't reload anything
 		write(new File(keys, "mail.example-sel1.pem.txt"), "v=DKIM1; k=rsa; p=BBBB\n");
-		assertTrue(server.shouldReloadZones());
-		server.loadZones();
-		assertEquals("v=DKIM1; k=rsa; p=BBBB", txt(ask("sel1._domainkey.mail.example", DNS.TXT)));
 		assertFalse(server.shouldReloadZones());
 	}
 
@@ -274,8 +264,6 @@ public class TestMailDomains {
 		server.loadZones();
 		String errors = String.join("\n", server.getZoneErrors());
 		assertTrue(errors.contains("not a domain name"), errors);
-		assertTrue(errors.contains("not domain:selector:keyfile: bad"), errors);
-		assertTrue(errors.contains("DKIM key of good.example (s)"), errors);
 		// the rest is served
 		assertNotNull(server.getZone("good.example"));
 	}

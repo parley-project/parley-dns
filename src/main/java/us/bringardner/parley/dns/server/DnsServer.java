@@ -173,8 +173,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public static final String PROP_USE_DATABASE = "parley.dns.useDatabase";
 	/**
 	 * The mail servers' shared settings (the mail queue's queue.properties, which parley-mail-admin
-	 * edits): its domains are served as zones inheriting from the master zone, with no zone file, and
-	 * its DKIM keys' records are served. Default: none. See {@link MailDomains}.
+	 * edits): its domains are served as zones inheriting from the master zone, with no zone file (a
+	 * domain's DKIM record is inherited too, for the shared key). Default: none. See {@link MailDomains}.
 	 */
 	public static final String PROP_MAIL_SETTINGS = "parley.dns.mailSettings";
 	/** Directory of the zones' DNSSEC keys (K&lt;zone&gt;.+alg+tag.key and .private). Default: the zone directory. A zone with keys is signed. */
@@ -1653,7 +1653,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 		if( md.reload() ) {
 			MailDomains.Snapshot s = md.get();
-			log(PROP_MAIL_SETTINGS+"="+f+": domains "+s.domains+", DKIM records at "+new java.util.TreeSet<String>(s.dkim.keySet()));
+			log(PROP_MAIL_SETTINGS+"="+f+": domains "+s.domains);
 		}
 		return md;
 	}
@@ -1701,7 +1701,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		return md != null && md.changed();
 	}
 
-	/** A mail domain's DKIM record, or a DMARC report authorization, at a name the zone has no records at. */
+	/** A DMARC report authorization of a mail domain, at a name the zone has no records at. */
 	private List<RR> mailRecords(String target, Zone zone) {
 		MailDomains md = mailDomains;
 		if( md == null ) {
@@ -2430,7 +2430,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			list = zone.getMatchingRRs(targetName);
 		}
 		if( list == null ) {
-			//  A mail domain's DKIM record, or a DMARC report authorization (parley.dns.mailSettings)
+			//  A DMARC report authorization of a mail domain (parley.dns.mailSettings)
 			list = mailRecords(target, zone);
 		}
 		//  ANY at the apex includes the SOA (the zone keeps it apart from the
