@@ -4,14 +4,17 @@
 
 ### Added
 
-- **Mail domains** (`parley.dns.mailSettings`, the mail queue's `queue.properties`): each listed domain with no zone
-  of its own is served as a zone inheriting from the master zone, made in memory with no zone file; its file is
-  written only when it gets a record of its own. A mail domain's DKIM record is inherited like any other, for the
-  shared key (parley-smtp's `dkim.shared`); the keys in `dkim.keys` aren't served from the settings. The master
-  zone serves the listed domains' DMARC report authorizations. See the README.
-- **`$INHERIT zone`** in a zone file: the zone serves the records of another zone (the primary domain's) too,
-  renamed into it, and its own records add to them or override them by name and type. Updates change the
-  zone's own records; a change to the primary reaches every zone that inherits from it. See the README.
+- **The shared zone** (`parley.dns.sharedZone`): a zone file written with relative names, served under the name
+  of every listed domain (relative names in its data too), with RFC 4592 wildcards for their hosts. It is read
+  again when it changes; one that fails to load is reported with its file and line and the version read last
+  is kept. See the README.
+- **Listed domains** (`parley.dns.domainList`, parley-net's `IDomainList`; by default `PropertiesDomainList`
+  reading the mail queue's `queue.properties` `domains`, `parley.dns.domainList.file`): one list for mail and
+  DNS. Each listed domain with no zone file is served from the shared zone in memory, with its own SOA; its file
+  is written only when it gets a record of its own. The master zone serves the listed domains' DMARC report
+  authorizations.
+- **`$INHERIT`** in a zone file: the zone serves the shared zone's records too, read under its name, and its
+  own records add to them or override them by name and type. Updates change the zone's own records.
 - **JMX**: `us.bringardner.parley:type=Dns,name=…` (`DnsServerMXBean`): state, the zones (own and inherited
   serials and records), each zone's records marked own or inherited, load errors, reload, and making an
   inheriting zone for a new domain. `DnsServer.main` registers it on the platform MBean server.
@@ -25,6 +28,13 @@
 
 ### Changed
 
+- **Breaking: the common domains are replaced by the listed domains and the shared zone.** Removed: the in-memory
+  list (`DnsServer.addDomain`, `removeDomain`, `isCommon`), the admin port's `add_domain` and `del_domain` and
+  `DnsAdminClient.addDomain` / `removeDomain`, the database `domains` table as the list's source, and
+  `parley.dns.mailSettings` (use `parley.dns.domainList.file`). `$INHERIT` takes no zone name (a file that
+  names one loads with a warning and inherits the shared zone), and JMX `createInheritingZone(zone)` has no
+  inheritFrom; `getInheritFrom` gives `shared` (`Zone.SHARED`). The master zone no longer answers for other
+  domains.
 - **Wildcards follow RFC 4592 in every zone** (they did only in signed zones). Only a leftmost `*` is a wildcard,
   and it stands for one or more labels below the closest encloser; a name that exists, or has names below it,
   is never matched by a wildcard; records from a wildcard are answered with the query name as their owner

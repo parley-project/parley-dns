@@ -199,51 +199,14 @@ public class TestDns implements DNS {
 	public void testServers() throws Exception {
 		if( server.isRunning()) {
 		runTests(REFUSED_RCODE, localServerAddress, localServrPort,"foo.com","bar.com");
-
-			testDomain((a,name,d)->{
-				switch (a) {
-				case Add: server.addDomain(name);	break;
-				case Delete: server.removeDomain(name);	break;
-				default:
-					throw new IOException("Unexpected action = "+a);
-				}
-			});
 		}
 	}
 
 
 
-	public void testDomain(Manager mgr) throws Exception {
-
-		//  Once a domain is added the server answers for it. (It used to answer
-		//  every query type from the master zone's positional patterns, *.*. and
-		//  the like; since RFC 4592 wildcards those are ordinary names, and what
-		//  a listed domain is answered with is decided in To-Do 13.9. Until then
-		//  only its apex SOA, which needs no pattern, is checked.)
-		String domain = "flunky.bo";
-		//server.addDomain(domain);
-		mgr.doit(Action.Add, domain, null);
-		Message added = new Message();
-		added.setServer(localServerAddress);
-		added.setPort(localServrPort);
-		Message soa = added.query(domain, DNS.SOA, IN);
-		assertEquals(domain+" type=SOA should be answered rcode="+soa.getResponseCode(), 0, soa.getResponseCode());
-		Assertions.assertEquals(1, soa.getAnswerCount(), domain+" SOA answer");
-		//  its apex exists (it has an SOA): a type it has no records of is NODATA, not NXDOMAIN
-		Message a = added.query(domain, A, IN);
-		assertEquals(domain+" type=A should be NODATA rcode="+a.getResponseCode(), 0, a.getResponseCode());
-
-		// once a domain is removed the (non-recursive) server no longer answers
-		// for it: REFUSED, not NAME ERROR (it is not authoritative any more)
-		//server.removeDomain(domain);
-		mgr.doit(Action.Delete, domain, null);
-		Message msg = new Message();
-		msg.setServer(localServerAddress);
-		msg.setPort(localServrPort);
-		Message res = msg.query(domain, A, IN);
-		assertEquals(domain+" type=A should be REFUSED rcode="+res.getResponseCode(),REFUSED_RCODE, res.getResponseCode());
-	}
-
+	//  (testDomain added a domain to the old in-memory common list and removed it again. The
+	//  list comes from parley.dns.domainList now, and the listed domains are served from the
+	//  shared zone: TestListedDomains.)
 
 	private void assertEquals(String string, int expect, int actual) {
 		Assertions.assertEquals(expect,actual,string);		
@@ -348,14 +311,6 @@ public class TestDns implements DNS {
 			assertTrue("Could not connect client to "+localServerAddress+":"+adminPort,client.connect());
 
 			try {
-				testDomain((a,name,d)->{
-					switch (a) {
-					case Add: client.addDomain(name);	break;
-					case Delete:client.removeDomain(name);	break;
-					default:
-						throw new IOException("Unexpected action = "+a);
-					}
-				});
 				testDynamic((a,n,d)->{
 					switch (a) {
 					case Add:client.addDynamic(n, d);break;

@@ -270,14 +270,6 @@ public class DnsAdminClient implements DnsAdminConstants {
 		return executePreDefined(DEBUG, args);
 	}
 
-	public void addDomain(String ... domains ) throws IOException {
-		executePreDefined(ADD_DOMAIN, domains);
-	}
-
-	public void removeDomain(String ... domains ) throws IOException {
-		executePreDefined(DEL_DOMAIN, domains);
-	}
-
 
 	public void addDynamic(String ... args ) throws IOException {
 		executePreDefined(ADD_DYNAMIC, args);

@@ -50,13 +50,13 @@ public interface DnsServerMXBean {
 	void reload() throws Exception;
 
 	/**
-	 * Make the zone file of a domain that inherits from another zone (a {@code $INHERIT} line and an
-	 * SOA like the primary's, serial 1) and load it. The domain then serves the primary's records
-	 * until it adds or overrides some.
+	 * Make the zone file of a domain that inherits the shared zone (a {@code $INHERIT} line and an
+	 * SOA like the shared zone's, serial 1) and load it. The domain then serves the shared zone's
+	 * records until it adds or overrides some. A listed domain gets its file this way when one of
+	 * its records changes.
 	 * @param zone the domain, e.g. example.com
-	 * @param inheritFrom the zone it inherits from, which must be served (e.g. the primary domain)
-	 * @throws IllegalArgumentException if the name isn't a domain name, the zone exists or
-	 *  inheritFrom isn't served
+	 * @throws IllegalArgumentException if the name isn't a domain name, the zone has a file
+	 *  already, or the shared zone isn't set or can't be read
 	 */
-	void createInheritingZone(String zone, String inheritFrom) throws Exception;
+	void createInheritingZone(String zone) throws Exception;
 }

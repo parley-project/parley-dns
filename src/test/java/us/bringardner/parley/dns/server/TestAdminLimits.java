@@ -37,7 +37,6 @@ import java.util.Arrays;
 
 import org.junit.jupiter.api.Test;
 
-import us.bringardner.parley.dns.Name;
 
 /**
  * Admin sessions can't exhaust memory with an endless line, and can't hold a
@@ -50,6 +49,7 @@ public class TestAdminLimits {
 		final DnsServer server = new DnsServer();
 		final DnsAdminServer admin;
 		final String savedSecret = System.getProperty(DnsServer.PROP_ADMIN_SECRET);
+		final AdminTestZone zone = new AdminTestZone(server);
 
 		AdminListener(String secret) throws IOException {
 			if( secret == null ) {
@@ -79,6 +79,7 @@ public class TestAdminLimits {
 		@Override
 		public void close() throws Exception {
 			admin.stop();
+			zone.close();
 			if( savedSecret == null ) {
 				System.clearProperty(DnsServer.PROP_ADMIN_SECRET);
 			} else {
@@ -146,11 +147,11 @@ public class TestAdminLimits {
 				assertEquals("+JDns admin ready", in.readLine());
 				char [] name = new char[100];
 				Arrays.fill(name, 'a');
-				s.getOutputStream().write(("add_domain "+new String(name)+".example\r\n").getBytes(StandardCharsets.UTF_8));
+				s.getOutputStream().write(("add_dynamic "+new String(name)+".example 10.0.0.1\r\n").getBytes(StandardCharsets.UTF_8));
 				assertEquals("-Line too long (max 64 bytes)", in.readLine());
 				assertEquals(null, in.readLine(), "session closed");
 			}
-			assertTrue(!l.server.isCommon(new Name("www."+"a".repeat(100)+".example")));
+			assertTrue(l.server.getDynamic("a".repeat(100)+".example") == null);
 		}
 	}
 
@@ -164,11 +165,12 @@ public class TestAdminLimits {
 				OutputStream out = s.getOutputStream();
 				//  Many short lines add up to far more than the limit
 				for(int i=0; i < 50; i++ ) {
-					out.write(("add_domain d"+i+".example\r\n").getBytes(StandardCharsets.UTF_8));
-					assertEquals("+OK", in.readLine());
+					out.write(("add_dynamic d"+i+".example 10.0.0.1\r\n").getBytes(StandardCharsets.UTF_8));
+					String reply = in.readLine();
+					assertTrue(reply.startsWith("+d"+i+".example"), reply);
 				}
 			}
-			assertTrue(l.server.isCommon(new Name("www.d49.example")));
+			assertTrue(l.server.getDynamic("d49.example") != null);
 		}
 	}
 
@@ -215,9 +217,9 @@ public class TestAdminLimits {
 			c.setTimeout(5000);
 			assertTrue(c.connect());
 			Thread.sleep(800);
-			c.addDomain("late.example");
+			c.addDynamic("late.example", "10.0.0.1");
 			c.close();
-			assertTrue(l.server.isCommon(new Name("www.late.example")));
+			assertTrue(l.server.getDynamic("late.example") != null);
 		}
 	}
 

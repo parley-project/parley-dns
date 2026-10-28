@@ -29,8 +29,8 @@ import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.resolve.QueryData;
 
 /**
- * $INHERIT: a domain's zone serves the primary zone's records too, renamed into the domain; the
- * domain's own records add to them or override them (by name and type).
+ * $INHERIT: a domain's zone serves the shared zone's records too (parley.dns.sharedZone, read under
+ * the domain's name); the domain's own records add to them or override them (by name and type).
  */
 public class TestInheritedZones {
 
@@ -39,7 +39,9 @@ public class TestInheritedZones {
 	private DnsServer server;
 	private String savedDir;
 	private String savedDefault;
+	private String savedShared;
 
+	/** A zone with relative names: the primary's zone file, and the shared zone's. */
 	static String primary(int serial, String extra) {
 		return "$TTL 300\n@\tIN\tSOA\tns1 postmaster ( "+serial+" 3600 1800 1209600 300 )\n"
 				+"\t\tNS\tns1\n"
@@ -55,7 +57,7 @@ public class TestInheritedZones {
 	}
 
 	static String child(int serial, String extra) {
-		return "$INHERIT primary.test.\n"
+		return "$INHERIT\n"
 				+"$TTL 300\n@\tIN\tSOA\tns1.primary.test. postmaster ( "+serial+" 3600 1800 1209600 300 )\n"
 				+"\t\tMX\t20 other.example.\n"
 				+"special\tIN\tA\t10.1.0.1\n"
@@ -69,10 +71,14 @@ public class TestInheritedZones {
 		dir = Files.createTempDirectory("inherit").toFile();
 		write("primary.test.txt", primary(10, ""));
 		write("child.test.txt", child(5, ""));
+		//  (not *.txt: that would be a zone of its own)
+		write("shared.zone", primary(10, ""));
 		savedDir = System.getProperty(DnsServer.PROP_ZONE_DIR);
 		savedDefault = System.getProperty(DnsServer.PROP_DEFAULT_ZONE);
+		savedShared = System.getProperty(DnsServer.PROP_SHARED_ZONE);
 		System.setProperty(DnsServer.PROP_ZONE_DIR, dir.getAbsolutePath());
 		System.setProperty(DnsServer.PROP_DEFAULT_ZONE, "primary.test");
+		System.setProperty(DnsServer.PROP_SHARED_ZONE, new File(dir, "shared.zone").getAbsolutePath());
 		server = new DnsServer();
 		server.loadZones();
 		server.setRecursionAvailable(false);
@@ -83,6 +89,7 @@ public class TestInheritedZones {
 	public void cleanup() {
 		restore(DnsServer.PROP_ZONE_DIR, savedDir);
 		restore(DnsServer.PROP_DEFAULT_ZONE, savedDefault);
+		restore(DnsServer.PROP_SHARED_ZONE, savedShared);
 		ZoneNotifier n = server.getNotifier();
 		if( n != null ) {
 			n.shutdown();
@@ -167,14 +174,14 @@ public class TestInheritedZones {
 	public void inheritsWhatItDoesNotHave() {
 		Zone z = server.getZone("child.test");
 		assertTrue(z.isInherited());
-		assertEquals("primary.test", z.getOwn().getInheritFrom());
-		// the primary's records, under the child's names, with their data as written
-		assertEquals("[ns1.primary.test.]", data("child.test", "child.test", DNS.NS).toString());
+		assertEquals(Zone.SHARED, z.getOwn().getInheritFrom());
+		// the shared zone's records, under the child's names; relative names in their data are the child's
+		assertEquals("[ns1.child.test.]", data("child.test", "child.test", DNS.NS).toString());
 		assertEquals("[\"v=spf1 mx -all\"]", data("child.test", "child.test", DNS.TXT).toString());
 		assertEquals("[\"v=DMARC1; p=quarantine\"]", data("child.test", "_dmarc.child.test", DNS.TXT).toString());
 		assertEquals("[10.0.0.25]", data("child.test", "mx1.child.test", DNS.A).toString());
 		assertEquals("[10.0.0.99]", data("child.test", "*.wild.child.test", DNS.A).toString());
-		// the primary itself is untouched
+		// the primary (a zone file without $INHERIT) is untouched
 		assertFalse(server.getZone("primary.test").isInherited());
 		assertEquals("[10 mx1.primary.test.]", data("primary.test", "primary.test", DNS.MX).toString());
 	}
@@ -237,17 +244,18 @@ public class TestInheritedZones {
 	}
 
 	@Test
-	public void primaryUpdateReachesTheChild() {
+	public void aPrimaryUpdateDoesNotReachTheChild() {
+		// the child inherits the shared zone, not the primary
 		assertEquals(DNS.NOERROR, update("primary.test", a("new.primary.test", "10.0.0.7")));
-		assertEquals("[10.0.0.7]", data("child.test", "new.child.test", DNS.A).toString());
-		assertEquals(11, server.getZone("primary.test").getSoa().getSerial());
-		assertEquals(16, server.getZone("child.test").getSoa().getSerial());
+		assertTrue(data("child.test", "new.child.test", DNS.A).isEmpty());
+		assertEquals(15, server.getZone("child.test").getSoa().getSerial());
 	}
 
 	@Test
-	public void reloadPicksUpPrimaryChanges() throws Exception {
+	public void reloadPicksUpSharedZoneChanges() throws Exception {
 		Zone before = server.getZone("child.test");
-		write("primary.test.txt", primary(11, "ftp\tIN\tA\t10.0.0.21\n"));
+		write("shared.zone", primary(11, "ftp\tIN\tA\t10.0.0.21\n"));
+		assertTrue(server.shouldReloadZones());
 		server.loadZones();
 		Zone after = server.getZone("child.test");
 		assertEquals("[10.0.0.21]", data("child.test", "ftp.child.test", DNS.A).toString());
@@ -257,22 +265,44 @@ public class TestInheritedZones {
 	}
 
 	@Test
-	public void withoutItsPrimaryOnlyOwnRecordsAreServed() throws Exception {
+	public void withoutASharedZoneOnlyOwnRecordsAreServed() throws Exception {
+		// an older file naming the zone to inherit still loads, with a warning
 		write("lone.test.txt", "$INHERIT nowhere.test\n$TTL 300\n@\tIN\tSOA\tns1 postmaster ( 1 3600 1800 1209600 300 )\n"
 				+"a\tIN\tA\t10.2.0.1\n");
-		write("chain.test.txt", "$INHERIT child.test\n$TTL 300\n@\tIN\tSOA\tns1 postmaster ( 1 3600 1800 1209600 300 )\n");
 		server.loadZones();
 		Zone lone = server.getZone("lone.test");
-		assertNotNull(lone);
-		assertFalse(lone.isInherited());
-		assertEquals("[10.2.0.1]", data("lone.test", "a.lone.test", DNS.A).toString());
-		// one level only: a zone can't inherit from a zone that inherits
-		assertFalse(server.getZone("chain.test").isInherited());
+		assertTrue(lone.isInherited(), "it inherits the shared zone");
+		assertEquals(1, lone.getOwn().getLoadWarnings().size(), lone.getOwn().getLoadWarnings().toString());
+		assertEquals("[10.0.0.25]", data("lone.test", "mx1.lone.test", DNS.A).toString());
+
+		System.clearProperty(DnsServer.PROP_SHARED_ZONE);
+		DnsServer none = new DnsServer();
+		none.loadZones();
+		Zone z = none.getZone("lone.test");
+		assertFalse(z.isInherited());
+		assertEquals(1, z.exactRecords("a.lone.test").size());
+		assertTrue(z.exactRecords("mx1.lone.test").isEmpty());
+		assertTrue(String.join("\n", none.getZoneErrors()).contains(DnsServer.PROP_SHARED_ZONE+" is not set"), none.getZoneErrors().toString());
+	}
+
+	@Test
+	public void sharedZoneErrorsNameItsFileAndLine() throws Exception {
+		write("shared.zone", primary(11, "bad\tIN\tA\tnot-an-address\n"));
+		server.loadZones();
+		String errors = String.join("\n", server.getZoneErrors());
+		assertTrue(errors.contains("shared.zone") && errors.contains("line 12"), errors);
+		// the version read last is still served
+		assertEquals(15, server.getZone("child.test").getSoa().getSerial());
+		assertEquals("[10.0.0.25]", data("child.test", "mx1.child.test", DNS.A).toString());
+		// its SOA must be at @
+		write("shared.zone", "other.test.\tIN\tSOA\tns1 postmaster ( 12 3600 1800 1209600 300 )\n");
+		server.loadZones();
+		assertTrue(String.join("\n", server.getZoneErrors()).contains("must be at @"), server.getZoneErrors().toString());
 	}
 
 	@Test
 	public void anInheritedDelegationDoesNotHideOwnRecords() throws Exception {
-		write("primary.test.txt", primary(11, "lab\tIN\tNS\tns.elsewhere.example.\nsub\tIN\tNS\tns.elsewhere.example.\n"));
+		write("shared.zone", primary(11, "lab\tIN\tNS\tns.elsewhere.example.\nsub\tIN\tNS\tns.elsewhere.example.\n"));
 		write("child.test.txt", child(6, "lab\tIN\tA\t10.1.0.9\nhost.lab\tIN\tA\t10.1.0.10\n"));
 		server.loadZones();
 		assertTrue(data("child.test", "lab.child.test", DNS.NS).isEmpty(), "not inherited over own records");
@@ -285,12 +315,11 @@ public class TestInheritedZones {
 	}
 
 	@Test
-	public void withoutItsPrimaryTheLastVersionIsKept() throws Exception {
+	public void withoutItsSharedZoneTheLastVersionIsKept() throws Exception {
 		assertEquals(15, server.getZone("child.test").getSoa().getSerial());
-		new File(dir, "primary.test.txt").delete();
-		write("other.test.txt", "@ IN SOA ns1 postmaster ( 1 3600 1800 1209600 300 )\n");
-		System.setProperty(DnsServer.PROP_DEFAULT_ZONE, "other.test");
+		new File(dir, "shared.zone").delete();
 		server.loadZones();
+		assertTrue(String.join("\n", server.getZoneErrors()).contains("shared.zone"), server.getZoneErrors().toString());
 		Zone z = server.getZone("child.test");
 		assertEquals(15, z.getSoa().getSerial(), "its serial doesn't go down");
 		assertEquals("[10.0.0.25]", data("child.test", "mx1.child.test", DNS.A).toString());
@@ -307,15 +336,17 @@ public class TestInheritedZones {
 	@Test
 	public void directiveRules() throws Exception {
 		String soa = "@\tIN\tSOA\tns1 postmaster ( 1 3600 1800 1209600 300 )\n";
-		assertThrows(IOException.class, () -> zone("twice.test", "$INHERIT a.test\n$INHERIT b.test\n"+soa));
-		assertThrows(IOException.class, () -> zone("self.test", "$INHERIT self.test.\n"+soa));
-		assertThrows(IOException.class, () -> zone("none.test", "$INHERIT\n"+soa));
+		assertThrows(IOException.class, () -> zone("twice.test", "$INHERIT\n$INHERIT\n"+soa));
+		assertEquals(Zone.SHARED, zone("bare.test", "$INHERIT\n"+soa).getInheritFrom());
+		Zone named = zone("named.test", "$INHERIT primary.test.\n"+soa);
+		assertEquals(Zone.SHARED, named.getInheritFrom(), "the name is ignored");
+		assertTrue(named.getLoadWarnings().get(0).contains("line 1"), named.getLoadWarnings().toString());
 		File inc = new File(dir, "inherit.inc");
 		try(FileWriter w = new FileWriter(inc)) {
-			w.write("$INHERIT primary.test\n");
+			w.write("$INHERIT\n");
 		}
 		assertThrows(IOException.class, () -> zone("inc.test", soa+"$INCLUDE inherit.inc\n"));
-		assertEquals("primary.test", zone("ok.test", "$INHERIT Primary.Test.\n"+soa).getInheritFrom());
+
 	}
 
 	private Zone zone(String name, String text) throws IOException {

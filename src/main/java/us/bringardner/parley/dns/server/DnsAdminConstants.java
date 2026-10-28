@@ -32,10 +32,8 @@ package us.bringardner.parley.dns.server;
  */
 public interface DnsAdminConstants 
 {
-	public static final String ADD_DOMAIN = "add_domain";
 	public static final String ADD_DYNAMIC = "add_dynamic";
 	
-	public static final String DEL_DOMAIN = "del_domain";
 	public static final String DEL_DYNAMIC = "del_dynamic";
 	
 	public static final String QUIT = "quit";

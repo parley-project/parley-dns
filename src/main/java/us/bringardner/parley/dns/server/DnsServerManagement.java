@@ -120,33 +120,32 @@ class DnsServerManagement implements DnsServerMXBean {
 	}
 
 	@Override
-	public void createInheritingZone(String zone, String inheritFrom) throws Exception {
+	public void createInheritingZone(String zone) throws Exception {
 		//  (the server's lock: every bean of this server, and its reloads, take it)
 		synchronized(server) {
-			create(zone, inheritFrom);
+			create(zone);
 		}
 	}
 
-	private void create(String zone, String inheritFrom) throws Exception {
+	private void create(String zone) throws Exception {
 		String name = zone == null ? "" : strip(zone.trim()).toLowerCase(Locale.ROOT);
-		String from = inheritFrom == null ? "" : strip(inheritFrom.trim()).toLowerCase(Locale.ROOT);
 		if( !DOMAIN.matcher(name).matches() ) {
 			throw new IllegalArgumentException("Not a domain name: "+zone);
 		}
 		Zone existing = server.getZone(name);
 		if( existing != null && existing.getOwn().isVirtual() ) {
-			throw new IllegalArgumentException("Zone "+name+" is served already: it is a mail domain, inheriting from "
-					+existing.getOwn().getInheritFrom()+"; its zone file is written when one of its records is changed");
+			throw new IllegalArgumentException("Zone "+name+" is served already: it is a listed domain, served from"
+					+" the shared zone; its zone file is written when one of its records is changed");
 		}
 		if( existing != null ) {
 			throw new IllegalArgumentException("Zone "+name+" exists already");
 		}
-		Zone parent = server.getZone(from);
-		if( parent == null ) {
-			throw new IllegalArgumentException("Zone "+inheritFrom+" isn't served");
+		SharedZone shared = server.getSharedZone();
+		if( shared == null ) {
+			throw new IllegalArgumentException(DnsServer.PROP_SHARED_ZONE+" is not set: there is no shared zone to inherit");
 		}
-		if( parent.getOwn().getInheritFrom() != null ) {
-			throw new IllegalArgumentException("Zone "+from+" inherits from another zone itself");
+		if( !shared.isReady() ) {
+			throw new IllegalArgumentException("The shared zone "+shared.getFile()+" can't be read; see the server's errors");
 		}
 		File dir = server.getZoneDirectory();
 		File file = new File(dir, name+".txt");
@@ -158,8 +157,8 @@ class DnsServerManagement implements DnsServerMXBean {
 			//  It would be replayed into the new zone (an earlier zone of this name, made the same way)
 			throw new IllegalArgumentException("An old journal of the zone is there: "+journal+"; move it away first");
 		}
-		Soa soa = parent.getOwn().getSoa();
-		String text = Zone.inheritingText(name, from, soa);
+		Soa soa = shared.under(name, dir).getSoa();
+		String text = Zone.inheritingText(name, soa);
 		File tmp = File.createTempFile("."+name, ".tmp", dir);
 		try {
 			Files.write(tmp.toPath(), text.getBytes(StandardCharsets.UTF_8));

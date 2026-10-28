@@ -25,6 +25,8 @@
  */
 package us.bringardner.parley.dns.server;
 
+import us.bringardner.parley.net.server.IDomainList;
+import us.bringardner.parley.net.server.PropertiesDomainList;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -172,11 +174,20 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public static final String PROP_NOTIFY_TIMEOUT = "parley.dns.notifyTimeout";
 	public static final String PROP_USE_DATABASE = "parley.dns.useDatabase";
 	/**
-	 * The mail servers' shared settings (the mail queue's queue.properties, which parley-mail-admin
-	 * edits): its domains are served as zones inheriting from the master zone, with no zone file (a
-	 * domain's DKIM record is inherited too, for the shared key). Default: none. See {@link MailDomains}.
+	 * The listed domains: the class of the {@link us.bringardner.parley.net.server.IDomainList} that
+	 * lists them (default {@link PropertiesDomainList}); its own settings are read with this prefix
+	 * and a dot, e.g. parley.dns.domainList.file (the mail queue's queue.properties, whose domains=
+	 * the mail admin edits) and parley.dns.domainList.key (default domains). Each listed domain is
+	 * served from the shared zone. Default: none listed. See {@link ListedDomains}.
 	 */
-	public static final String PROP_MAIL_SETTINGS = "parley.dns.mailSettings";
+	public static final String PROP_DOMAIN_LIST = "parley.dns.domainList";
+	/**
+	 * The shared zone: a zone file written with relative names (@ is the domain), served under the
+	 * name of every listed domain and inherited by every zone with a $INHERIT line. Not a *.txt
+	 * file in the zone directory (that would be loaded as a zone of its own). Default: none. See
+	 * {@link SharedZone}.
+	 */
+	public static final String PROP_SHARED_ZONE = "parley.dns.sharedZone";
 	/** Directory of the zones' DNSSEC keys (K&lt;zone&gt;.+alg+tag.key and .private). Default: the zone directory. A zone with keys is signed. */
 	public static final String PROP_DNSSEC_KEY_DIR = "parley.dns.dnssecKeyDir";
 	/** How long DNSSEC signatures are valid, e.g. 14d (the default); zones are signed again when a quarter of it is left. */
@@ -276,10 +287,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	// These servers are used to forward requests
 	//private ArrayList forwarders;
 
-	//  lower case domain -> domain. Read by query threads, written by admin threads.
-	private final Map<String, String> common = new ConcurrentHashMap<String, String>();
-	//  The mail domains (parley.dns.mailSettings), or null
-	private volatile MailDomains mailDomains;
+	//  The listed domains (parley.dns.domainList), or null
+	private volatile ListedDomains listedDomains;
+	//  The shared zone (parley.dns.sharedZone), or null
+	private volatile SharedZone sharedZone;
 
 	/**
 	 * Dynamic A records: lower case name -> unmodifiable list holding one A.
@@ -354,13 +365,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public DnsServer() {
 
 
-	}
-
-	/**
-	 * Add a domain to our domain list
-	 **/
-	public void addDomain(String domain) {
-		common.put(domain.toLowerCase(),domain);
 	}
 
 	/*
@@ -659,7 +663,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 
 		loadZones();
-		loadCommon();
 		loadDynamic();
 
 		int alltimeout = intProperty(PROP_TIMEOUT, 5000);
@@ -1061,40 +1064,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 	}
 
-	/*
-	 *  Look for the smallest common value (a.b.c.com could match .com, c.com or b.c.com)
-	 */
-	private boolean isCommon(Section question) {
-		boolean ret = false;
-		Name name = new Name(question.getName().toLowerCase());
-		while(!ret && name != null ) {
-			ret = isCommon(name);
-			if( !ret ) {
-				name = name.getParentName();
-			}
-		}
-
-
-		return ret;
-
-	}
-
-	public boolean isCommon(Name name)  {
-		//System.out.println("isCommon start name="+name);
-		boolean ret = false;
-		while(!ret && name != null ) {
-			//System.out.println("isCommon loop name="+name);
-			ret = common.containsKey(name.toString().toLowerCase());
-			if( !ret ) {
-				name = name.getParentName();
-			}
-		}
-		//System.out.println("isCommon end name="+name+" ret="+ret);
-
-		return ret;
-
-	}
-
 	/**
 	 * 
 	 * Creation date: (6/16/2003 10:38:48 AM)
@@ -1120,35 +1089,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 */
 	public static boolean isShutdown() {
 		return shutdown;
-	}
-
-	/**
-	 * DNS Server supports a list of domains that have a common configuration
-	 * dramatically reducing the administrative effort.
-	 */
-	private void loadCommon() {
-
-		if( useDatabase()) {
-			try {
-				List<String> names = withConnection(con -> {
-					List<String> ret = new ArrayList<String>();
-					try(Statement stmt = con.createStatement();
-							ResultSet rs = stmt.executeQuery("select name from domains")) {
-						while( rs.next() ) {
-							ret.add(rs.getString(1));
-						}
-					}
-					return ret;
-				});
-				for(String name : names) {
-					common.put(name.toLowerCase(),name);
-					log("Install common domain ="+name);
-				}
-			} catch (Throwable ex) {
-				log("Database not availible",ex);
-			}
-		}
-
 	}
 
 	void loadDynamic() {
@@ -1475,8 +1415,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		if( zoneDir == null || seen == null ) {
 			return true;
 		}
-		MailDomains md = mailDomains;
-		return !currentZoneFiles().equals(seen) || dnssecKeysChanged() || (md != null && md.changed());
+		return !currentZoneFiles().equals(seen) || dnssecKeysChanged() || listChanged() || sharedZoneChanged();
 	}
 
 	/**
@@ -1496,7 +1435,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 		Map<String, Long> seen = new HashMap<String, Long>();
 		reloadDnssecKeys();
-		MailDomains md = readMailDomains();
+		ListedDomains ld = readListedDomains();
+		readSharedZone();
 		try {
 			if( !zoneDir.exists() ) {
 				throw new IOException(PROP_ZONE_DIR+" ="+zoneDir+" does not exist!!! exiting from "+getClass().getName());
@@ -1555,8 +1495,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				}
 			}
 
-			//  The mail domains with no zone of their own: zones inheriting from the master zone, with no file
-			List<Zone> virtual = mailDomainZones(md, zones);
+			//  The listed domains with no zone of their own: zones inheriting the shared zone, with no file
+			List<Zone> virtual = listedDomainZones(ld, zones);
 
 			//  DNSSEC: sign the zones that have keys (a zone whose data, keys and
 			//  dynamic entries did not change keeps its signatures)
@@ -1638,77 +1578,140 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 	}
 
-	/** The mail domains (parley.dns.mailSettings) read again if they changed, or null when not set. */
-	private MailDomains readMailDomains() {
-		String name = getProperty(PROP_MAIL_SETTINGS, null);
-		if( name == null || name.trim().isEmpty() ) {
-			mailDomains = null;
+	/**
+	 * The listed domains (parley.dns.domainList) read again if they changed, or null when no list
+	 * is set. A list that can't be read keeps the domains read last (the error is in the zone errors).
+	 */
+	private ListedDomains readListedDomains() {
+		String cls = getProperty(PROP_DOMAIN_LIST, null);
+		String file = getProperty(PROP_DOMAIN_LIST+"."+PropertiesDomainList.FILE, null);
+		if( blank(cls) && blank(file) ) {
+			listedDomains = null;
+			zoneErrors.remove("domain list");
+			return null;
+		}
+		String c = blank(cls) ? PropertiesDomainList.class.getName() : cls.trim();
+		String settings = c+" "+file;
+		ListedDomains ld = listedDomains;
+		try {
+			if( ld == null || !ld.getSettings().equals(settings) ) {
+				IDomainList list = (IDomainList)Class.forName(c).getDeclaredConstructor().newInstance();
+				list.initialize(k -> getProperty(PROP_DOMAIN_LIST+"."+k, null));
+				ld = new ListedDomains(list, settings);
+				listedDomains = ld;
+				log(PROP_DOMAIN_LIST+"="+list+": domains "+ld.domains());
+			} else if( ld.reloadIfChanged() ) {
+				log(PROP_DOMAIN_LIST+"="+ld.getList()+": domains "+ld.domains());
+			}
+			zoneErrors.remove("domain list");
+		} catch(Exception e) {
+			zoneErrors.put("domain list", String.valueOf(e.getMessage()));
+			logError(PROP_DOMAIN_LIST+": "+e.getMessage()+(ld == null ? "" : "; serving the domains read last"));
+		}
+		zoneErrors.keySet().removeIf(k -> k.startsWith("domain list: "));
+		if( ld != null && ld.getList() instanceof PropertiesDomainList ) {
+			for(String e : ((PropertiesDomainList)ld.getList()).getErrors()) {
+				zoneErrors.put("domain list: "+e, e);
+				logError(PROP_DOMAIN_LIST+": "+e);
+			}
+		}
+		return ld;
+	}
+
+	/** Whether the listed domains changed (reading them again if so); false if they can't be read. */
+	private boolean listChanged() {
+		ListedDomains ld = listedDomains;
+		if( ld == null ) {
+			return false;
+		}
+		try {
+			return ld.reloadIfChanged();
+		} catch(Exception e) {
+			//  (loadZones reports it when something else makes it run)
+			return false;
+		}
+	}
+
+	/** The shared zone (parley.dns.sharedZone) read again if it changed, or null when not set. */
+	private SharedZone readSharedZone() {
+		String name = getProperty(PROP_SHARED_ZONE, null);
+		if( blank(name) ) {
+			sharedZone = null;
+			zoneErrors.remove("shared zone");
 			return null;
 		}
 		File f = new File(name.trim());
-		MailDomains md = mailDomains;
-		if( md == null || !md.getFile().equals(f) ) {
-			md = new MailDomains(f);
-			mailDomains = md;
+		SharedZone sz = sharedZone;
+		if( sz == null || !sz.getFile().equals(f) ) {
+			sz = new SharedZone(f);
+			sharedZone = sz;
 		}
-		if( md.reload() ) {
-			MailDomains.Snapshot s = md.get();
-			log(PROP_MAIL_SETTINGS+"="+f+": domains "+s.domains);
+		try {
+			if( sz.read() ) {
+				log(PROP_SHARED_ZONE+"="+f+" read");
+				for(String w : sz.getWarnings()) {
+					logError(w);
+				}
+			}
+			zoneErrors.remove("shared zone");
+		} catch(IOException e) {
+			zoneErrors.put("shared zone", String.valueOf(e.getMessage()));
+			logError(e.getMessage()+(sz.isReady() ? "; serving the version read last" : ""));
 		}
-		return md;
+		return sz;
+	}
+
+	private boolean sharedZoneChanged() {
+		SharedZone sz = sharedZone;
+		return sz != null && sz.changed();
+	}
+
+	private static boolean blank(String s) {
+		return s == null || s.trim().isEmpty();
 	}
 
 	/**
-	 * The zones of the mail domains with no zone of their own: each inherits from the master zone and
+	 * The zones of the listed domains with no zone of their own: each inherits the shared zone and
 	 * has an SOA like its, serial 1, as {@link DnsServerManagement#createInheritingZone} would write;
 	 * no file is written until one of its records is changed.
 	 */
-	private List<Zone> mailDomainZones(MailDomains md, Map<String, Zone> zones) {
-		zoneErrors.keySet().removeIf(k -> k.startsWith("mail domains"));
+	private List<Zone> listedDomainZones(ListedDomains ld, Map<String, Zone> zones) {
+		zoneErrors.keySet().removeIf(k -> k.startsWith("listed domain "));
 		List<Zone> ret = new ArrayList<Zone>();
-		if( md == null ) {
+		if( ld == null || ld.domains().isEmpty() ) {
 			return ret;
 		}
-		MailDomains.Snapshot s = md.get();
-		for(String e : s.errors) {
-			zoneErrors.put("mail domains "+e, e);
-			logError(PROP_MAIL_SETTINGS+": "+e);
-		}
-		String master = defaultZoneName.toLowerCase();
-		Zone parent = zones.get(master);
-		if( parent == null || parent.getInheritFrom() != null ) {
+		SharedZone sz = sharedZone;
+		if( sz == null || !sz.isReady() ) {
+			String why = "the listed domains aren't served: "+(sz == null ? PROP_SHARED_ZONE+" is not set" : "the shared zone can't be read");
+			zoneErrors.put("listed domain "+ld.domains(), why);
+			logError(why);
 			return ret;
 		}
-		for(String d : s.domains) {
+		for(String d : ld.domains()) {
 			if( zones.containsKey(d) ) {
 				continue;
 			}
 			try {
-				Zone v = new Zone(new File(zoneDir, d+".txt"), Zone.inheritingText(d, master, parent.getSoa()));
+				Zone v = new Zone(new File(zoneDir, d+".txt"), Zone.inheritingText(d, sz.under(d, zoneDir).getSoa()));
 				zones.put(d, v);
 				ret.add(v);
 			} catch(IOException | RuntimeException e) {
-				zoneErrors.put("mail domains "+d, String.valueOf(e.getMessage()));
-				logError("Can't serve the mail domain "+d, e);
+				zoneErrors.put("listed domain "+d, String.valueOf(e.getMessage()));
+				logError("Can't serve the listed domain "+d, e);
 			}
 		}
 		return ret;
 	}
 
-	/** Whether the mail domains' settings changed (for tests). */
-	boolean mailDomainsChanged() {
-		MailDomains md = mailDomains;
-		return md != null && md.changed();
-	}
-
-	/** A DMARC report authorization of a mail domain, at a name the zone has no records at. */
-	private List<RR> mailRecords(String target, Zone zone) {
-		MailDomains md = mailDomains;
-		if( md == null ) {
+	/** A DMARC report authorization of a listed domain, at a name the zone has no records at. */
+	private List<RR> listedRecords(String target, Zone zone) {
+		ListedDomains ld = listedDomains;
+		if( ld == null ) {
 			return null;
 		}
 		boolean master = zone == zoneSet.defaultZone;
-		String text = md.txt(target, master ? defaultZoneName : null);
+		String text = ld.txt(target, master ? defaultZoneName : null);
 		if( text == null || !(stripDot(target).toLowerCase().equals(stripDot(zone.getName()).toLowerCase())
 				|| stripDot(target).toLowerCase().endsWith("."+stripDot(zone.getName()).toLowerCase())) ) {
 			return null;
@@ -1721,13 +1724,24 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		return ret;
 	}
 
-	private boolean mailNamesBelow(String target, Zone zone) {
-		MailDomains md = mailDomains;
-		return md != null && md.hasNamesBelow(target, zone == zoneSet.defaultZone ? defaultZoneName : null);
+	private boolean listedNamesBelow(String target, Zone zone) {
+		ListedDomains ld = listedDomains;
+		return ld != null && ld.hasNamesBelow(target, zone == zoneSet.defaultZone ? defaultZoneName : null);
+	}
+
+	/** The shared zone (parley.dns.sharedZone), or null when it isn't set. */
+	SharedZone getSharedZone() {
+		return sharedZone;
+	}
+
+	/** The listed domains (lower case), or an empty set when no list is set. */
+	public java.util.Set<String> getListedDomains() {
+		ListedDomains ld = listedDomains;
+		return ld == null ? java.util.Collections.<String>emptySet() : ld.domains();
 	}
 
 	/**
-	 * Write the zone file of a mail domain's zone (it had none), so a change to its records can be
+	 * Write the zone file of a listed domain's zone (it had none), so a change to its records can be
 	 * journaled beside it. From then on it is a zone with a file like any other.
 	 */
 	private void writeZoneFile(Zone own) throws IOException {
@@ -1750,7 +1764,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		} finally {
 			tmp.delete();
 		}
-		log("Wrote the zone file of the mail domain "+own.getName()+": "+file);
+		log("Wrote the zone file of the listed domain "+own.getName()+": "+file);
 	}
 
 	public Zone getDefaultZone() {
@@ -1960,13 +1974,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		ret.getHeader().setTC(false);
 		ret.setResponseCodeFormatError();
 		return ret;
-	}
-
-	/**
-	 * Delete a domain from our domain list
-	 **/
-	public Object removeDomain(String domain) {
-		return common.remove(domain.toLowerCase());
 	}
 
 
@@ -2236,12 +2243,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				zone = p;
 			}
 		}
-		if( zone == null ) {
-			if( isCommon(question) ) {
-				zone = getDefaultZone();
-			}
-		}
-
 		if( zone != null ) {
 			ret.setAuthorityAnswerOn();
 			ret = step3(query,ret,zone);
@@ -2284,13 +2285,9 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		return ret;
 	}
 
-	/**
-	 * @return true if name is the apex of the zone we answer from: the zone's
-	 * own name, or a 'common' domain served from the default zone.
-	 */
+	/** @return true if name is the apex of the zone we answer from (the zone's own name). */
 	private boolean isZoneApex(String name, Zone zone) {
-		String n = name.toLowerCase();
-		return n.equals(zone.getName().toLowerCase()) || common.containsKey(n);
+		return stripDot(name).equalsIgnoreCase(stripDot(zone.getName()));
 	}
 
 	/* RFC 1034
@@ -2336,24 +2333,9 @@ public class DnsServer  extends DnsBaseClass implements Runnable
             not the node with the "*" label.  Go to step 6.
 
 	 */
-	/**
-	 * The zone's SOA as the answer for 'targetName': for a domain served by
-	 * the default (common) zone it gets that domain's name.
-	 */
+	/** The zone's SOA as the answer at its apex. */
 	private static Soa soaFor(Zone zone, Name targetName) {
-		Soa soa = zone.getSoa();
-		RR realrr = soa.copy();
-		realrr.replaceWildCards(targetName);
-		String domain = soa.getName();
-		String target = targetName.toString();
-
-		// Set the SOA info to the hosted name
-		if( !domain.equals(target)){
-			//  must be common
-			((Soa)realrr).setName(target);
-			((Soa)realrr).setRname("postmaster."+target);
-		}
-		return (Soa)realrr;
+		return (Soa)zone.getSoa().copy();
 	}
 
 	private Message step3(QueryData query, Message ret, Zone zone)
@@ -2430,8 +2412,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			list = zone.getMatchingRRs(targetName);
 		}
 		if( list == null ) {
-			//  A DMARC report authorization of a mail domain (parley.dns.mailSettings)
-			list = mailRecords(target, zone);
+			//  A DMARC report authorization of a listed domain (parley.dns.domainList)
+			list = listedRecords(target, zone);
 		}
 		//  ANY at the apex includes the SOA (the zone keeps it apart from the
 		//  other records, so it was left out); the apex exists even when the
@@ -2451,9 +2433,9 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			//  Either way the SOA goes in the authority section (RFC 2308 3).
 			//  After a CNAME this also sets the final RCODE (RFC 6604).
 			if( signedName ? zone.getSigned().isEmptyNonTerminal(target)
-					: (zone.hasNamesBelow(target) || mailNamesBelow(target, zone) || isZoneApex(target, zone)) ) {
+					: (zone.hasNamesBelow(target) || listedNamesBelow(target, zone) || isZoneApex(target, zone)) ) {
 				//  (a name with only a wildcard below it exists too, RFC 4592 2.2.2; so does a
-				//  zone apex, or a domain served by the default zone, which has its SOA)
+				//  zone apex, which has its SOA)
 				ret.setResponseCodeNoError();
 			} else {
 				ret.setResponseCodeNameError();
@@ -2672,9 +2654,9 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		return a.msg;
 	}
 
-	/** @return true if the name is in one of our zones (or a 'common' domain) */
+	/** @return true if the name is in one of our zones */
 	private boolean isLocalName(Section s) {
-		return getZone(s) != null || isCommon(s);
+		return getZone(s) != null;
 	}
 
 	/**
@@ -3112,35 +3094,42 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	}
 
 	/**
-	 * The zone to serve for a zone with an $INHERIT line: its own records plus its primary's
-	 * (see {@link Zone#inherit(Zone, Zone)}). When the primary isn't served, or inherits from
-	 * another zone itself, only the zone's own records are served (logged). Such a zone is
-	 * not signed: DNSSEC keys for it are not used (logged).
+	 * The zone to serve for a zone with an $INHERIT line (a listed domain's too): its own records
+	 * plus the shared zone's, read under its name (see {@link Zone#inherit(Zone, Zone)}). When the
+	 * shared zone isn't set or can't be read, only the zone's own records are served (logged), or
+	 * the version last built with it. Such a zone is not signed: DNSSEC keys for it are not used
+	 * (logged).
 	 * @param own the zone as loaded (and updated)
 	 * @param zones the zones served (or about to be), by lower case name
 	 */
 	private Zone withInherited(Zone own, Map<String, Zone> zones) {
-		String from = own.getInheritFrom();
-		Zone parent = zones.get(from);
 		String key = "zone "+own.getName().toLowerCase();
+		SharedZone sz = sharedZone;
+		Zone parent = null;
+		String problem;
+		if( sz == null ) {
+			problem = PROP_SHARED_ZONE+" is not set";
+		} else if( !sz.isReady() ) {
+			problem = "the shared zone "+sz.getFile()+" can't be read";
+		} else {
+			problem = null;
+			try {
+				parent = sz.under(own.getName(), zoneDir);
+			} catch(IOException e) {
+				problem = String.valueOf(e.getMessage());
+			}
+		}
 		if( parent == null ) {
-			//  The last version built with the primary is served while it's gone (its own records
+			//  The last version built with the shared zone is served while it's gone (its own records
 			//  alone would have a lower serial, which secondaries take for an older zone)
 			Zone last = zoneSet.zones.get(own.getName().toLowerCase());
 			if( last != null && last.isInherited() && last.getOwn() == own ) {
-				String why = "inherits from "+from+", which is not served: still serving the version built with it";
+				String why = "inherits the shared zone, but "+problem+": still serving the version built with it";
 				logError("Zone "+own.getName()+" "+why);
 				zoneErrors.put(key, why);
 				return last;
 			}
-			String why = "inherits from "+from+", which is not served: serving only its own records";
-			logError("Zone "+own.getName()+" "+why);
-			zoneErrors.put(key, why);
-			return own;
-		}
-		if( parent.getOwn().getInheritFrom() != null ) {
-			String why = "inherits from "+from+", which inherits from "+parent.getOwn().getInheritFrom()
-					+" itself: only one level is supported, serving only its own records";
+			String why = "inherits the shared zone, but "+problem+": serving only its own records";
 			logError("Zone "+own.getName()+" "+why);
 			zoneErrors.put(key, why);
 			return own;
@@ -3148,10 +3137,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		zoneErrors.remove(key);
 		List<DnssecKey> keys = dnssecKeys.get(Canonical.key(own.getName()));
 		if( keys != null && !keys.isEmpty() ) {
-			logError("DNSSEC: "+own.getName()+" inherits from "+from+", and such zones are not signed: its keys in "
+			logError("DNSSEC: "+own.getName()+" inherits the shared zone, and such zones are not signed: its keys in "
 					+getDnssecKeyDir()+" are not used");
 		}
-		return Zone.inherit(own, parent.getUnsigned());
+		return Zone.inherit(own, parent);
 	}
 
 	/**
@@ -3347,9 +3336,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		A ret = null;
 		Name nn = new Name(name);
 		Zone zone = getZoneFor(nn);
-		if( zone == null &&  isCommon(nn) ) {
-			zone = getDefaultZone();
-		}
 		if( zone != null ) {
 			ret = new A(name);
 			ret.setAddress(addr);

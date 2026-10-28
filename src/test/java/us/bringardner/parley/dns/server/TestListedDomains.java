@@ -11,10 +11,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.nio.file.Files;
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 
@@ -31,11 +28,12 @@ import us.bringardner.parley.dns.Txt;
 import us.bringardner.parley.dns.resolve.QueryData;
 
 /**
- * parley.dns.mailSettings: the mail domains are served as zones inheriting from the master zone with
- * no zone file, they inherit the master zone's DKIM record (the shared key) while the DKIM keys in
- * the settings aren't served, and their DMARC report authorizations are served.
+ * parley.dns.domainList: the listed domains (here the mail queue's queue.properties domains=) are
+ * served from the shared zone (parley.dns.sharedZone) with no zone file, each under its own name;
+ * the shared zone's DKIM record (the shared key) with them; and their DMARC report authorizations
+ * from the master zone.
  */
-public class TestMailDomains {
+public class TestListedDomains {
 
 	private static final InetAddress LOOPBACK = InetAddress.getLoopbackAddress();
 	private static final int REFUSED = 5;
@@ -46,31 +44,28 @@ public class TestMailDomains {
 	private DnsServer server;
 	private String savedDir;
 	private String savedDefault;
-	private String savedSettings;
-	private KeyPair key2;
+	private String savedList;
+	private String savedShared;
+
+	static final String DKIM = "mx1._domainkey\tIN\tTXT\t\"v=DKIM1; k=rsa; p=SHARED\"\n";
 
 	@BeforeEach
 	public void setup() throws Exception {
-		dir = Files.createTempDirectory("maildomains").toFile();
-		keys = Files.createTempDirectory("maildkim").toFile();
-		write(new File(dir, "primary.test.txt"), TestInheritedZones.primary(10, "mx1._domainkey\tIN\tTXT\t\"v=DKIM1; k=rsa; p=SHARED\"\n"));
+		dir = Files.createTempDirectory("listed").toFile();
+		keys = Files.createTempDirectory("listedsettings").toFile();
+		write(new File(dir, "primary.test.txt"), TestInheritedZones.primary(10, DKIM));
 		write(new File(dir, "child.test.txt"), TestInheritedZones.child(5, ""));
-		//  a key with the record text parley-mail-admin keeps beside it, and one without (made from the key)
-		write(new File(keys, "mail.example-sel1.pem"), "-----BEGIN PRIVATE KEY-----\nnot read\n-----END PRIVATE KEY-----\n");
-		write(new File(keys, "mail.example-sel1.pem.txt"), "v=DKIM1; k=rsa; p=AAAA\n");
-		KeyPairGenerator g = KeyPairGenerator.getInstance("RSA");
-		g.initialize(2048);
-		key2 = g.generateKeyPair();
-		write(new File(keys, "child.test-s2.pem"), "-----BEGIN PRIVATE KEY-----\n"
-				+Base64.getMimeEncoder().encodeToString(key2.getPrivate().getEncoded())+"\n-----END PRIVATE KEY-----\n");
+		write(new File(dir, "shared.zone"), TestInheritedZones.primary(10, DKIM));
 		settings = new File(keys, "queue.properties");
 		settings("primary.test,child.test,Mail.Example.");
 		savedDir = System.getProperty(DnsServer.PROP_ZONE_DIR);
 		savedDefault = System.getProperty(DnsServer.PROP_DEFAULT_ZONE);
-		savedSettings = System.getProperty(DnsServer.PROP_MAIL_SETTINGS);
+		savedList = System.getProperty(DnsServer.PROP_DOMAIN_LIST+".file");
+		savedShared = System.getProperty(DnsServer.PROP_SHARED_ZONE);
 		System.setProperty(DnsServer.PROP_ZONE_DIR, dir.getAbsolutePath());
 		System.setProperty(DnsServer.PROP_DEFAULT_ZONE, "primary.test");
-		System.setProperty(DnsServer.PROP_MAIL_SETTINGS, settings.getAbsolutePath());
+		System.setProperty(DnsServer.PROP_DOMAIN_LIST+".file", settings.getAbsolutePath());
+		System.setProperty(DnsServer.PROP_SHARED_ZONE, new File(dir, "shared.zone").getAbsolutePath());
 		server = new DnsServer();
 		server.loadZones();
 		server.setRecursionAvailable(false);
@@ -78,17 +73,15 @@ public class TestMailDomains {
 	}
 
 	private void settings(String domains) throws IOException {
-		write(settings, "hostname=mx1.primary.test\n"
-				+"domains="+domains+"\n"
-				+"dkim.keys=mail.example:sel1:"+new File(keys, "mail.example-sel1.pem")
-				+",child.test:s2:"+new File(keys, "child.test-s2.pem")+"\n");
+		write(settings, "hostname=mx1.primary.test\ndomains="+domains+"\ndkim.shared=primary.test\n");
 	}
 
 	@AfterEach
 	public void cleanup() {
 		restore(DnsServer.PROP_ZONE_DIR, savedDir);
 		restore(DnsServer.PROP_DEFAULT_ZONE, savedDefault);
-		restore(DnsServer.PROP_MAIL_SETTINGS, savedSettings);
+		restore(DnsServer.PROP_DOMAIN_LIST+".file", savedList);
+		restore(DnsServer.PROP_SHARED_ZONE, savedShared);
 		ZoneNotifier n = server.getNotifier();
 		if( n != null ) {
 			n.shutdown();
@@ -158,23 +151,31 @@ public class TestMailDomains {
 	}
 
 	@Test
-	public void aMailDomainIsServedFromTheMasterZoneWithNoFile() {
+	public void aListedDomainIsServedFromTheSharedZoneWithNoFile() {
 		Zone z = server.getZone("mail.example");
 		assertNotNull(z, "served");
 		assertTrue(z.getOwn().isVirtual());
-		assertEquals("primary.test", z.getOwn().getInheritFrom());
+		assertEquals(Zone.SHARED, z.getOwn().getInheritFrom());
 		assertFalse(new File(dir, "mail.example.txt").exists(), "no zone file");
 
 		Message m = ask("mail.example", DNS.MX);
 		assertEquals(DNS.NOERROR, m.getResponseCode());
 		assertTrue(m.isAuthority());
-		assertEquals("[mail.example MX 10 mx1.primary.test.]", answers(m).toString());
+		// relative names in the shared zone's data are the domain's
+		assertEquals("[mail.example MX 10 mx1.mail.example.]", answers(m).toString());
 		assertEquals("[mx1.mail.example A 10.0.0.25]", answers(ask("mx1.mail.example", DNS.A)).toString());
+		// its wildcard, under the domain
+		assertEquals("[x.wild.mail.example A 10.0.0.99]", answers(ask("x.wild.mail.example", DNS.A)).toString());
+		assertEquals(NXDOMAIN, ask("nothing.mail.example", DNS.A).getResponseCode());
 		assertEquals("\"v=spf1 mx -all\"", answers(ask("mail.example", DNS.TXT)).get(0).replace("mail.example TXT ", ""));
 		assertEquals("[_dmarc.mail.example TXT \"v=DMARC1; p=quarantine\"]", answers(ask("_dmarc.mail.example", DNS.TXT)).toString());
 		Message soa = ask("mail.example", DNS.SOA);
 		assertEquals(1, soa.getAnswerCount());
 		assertEquals("mail.example", strip(soa.getAnswer().get(0).getName()));
+		assertEquals("ns1.mail.example", strip(((us.bringardner.parley.dns.Soa)soa.getAnswer().get(0)).getMname()));
+		// a negative answer carries the domain's SOA, not the master's
+		Message neg = ask("nothing.mail.example", DNS.A);
+		assertEquals("mail.example", strip(neg.getAuthority().get(0).getName()));
 
 		// a domain with a zone of its own keeps it; one that isn't listed isn't served
 		assertFalse(server.getZone("child.test").getOwn().isVirtual());
@@ -186,7 +187,7 @@ public class TestMailDomains {
 		for(DnsZoneInfo i : mgmt.getZones()) {
 			if( i.getName().equals("mail.example") ) {
 				found = true;
-				assertEquals("primary.test", i.getInheritFrom());
+				assertEquals(Zone.SHARED, i.getInheritFrom());
 				assertNull(i.getFile());
 			}
 		}
@@ -194,16 +195,12 @@ public class TestMailDomains {
 	}
 
 	@Test
-	public void theSharedKeysRecordIsInheritedAndTheSettingsKeysArentServed() throws Exception {
-		// every mail domain, with or without a zone file, inherits the master zone's DKIM record (the shared key)
+	public void theSharedZonesDkimRecordIsServedForEveryDomain() throws Exception {
 		assertEquals("v=DKIM1; k=rsa; p=SHARED", txt(ask("mx1._domainkey.primary.test", DNS.TXT)));
 		assertEquals("v=DKIM1; k=rsa; p=SHARED", txt(ask("mx1._domainkey.mail.example", DNS.TXT)));
 		assertEquals("v=DKIM1; k=rsa; p=SHARED", txt(ask("mx1._domainkey.child.test", DNS.TXT)));
-		// the keys in dkim.keys aren't served from the settings: a domain's own key goes in its own zone
-		assertEquals(NXDOMAIN, ask("sel1._domainkey.mail.example", DNS.TXT).getResponseCode());
-		assertEquals(NXDOMAIN, ask("s2._domainkey.child.test", DNS.TXT).getResponseCode());
-		// and a change to a key's files doesn't reload anything
-		write(new File(keys, "mail.example-sel1.pem.txt"), "v=DKIM1; k=rsa; p=BBBB\n");
+		// another change to the settings file, with the same domains, reloads nothing
+		write(settings, "hostname=mx2.primary.test\ndomains=primary.test,child.test,Mail.Example.\n");
 		assertFalse(server.shouldReloadZones());
 	}
 
@@ -242,17 +239,18 @@ public class TestMailDomains {
 		assertTrue(file.exists(), "the zone file is written");
 		assertTrue(new File(dir, "mail.example.txt.jnl").exists(), "and the change journaled beside it");
 		assertEquals("[special.mail.example A 10.2.0.1]", answers(ask("special.mail.example", DNS.A)).toString());
-		assertEquals("[mail.example MX 10 mx1.primary.test.]", answers(ask("mail.example", DNS.MX)).toString());
+		assertEquals("[mail.example MX 10 mx1.mail.example.]", answers(ask("mail.example", DNS.MX)).toString());
+		assertTrue(new String(Files.readAllBytes(file.toPath()), java.nio.charset.StandardCharsets.UTF_8).contains("$INHERIT\n"));
 
 		// read back from the file: the same zone, now with a file
 		assertTrue(server.shouldReloadZones());
 		server.loadZones();
 		Zone z = server.getZone("mail.example");
 		assertFalse(z.getOwn().isVirtual());
-		assertEquals("primary.test", z.getOwn().getInheritFrom());
+		assertEquals(Zone.SHARED, z.getOwn().getInheritFrom());
 		assertEquals("[special.mail.example A 10.2.0.1]", answers(ask("special.mail.example", DNS.A)).toString());
 
-		// with a file it stays served when it leaves the list (its own records override the master's)
+		// with a file it stays served when it leaves the list (its own records added to the shared zone's)
 		settings("primary.test,child.test");
 		server.loadZones();
 		assertEquals("[special.mail.example A 10.2.0.1]", answers(ask("special.mail.example", DNS.A)).toString());
@@ -260,11 +258,38 @@ public class TestMailDomains {
 
 	@Test
 	public void errorsAreReported() throws Exception {
-		write(settings, "domains=good.example,not_a domain!\ndkim.keys=good.example:s:"+new File(keys, "missing.pem")+",bad\n");
+		write(settings, "domains=good.example,not_a domain!\n");
 		server.loadZones();
 		String errors = String.join("\n", server.getZoneErrors());
 		assertTrue(errors.contains("not a domain name"), errors);
 		// the rest is served
 		assertNotNull(server.getZone("good.example"));
+	}
+
+	@Test
+	public void withoutASharedZoneTheListedDomainsArentServed() throws Exception {
+		System.clearProperty(DnsServer.PROP_SHARED_ZONE);
+		DnsServer none = new DnsServer();
+		none.loadZones();
+		assertNull(none.getZone("mail.example"));
+		assertTrue(String.join("\n", none.getZoneErrors()).contains(DnsServer.PROP_SHARED_ZONE+" is not set"), none.getZoneErrors().toString());
+		// a zone with a file is still served, from its own records
+		assertNotNull(none.getZone("child.test"));
+	}
+
+	@Test
+	public void anotherSettingCanHoldTheList() throws Exception {
+		write(settings, "domains=mail.example\nzones=other.example\n");
+		String saved = System.getProperty(DnsServer.PROP_DOMAIN_LIST+".key");
+		System.setProperty(DnsServer.PROP_DOMAIN_LIST+".key", "zones");
+		try {
+			DnsServer other = new DnsServer();
+			other.loadZones();
+			assertNotNull(other.getZone("other.example"));
+			assertNull(other.getZone("mail.example"));
+			assertEquals("[other.example]", other.getListedDomains().toString());
+		} finally {
+			restore(DnsServer.PROP_DOMAIN_LIST+".key", saved);
+		}
 	}
 }

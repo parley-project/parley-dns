@@ -120,8 +120,6 @@ public class DnsAdminProcessor extends AbstractCommandProcessor implements DnsAd
 
 	public DnsAdminProcessor(DnsServer server) {
 		this.server = server;
-		register(new AddDomain());
-		register(new DeleteDomain());
 		register(new Help());
 		register(new ListZones());
 		register(new Status());
@@ -570,51 +568,4 @@ public class DnsAdminProcessor extends AbstractCommandProcessor implements DnsAd
 		}
 	}
 
-	private class AddDomain extends AdminCommand {
-		@Override
-		public String getName() {
-			return ADD_DOMAIN;
-		}
-
-		@Override
-		public String getHelp() {
-			return ADD_DOMAIN+" Add a domain to the server.\n\tUsage: "+ADD_DOMAIN+" name [,name,..]";
-		}
-
-		@Override
-		void proccess(CommandArgs args) throws IOException {
-			if( args.args.size() < 1) {
-				reply("-Usage: "+ADD_DOMAIN+" name [,name,..]");
-			} else {
-				for(String name : args.args) {
-					server.addDomain(name);
-				}
-				reply("+OK");
-			}
-		}
-	}
-
-	private class DeleteDomain extends AdminCommand {
-		@Override
-		public String getName() {
-			return DEL_DOMAIN;
-		}
-
-		@Override
-		public String getHelp() {
-			return DEL_DOMAIN+" Delete a domain to the server.\n\tUsage: "+DEL_DOMAIN+" name [,name,..]";
-		}
-
-		@Override
-		void proccess(CommandArgs args) throws IOException {
-			if( args.args.size() < 1) {
-				reply("-Usage: "+DEL_DOMAIN+" name [,name,..]");
-			} else {
-				for(String name : args.args) {
-					server.removeDomain(name);
-				}
-				reply("+OK");
-			}
-		}
-	}
 }

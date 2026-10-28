@@ -22,9 +22,9 @@ The intent of this DNS code is to support a large number of domains with very li
  
 # Major Features:
  +  Supports unique configuration for any domain.
- +  Supports a common configuration that will be used for any domain that does not have a unique configuration. (What a common domain is answered with is being redesigned: the positional `*.*.` patterns it used are no longer supported; see Wildcards.)
+ +  Supports a common configuration, the shared zone, served under the name of any number of listed domains that need no zone of their own (see Listed domains and the shared zone)
  +  Wildcards follow RFC 4592 in every zone, signed or not (see Wildcards)
- +  Domains may be in a database or file system
+ +  Dynamic records may be in a database or a file
  +  Support Dynamic DNS (DDNS) with trivial configuration
  +  Zone file record types: SOA, NS, A, AAAA, CNAME, PTR, MX, TXT, SPF, HINFO, RP, SRV, CAA, HTTPS, SVCB, DS (other types are passed through unchanged when resolving)
  +  DNSSEC: zones are signed by the server itself when it has keys for them, or served as signed by another tool (see below)
@@ -65,54 +65,79 @@ for any 3-label name starting with `dev`, with the last matching entry in the fi
 no longer supported. A zone file with them still loads: each such name is logged as a warning naming the file
 and line, and is served as the ordinary name it now is.
 
-# Inherited zones ($INHERIT)
+# Listed domains and the shared zone
 
-A domain can serve the records of another zone, the primary domain's, so many domains share one set of
-records: `$INHERIT bringardner.us.` in `example.com.txt` (in the zone file itself, once; the file still needs its
-own SOA).
+Many domains can be served from one set of records, the shared zone, so only the domains that need
+something different have zone files of their own.
 
- +  Every record of the primary is served in the domain under the same relative name: the primary's `www`
-    is `www.example.com`, its apex MX is example.com's MX. The record data is copied as written, so names in
-    it (an MX's mail server, a CNAME's target) still point at the primary's hosts.
- +  The domain's own records add to them, or override them by name and type: an own MX replaces the
-    inherited MX, and an own TXT at a name replaces every inherited TXT there. An own CNAME hides everything
-    inherited at its name, and an inherited CNAME is left out where the domain has records of its own.
- +  The primary's SOA and DNSSEC records are not inherited. The SOA served is the domain's, with the sum of
-    the two serials, so it goes up when either zone changes and secondaries transfer the domain again.
- +  An inherited NS record below the apex (a delegation) is left out where the domain has records of its
-    own at or below its name, so it doesn't send them elsewhere.
- +  Dynamic updates of the domain change its own records (and its journal); an update or edit of the
-    primary reaches every domain that inherits from it. Only one level: a primary can't inherit itself.
-    An update sees only the domain's own records: deleting an inherited record changes nothing (override
-    it with a record of its own instead), a prerequisite on an inherited record fails, and an SOA
-    prerequisite compares the domain's own serial.
- +  When the primary isn't served (its file removed or broken), the domain keeps serving what it served
-    with it; at a start without the primary it serves only its own records. A serial that goes down (the
-    `$INHERIT` line removed, say) is logged: raise the zone file's serial above the one served.
- +  Inheriting zones are not signed (DNSSEC keys for them are not used).
+**The shared zone** (`parley.dns.sharedZone`) is a zone file written with relative names, for any domain:
 
-# Mail domains (parley.dns.mailSettings)
+```
+$TTL 3600
+@               IN SOA  ns1.example.net. hostmaster.example.net. ( 2026102801 3600 1800 1209600 300 )
+                NS      ns1.example.net.
+                MX      10 mail.example.net.
+                TXT     "v=spf1 mx -all"
+_dmarc          TXT     "v=DMARC1; p=quarantine; rua=mailto:dmarc@example.net"
+mx1._domainkey  TXT     "v=DKIM1; k=rsa; p=MIIB..."
+www             A       192.0.2.80
+*               A       192.0.2.80
+```
 
-With `parley.dns.mailSettings` naming the mail servers' shared settings (the mail queue's `queue.properties`,
-which parley-mail-admin's Domains page edits), the mail domains need no zone files:
+ +  It is served under each domain's name: `@` is the domain, `www` is `www.<domain>`, `*` is a wildcard
+    below the domain (RFC 4592, see Wildcards). Relative names in record data are the domain's too (`MX 10
+    mail` means `mail.<domain>`); a name with a trailing dot is the same for every domain.
+ +  Its SOA gives each domain's SOA; its serial is added to the serial of a domain with a zone file (see
+    below), so secondaries see a change to either. Raise it when you edit the file.
+ +  It is read again when it changes. A version that fails to load is reported with the file name and line
+    (the zone errors, JMX `getErrors`), and the version read last keeps being served.
+ +  It must not be a `*.txt` file in the zone directory (that would be loaded as a zone of its own), and it
+    can't have a `$INHERIT` line.
 
- +  Each domain in its `domains` that has no zone of its own is served as a zone inheriting from
-    `parley.dns.masterZone` (as with `$INHERIT` above, with an SOA like the master's, serial 1), made in memory.
-    A domain added there is served within the maintenance round; one removed is no longer served.
+**The listed domains** (`parley.dns.domainList`) are the domains served from the shared zone. The list comes
+from parley-net's `IDomainList`; by default (`PropertiesDomainList`) it is the `domains` setting of the mail
+queue's `queue.properties` (`parley.dns.domainList.file`), which parley-mail-admin's Domains page edits, so
+mail and DNS share one list:
+
+ +  Each listed domain with no zone file is served from the shared zone, in memory, with an SOA like the
+    shared zone's (serial 1 plus the shared zone's). A domain added to the list is served within the
+    maintenance round; one removed is no longer served. Negative answers carry the domain's own SOA.
  +  Its zone file is written only when one of its records is changed (a dynamic update, e.g. from
     parley-mail-admin's DNS page), so the change can be journaled beside it; from then on it is a zone with a
-    file, its own records overriding the master's, and it stays served if the domain leaves the list.
-    Writing it is refused while an old journal of that zone is there.
- +  DKIM: a mail domain signs with the shared key (parley-smtp's `dkim.shared`), whose record
-    (`selector._domainkey`) it inherits from the master zone, so it needs no zone file for it. A domain
-    with a key of its own has that key's record in its own zone (which then has a file). The keys in
-    `dkim.keys` aren't served from the settings.
+    file (below), and it stays served if the domain leaves the list. Writing it is refused while an old
+    journal of that zone is there.
  +  The master zone answers `domain._report._dmarc.master` with `v=DMARC1` for each listed domain outside
-    the master's own (RFC 7489 7.1), so the reports an inherited DMARC record asks for, at an address in the
+    the master's own (RFC 7489 7.1), so the reports a shared DMARC record asks for, at an address in the
     master domain, are sent.
- +  Problems (a name that isn't a domain) are logged and reported with the zone
-    errors (JMX `getErrors`); the rest is served.
+ +  Names in the list that aren't domain names are left out and reported with the zone errors. A list that
+    can't be read keeps the domains read last (reported). Without a shared zone the listed domains aren't
+    served (reported).
  +  These records are not part of zone transfers: a secondary gets the zones' own and inherited records.
+
+**A domain with records of its own** has a zone file with a `$INHERIT` line (in the file itself, once; the file
+still needs its own SOA; JMX `createInheritingZone` writes one). It serves the shared zone's records, read under
+its name, plus its own:
+
+ +  Its own records add to the shared ones, or override them by name and type: an own MX replaces the
+    shared MX, and an own TXT at a name replaces every shared TXT there. An own CNAME hides everything
+    inherited at its name, and an inherited CNAME is left out where the domain has records of its own.
+ +  The shared zone's SOA and DNSSEC records are not inherited. The SOA served is the domain's, with the sum
+    of the two serials, so it goes up when either changes and secondaries transfer the domain again.
+ +  An inherited NS record below the apex (a delegation) is left out where the domain has records of its
+    own at or below its name, so it doesn't send them elsewhere.
+ +  Dynamic updates of the domain change its own records (and its journal). An update sees only the domain's
+    own records: deleting an inherited record changes nothing (override it with a record of its own
+    instead), a prerequisite on an inherited record fails, and an SOA prerequisite compares the domain's own
+    serial. The shared zone is changed by editing its file.
+ +  When the shared zone can't be read, the domain keeps serving what it served with it; at a start without
+    it, it serves only its own records. A serial that goes down (the `$INHERIT` line removed, say) is logged:
+    raise the zone file's serial above the one served.
+ +  Inheriting zones are not signed (DNSSEC keys for them are not used).
+ +  **Changed in 2.0.0:** `$INHERIT` used to name the zone to inherit (the primary domain's). It takes no
+    name now; a file that still names one loads with a warning (file and line), and inherits the shared zone.
+    The domain list used to be the database's `domains` table plus the admin port's `add_domain` and
+    `del_domain` (memory only), answered from the master zone's positional patterns; `parley.dns.mailSettings`
+    is replaced by `parley.dns.domainList.file`.
 
 # Management (JMX)
 
@@ -304,8 +329,11 @@ A bind address of `localhost` means this host's own name (its network address), 
 | `parley.dns.configFile` | `parley-dns.properties` (current directory) | The properties file to load at startup |
 | `parley.dns.dnsDir` | `/data/services/dns/config` | Directory for the dynamic entries file, the TSIG key file and the root hints (`sbelt.prop`) |
 | `parley.dns.zoneDir` | `zones` | Directory of the zone files (`<zone>.txt`); a changed file is reloaded |
-| `parley.dns.masterZone` | required | The default zone: answers for the common domains (see Major Features) come from it |
-| `parley.dns.mailSettings` | none | The mail servers' shared settings (the mail queue's `queue.properties`): its domains are served from the master zone with no zone files (see Mail domains) |
+| `parley.dns.masterZone` | required | The primary domain's zone; it serves the listed domains' DMARC report authorizations |
+| `parley.dns.sharedZone` | none | The shared zone's file, served under every listed domain's name and inherited by zones with `$INHERIT` (see Listed domains and the shared zone) |
+| `parley.dns.domainList` | `PropertiesDomainList` when `parley.dns.domainList.file` is set | The class of the domain list (parley-net's `IDomainList`); its settings are `parley.dns.domainList.<name>` |
+| `parley.dns.domainList.file` | none | `PropertiesDomainList`: the properties file holding the list (the mail queue's `queue.properties`) |
+| `parley.dns.domainList.key` | `domains` | `PropertiesDomainList`: the setting in that file that lists the domains, separated by commas or spaces |
 | `parley.dns.dynamicFileName` | `dynamic.txt` | Dynamic entries file, relative to `parley.dns.dnsDir` (used without a database) |
 | `parley.dns.debug` | true | Debug logging checks; false skips the work of building debug messages |
 | `parley.dns.recursionAvailable` | true | Recursion available: resolve names that are not in our zones for clients that ask for it |
@@ -374,7 +402,7 @@ The admin port runs on parley-net's `Server` (one thread per session, virtual th
 
 | Property | Default | Meaning |
 |---|---|---|
-| `parley.dns.useDatabase` | only if `parley.dns.jdbcUrl` is set | Use the database for common domains and dynamic records |
+| `parley.dns.useDatabase` | only if `parley.dns.jdbcUrl` is set | Use the database for dynamic records |
 | `parley.dns.jdbcUrl` | none | JDBC URL of the database |
 | `parley.dns.jdbcDriver` | none | JDBC driver class to load (not needed for JDBC 4 drivers on the class path) |
 | `parley.dns.jdbcUser` / `parley.dns.jdbcPassword` | none | Database login |

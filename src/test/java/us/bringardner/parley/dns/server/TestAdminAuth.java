@@ -38,7 +38,6 @@ import java.util.Collections;
 
 import org.junit.jupiter.api.Test;
 
-import us.bringardner.parley.dns.Name;
 
 /**
  * Offline tests for admin port security: challenge-response authentication
@@ -52,6 +51,7 @@ public class TestAdminAuth {
 		final DnsServer server = new DnsServer();
 		final DnsAdminServer admin;
 		final String savedSecret = System.getProperty(DnsServer.PROP_ADMIN_SECRET);
+		final AdminTestZone zone = new AdminTestZone(server);
 
 		AdminListener(String secret, InetAddress bind) throws IOException {
 			if( secret == null ) {
@@ -74,6 +74,7 @@ public class TestAdminAuth {
 		@Override
 		public void close() throws Exception {
 			admin.stop();
+			zone.close();
 			if( savedSecret == null ) {
 				System.clearProperty(DnsServer.PROP_ADMIN_SECRET);
 			} else {
@@ -142,9 +143,9 @@ public class TestAdminAuth {
 		try(AdminListener l = new AdminListener(null)) {
 			DnsAdminClient c = client(l.port(), null);
 			assertTrue(c.connect());
-			c.addDomain("local.example");
+			c.addDynamic("local.example", "10.0.0.1");
 			c.close();
-			assertTrue(l.server.isCommon(new Name("www.local.example")));
+			assertTrue(l.server.getDynamic("local.example") != null);
 		}
 	}
 
@@ -171,7 +172,7 @@ public class TestAdminAuth {
 			assertNotNull(greeting);
 			assertTrue(greeting.startsWith("-Admin access from"), greeting);
 			assertEquals(null, r.line(), "connection closed");
-			assertTrue(!l.server.isCommon(new Name("www.remote.example")));
+			assertTrue(l.server.getDynamic("remote.example") == null);
 		}
 	}
 
@@ -183,11 +184,11 @@ public class TestAdminAuth {
 				Raw r = new Raw(InetAddress.getLoopbackAddress(), l.port())) {
 			String greeting = r.line();
 			assertNotNull(AdminAuth.challengeFrom(greeting), greeting);
-			r.send("add_domain sneaky.example");
+			r.send("add_dynamic sneaky.example 10.0.0.1");
 			assertEquals("-Authentication required", r.line());
 			r.send("");
 			assertEquals("-Authentication required", r.line(), "empty line must not repeat a command");
-			assertTrue(!l.server.isCommon(new Name("www.sneaky.example")));
+			assertTrue(l.server.getDynamic("sneaky.example") == null);
 		}
 	}
 
@@ -196,9 +197,9 @@ public class TestAdminAuth {
 		try(AdminListener l = new AdminListener("s3cret")) {
 			DnsAdminClient c = client(l.port(), "s3cret");
 			assertTrue(c.connect());
-			c.addDomain("authed.example");
+			c.addDynamic("authed.example", "10.0.0.1");
 			c.close();
-			assertTrue(l.server.isCommon(new Name("www.authed.example")));
+			assertTrue(l.server.getDynamic("authed.example") != null);
 		}
 	}
 

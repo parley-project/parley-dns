@@ -111,15 +111,21 @@ public class Zone implements DNS {
 		return s == null ? this : s.unsigned;
 	}
 
-	//  $INHERIT: the zone whose records this one serves too (lower case, no trailing dot), or null
+	/**
+	 * What {@link #getInheritFrom()} gives for a zone with a $INHERIT line: it inherits the shared
+	 * zone (parley.dns.sharedZone), the one every listed domain is served from.
+	 */
+	public static final String SHARED = "shared";
+
+	//  $INHERIT: SHARED for a zone that serves the shared zone's records too, or null
 	private String inheritFrom;
 
 	//  Set on a zone built by inherit(): the zone as loaded (and updated), before the inherited records
 	private Zone own;
 
 	/**
-	 * The zone this one inherits from (its $INHERIT line), lower case without the trailing dot, or null
-	 * if it inherits nothing.
+	 * {@link #SHARED} if this zone has a $INHERIT line (it serves the shared zone's records too,
+	 * under its own name), or null if it inherits nothing.
 	 */
 	public String getInheritFrom() {
 		return inheritFrom;
@@ -150,7 +156,8 @@ public class Zone implements DNS {
 
 	/**
 	 * The zone served for a zone with an $INHERIT line: its own records, plus every record of
-	 * 'parent' (the primary zone) under the same relative name, renamed into this zone.
+	 * 'parent' under the same relative name, renamed into this zone. The parent is the shared zone
+	 * read under this zone's name (so its relative names are this zone's already).
 	 * <ul>
 	 * <li>A record of a type this zone has at that name is overridden: this zone's records of that type
 	 *     are served, the parent's of that type are not (e.g. its own MX replaces the inherited MX, and
@@ -159,9 +166,8 @@ public class Zone implements DNS {
 	 *     name, and an inherited CNAME is left out where this zone has records of its own.</li>
 	 * <li>An inherited NS record below the apex (a delegation) is left out where this zone has records
 	 *     of its own at or below its name, which it would otherwise hide.</li>
-	 * <li>The parent's SOA and DNSSEC records are never inherited. Record data is copied as written:
-	 *     names in it (an MX's mail server, a CNAME's target) are not renamed, so they keep pointing at
-	 *     the parent's hosts.</li>
+	 * <li>The parent's SOA and DNSSEC records are never inherited. Record data is copied as written
+	 *     (names in the shared zone's data were completed with this zone's name when it was read).</li>
 	 * <li>The SOA's serial is the sum of this zone's and the parent's (modulo 2^32), so it goes up when
 	 *     either changes and secondaries transfer the zone again.</li>
 	 * </ul>
@@ -278,7 +284,7 @@ public class Zone implements DNS {
 	}
 
 	/**
-	 * A zone read from text instead of its file: a mail domain's inheriting zone (see
+	 * A zone read from text instead of its file: a listed domain's inheriting zone (see
 	 * DnsServer.loadZones), served with no zone file until one of its records is changed. Then
 	 * {@link #getVirtualText()} is written to masterFile, and the change to its journal beside it.
 	 * @param masterFile the file the zone will have (it does not exist)
@@ -293,7 +299,7 @@ public class Zone implements DNS {
 	//  The text of a zone that has no file yet (null for a zone read from its file)
 	private String virtualText;
 
-	/** Whether this zone was read from text and has no zone file (a mail domain's inheriting zone). */
+	/** Whether this zone was read from text and has no zone file (a listed domain's inheriting zone). */
 	public boolean isVirtual() {
 		return virtualText != null;
 	}
@@ -304,12 +310,12 @@ public class Zone implements DNS {
 	}
 
 	/**
-	 * The zone file of a domain inheriting from another zone: a $INHERIT line and an SOA like the
-	 * other zone's, serial 1. The domain serves the other zone's records until it adds or overrides some.
+	 * The zone file of a domain served from the shared zone: a $INHERIT line and an SOA like the
+	 * shared zone's, serial 1. The domain serves the shared zone's records until it adds or overrides some.
 	 */
-	static String inheritingText(String name, String from, us.bringardner.parley.dns.Soa soa) {
-		return "; "+name+": the records of "+from+", with this zone's own added or overriding them (by name and type)\n"
-				+"$INHERIT "+from+".\n"
+	static String inheritingText(String name, us.bringardner.parley.dns.Soa soa) {
+		return "; "+name+": the shared zone's records, with this zone's own added or overriding them (by name and type)\n"
+				+"$INHERIT\n"
 				+"@\t"+soa.getTTL()+"\tIN\tSOA\t"+dot(soa.getMname())+" "+dot(soa.getRname())+" ( 1 "
 				+soa.getRefreash()+" "+soa.getRetry()+" "+soa.getExpire()+" "+soa.getMinimum()+" )\n";
 	}
@@ -1459,21 +1465,21 @@ public class Zone implements DNS {
 			break;
 		}
 		case "$INHERIT": {
-			//  Parley's own: serve the records of another zone (the primary) too, see inherit()
-			if( list.size() != 2 ) {
-				throw new IllegalArgumentException("$INHERIT needs one zone name");
-			}
+			//  Parley's own: serve the shared zone's records too, under this zone's name (see inherit())
 			if( depth > 0 ) {
 				throw new IllegalArgumentException("$INHERIT must be in the zone file itself, not in a file it includes");
 			}
 			if( inheritFrom != null ) {
 				throw new IllegalArgumentException("$INHERIT is given twice");
 			}
-			String from = stripDot(list.get(1)).toLowerCase(java.util.Locale.ROOT);
-			if( from.isEmpty() || from.equals(stripDot(name).toLowerCase(java.util.Locale.ROOT)) ) {
-				throw new IllegalArgumentException("$INHERIT needs another zone's name");
+			if( list.size() > 1 ) {
+				//  It named the zone to inherit (the primary) before the shared zone replaced it
+				String w = "Warning in "+file.getName()+" at line "+currentLine+": '$INHERIT "+list.get(1)
+						+"': the zone name is ignored; $INHERIT inherits the shared zone (parley.dns.sharedZone)";
+				loadWarnings.add(w);
+				LOG.logWarn(w);
 			}
-			inheritFrom = from;
+			inheritFrom = SHARED;
 			break;
 		}
 		default:

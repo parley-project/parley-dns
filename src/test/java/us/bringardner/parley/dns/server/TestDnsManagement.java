@@ -32,14 +32,18 @@ public class TestDnsManagement {
 	private DnsServerMXBean bean;
 	private String savedDir;
 	private String savedDefault;
+	private String savedShared;
 
 	@BeforeEach
 	public void setup() throws Exception {
 		dir = Files.createTempDirectory("dnsjmx").toFile();
 		write("primary.test.txt", TestInheritedZones.primary(10, ""));
 		write("child.test.txt", TestInheritedZones.child(5, ""));
+		write("shared.zone", TestInheritedZones.primary(10, ""));
 		savedDir = System.getProperty(DnsServer.PROP_ZONE_DIR);
 		savedDefault = System.getProperty(DnsServer.PROP_DEFAULT_ZONE);
+		savedShared = System.getProperty(DnsServer.PROP_SHARED_ZONE);
+		System.setProperty(DnsServer.PROP_SHARED_ZONE, new File(dir, "shared.zone").getAbsolutePath());
 		System.setProperty(DnsServer.PROP_ZONE_DIR, dir.getAbsolutePath());
 		System.setProperty(DnsServer.PROP_DEFAULT_ZONE, "primary.test");
 		server = new DnsServer();
@@ -55,6 +59,7 @@ public class TestDnsManagement {
 		server.stop();
 		restore(DnsServer.PROP_ZONE_DIR, savedDir);
 		restore(DnsServer.PROP_DEFAULT_ZONE, savedDefault);
+		restore(DnsServer.PROP_SHARED_ZONE, savedShared);
 		for(File f : dir.listFiles()) {
 			f.delete();
 		}
@@ -105,7 +110,7 @@ public class TestDnsManagement {
 		assertEquals(10, p.getSerial());
 		assertEquals(p.getRecords(), p.getOwnRecords());
 		DnsZoneInfo c = zone("child.test");
-		assertEquals("primary.test", c.getInheritFrom());
+		assertEquals(Zone.SHARED, c.getInheritFrom());
 		assertEquals(15, c.getSerial());
 		assertEquals(5, c.getOwnSerial());
 		assertTrue(c.getRecords() > c.getOwnRecords());
@@ -123,42 +128,42 @@ public class TestDnsManagement {
 	@Test
 	public void errorsAreReported() throws Exception {
 		write("broken.test.txt", "@ IN SOA ns1 postmaster ( 1 3600 1800 1209600 300 )\nx IN BOGUS 1\n");
-		write("orphan.test.txt", "$INHERIT nowhere.test\n@ IN SOA ns1 postmaster ( 1 3600 1800 1209600 300 )\n");
+		write("shared.zone", TestInheritedZones.primary(11, "x IN BOGUS 1\n"));
+		new File(dir, "shared.zone").setLastModified(System.currentTimeMillis()+5000);
 		bean.reload();
 		String errors = String.join("\n", bean.getErrors());
 		assertTrue(errors.contains("broken.test.txt: "), errors);
-		assertTrue(errors.contains("zone orphan.test: inherits from nowhere.test"), errors);
+		assertTrue(errors.contains("shared zone: ") && errors.contains("shared.zone"), errors);
 		new File(dir, "broken.test.txt").delete();
-		write("orphan.test.txt", "@ IN SOA ns1 postmaster ( 2 3600 1800 1209600 300 )\n");
-		new File(dir, "orphan.test.txt").setLastModified(System.currentTimeMillis()+5000);
+		write("shared.zone", TestInheritedZones.primary(11, ""));
+		new File(dir, "shared.zone").setLastModified(System.currentTimeMillis()+10000);
 		bean.reload();
 		assertEquals(0, bean.getErrors().length, String.join("\n", bean.getErrors()));
 	}
 
 	@Test
 	public void createInheritingZone() throws Exception {
-		bean.createInheritingZone("New.Example.", "primary.test");
+		bean.createInheritingZone("New.Example.");
 		File f = new File(dir, "new.example.txt");
 		String text = new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
-		assertTrue(text.contains("$INHERIT primary.test.\n"), text);
+		assertTrue(text.contains("$INHERIT\n"), text);
 		DnsZoneInfo z = zone("new.example");
-		assertEquals("primary.test", z.getInheritFrom());
+		assertEquals(Zone.SHARED, z.getInheritFrom());
 		assertEquals(0, z.getOwnRecords());
 		assertEquals(11, z.getSerial());
 		assertEquals("[A 10.0.0.80 (inherited)]", records("new.example", "www.new.example").toString());
 		Zone served = server.getZone("new.example");
-		assertEquals("ns1.primary.test", served.getSoa().getMname());
+		// the shared zone's SOA, read under the new domain's name
+		assertEquals("ns1.new.example", served.getSoa().getMname());
 
-		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("new.example", "primary.test"));
+		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("new.example"));
 		// an old journal of the name would be replayed into the new zone: refused
 		write("old.example.txt.jnl", "base 1\nbegin\nadd ghost.old.example. 300 IN A 6.6.6.6\nend\n");
-		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("old.example", "primary.test"));
+		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("old.example"));
 		assertFalse(new File(dir, "old.example.txt").exists());
-		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("other.example", "nowhere.test"));
-		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("../evil", "primary.test"));
-		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("bad_name.example", "primary.test"));
-		// one level only
-		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("grand.example", "child.test"));
+		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("../evil"));
+		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("bad_name.example"));
+		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("child.test"), "has a file already");
 	}
 
 	@Test

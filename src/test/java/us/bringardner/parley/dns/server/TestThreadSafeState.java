@@ -47,7 +47,6 @@ import org.junit.jupiter.api.Test;
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
-import us.bringardner.parley.dns.Name;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.dns.resolve.RemoteServer;
@@ -141,14 +140,6 @@ public class TestThreadSafeState {
 	}
 
 	@Test
-	public void commonDomainsAreCaseInsensitive() {
-		server.addDomain("Example.ORG");
-		assertTrue(server.isCommon(new Name("www.example.org")));
-		server.removeDomain("EXAMPLE.org");
-		assertTrue(!server.isCommon(new Name("www.example.org")));
-	}
-
-	@Test
 	public void concurrentUpdatesAndQueries() throws Exception {
 		final String[] ips = {"10.0.3.1","10.0.3.2"};
 		final int names = 20;
@@ -163,10 +154,6 @@ public class TestThreadSafeState {
 				for(int n=0; n< 3000 && failure.get() == null; n++ ) {
 					String name = "h"+(n % names)+".dyn.test";
 					server.addOrUpdateDynamic(name, ips[n % 2]);
-					server.addDomain("d"+(n % 50)+".example");
-					if( n % 7 == 0 ) {
-						server.removeDomain("d"+((n+25) % 50)+".example");
-					}
 					// iterate the snapshot like the admin 'list' command does
 					server.getDynamic().size();
 				}
@@ -189,7 +176,6 @@ public class TestThreadSafeState {
 						if( got.size() != 1 || !(got.get(0).equals(ips[0]) || got.get(0).equals(ips[1])) ) {
 							failure.compareAndSet(null, name+" -> "+got);
 						}
-						server.isCommon(new Name("www.d"+(i % 50)+".example"));
 					}
 				} catch(Throwable ex) {
 					failure.compareAndSet(null,"reader: "+ex);

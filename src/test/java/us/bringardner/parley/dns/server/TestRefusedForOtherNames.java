@@ -149,16 +149,4 @@ public class TestRefusedForOtherNames {
 		assertTrue(missing.getHeader().getAA());
 	}
 
-	@Test
-	public void removedCommonDomainIsRefused() {
-		// The TestDns scenario: served from the default zone while it is a
-		// common domain, REFUSED once it is removed
-		server.setRecursionAvailable(false);
-		server.addDomain("flunky.bo");
-		Message served = ask("flunky.bo", true);
-		assertTrue(served.getResponseCode() != DNS.REFUSED, "answered for while it is ours");
-		assertTrue(served.getHeader().getAA());
-		server.removeDomain("flunky.bo");
-		assertRefused(ask("flunky.bo", true), "flunky.bo");
-	}
 }
