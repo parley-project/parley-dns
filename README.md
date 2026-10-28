@@ -43,6 +43,37 @@ Each `<zone>.txt` file in `parley.dns.zoneDir` is one zone, in the RFC 1035 mast
  +  Parentheses can span lines anywhere in a record, and `;` starts a comment except inside quotes.
  +  A zone file that fails to load is reported with the file name and line number (and the previous version keeps being served).
 
+# Inherited zones ($INHERIT)
+
+A domain can serve the records of another zone, the primary domain's, so many domains share one set of
+records: `$INHERIT bringardner.us.` in `example.com.txt` (in the zone file itself, once; the file still needs its
+own SOA).
+
+ +  Every record of the primary is served in the domain under the same relative name: the primary's `www`
+    is `www.example.com`, its apex MX is example.com's MX. The record data is copied as written, so names in
+    it (an MX's mail server, a CNAME's target) still point at the primary's hosts.
+ +  The domain's own records add to them, or override them by name and type: an own MX replaces the
+    inherited MX, and an own TXT at a name replaces every inherited TXT there. An own CNAME hides everything
+    inherited at its name, and an inherited CNAME is left out where the domain has records of its own.
+ +  The primary's SOA and DNSSEC records are not inherited. The SOA served is the domain's, with the sum of
+    the two serials, so it goes up when either zone changes and secondaries transfer the domain again.
+ +  Dynamic updates of the domain change its own records (and its journal); an update or edit of the
+    primary reaches every domain that inherits from it. Only one level: a primary can't inherit itself.
+ +  Inheriting zones are not signed (DNSSEC keys for them are not used).
+
+# Management (JMX)
+
+`us.bringardner.parley:type=Dns,name=…` (`DnsServerMXBean`, an MXBean any JMX client can read) gives the
+server's state, its zones (inherited from, served and own serials, record counts, signed), a zone's records
+marked own or inherited, the zone files that failed to load, `reload()`, and `createInheritingZone(domain, primary)`,
+which writes the domain's zone file (an `$INHERIT` line and an SOA like the primary's) and loads it. Records are
+changed with dynamic updates signed with a key in `parley.dns.updateKeys`, sent to its TCP port.
+
+`DnsServer.main` registers the bean on the platform MBean server (reach it with the JVM's
+`com.sun.management.jmxremote.*` settings). In parley-net's launcher, as `dns` in `parley.servers`
+(`DnsServerProvider`), the server is also `us.bringardner.parley:type=Server,name=dns`, like every Parley
+server, and its `Dns` bean is registered while it runs. One DNS server runs in a JVM.
+
 # Dynamic update (RFC 2136)
 
 Allowed for requests signed with a key in `parley.dns.updateKeys`, or unsigned from an address in `parley.dns.updateAllow` (over TCP, or over UDP from this machine); everyone else gets REFUSED. Prerequisites, adds and all three kinds of delete are supported, with the RFC's rules (the apex SOA and NS RRset can't be deleted, never the last NS, no other data next to a CNAME). An update is all or nothing.

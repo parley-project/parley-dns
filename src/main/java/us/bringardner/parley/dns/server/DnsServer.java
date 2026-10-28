@@ -303,6 +303,14 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	private UDPProsessor [] UDPProcs;
 
 	private volatile boolean running = false;
+	//  When it started serving (ms since the epoch), or 0; the TCP port it serves (for JMX)
+	private volatile long startedAt;
+	private volatile int servingTcpPort;
+	//  Zone files that failed to load and zones that can't inherit: file or zone -> why (for JMX)
+	private final Map<String, String> zoneErrors = new ConcurrentHashMap<String, String>();
+	//  The management bean's name, once registered
+	private volatile javax.management.ObjectName managementName;
+	private volatile javax.management.MBeanServer managementServer;
 
 	//  TCP reactor threads (NioServer). Requests are answered on a separate
 	//  pool (parley.dns.tcpMaxConnections threads), so one is enough; it was 4.
@@ -687,6 +695,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		//  One TCPProsessor runs the NioServer; TCPProcCount is its reactor count
 		TCPProcs = new TCPProsessor[1];
 		int tcpPort = intProperty(PROP_TCP_PORT, dnsPort);
+		servingTcpPort = tcpPort;
 		int backlog = intProperty(PROP_TCP_BACKLOG, 10);
 		//  (parley.dns.tcpBindAddress used to be read and then ignored)
 		InetAddress tcpAddress = bindAddress;
@@ -1507,15 +1516,18 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				Long prevModified = oldSeen == null ? null : oldSeen.get(fileName);
 				Zone z = null;
 				if( prev != null && prevModified != null && prevModified.longValue() == zoneStamp(modified, prev) ) {
-					z = prev;
+					//  (its own records: the inherited ones are added again below, the primary may have changed)
+					z = prev.getOwn();
 				} else {
 					try {
 						z = new Zone(file);
-						log("Adding Zone "+z.getName());
+						log("Adding Zone "+z.getName()+(z.getInheritFrom() == null ? "" : ", inheriting from "+z.getInheritFrom()));
+						zoneErrors.remove(fileName);
 					} catch (Throwable e) {
+						zoneErrors.put(fileName, String.valueOf(e.getMessage()));
 						if( prev != null ) {
 							logError("Error loading zone from "+file+", still serving the previous version",e);
-							z = prev;
+							z = prev.getOwn();
 						} else {
 							logError("Error loading zone from "+file,e);
 						}
@@ -1541,8 +1553,26 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			}
 			for(Map.Entry<String, Zone> e : new ArrayList<Map.Entry<String, Zone>>(byFile.entrySet())) {
 				Zone loaded = e.getValue();
+				if( loaded.getInheritFrom() != null ) {
+					//  built from its primary below (and not signed)
+					continue;
+				}
 				Zone served = prepareZone(loaded, old.byFile.get(e.getKey()), false, unsignedByName);
 				if( served != loaded ) {
+					e.setValue(served);
+					String k = loaded.getName().toLowerCase();
+					if( zones.get(k) == loaded ) {
+						zones.put(k, served);
+					}
+				}
+			}
+			//  $INHERIT: each such zone gets the records of its primary too (after the primaries are signed);
+			//  the errors about inheriting are found again
+			zoneErrors.keySet().removeIf(k -> k.startsWith("zone "));
+			for(Map.Entry<String, Zone> e : new ArrayList<Map.Entry<String, Zone>>(byFile.entrySet())) {
+				Zone loaded = e.getValue();
+				if( loaded.getInheritFrom() != null ) {
+					Zone served = withInherited(loaded, zones);
 					e.setValue(served);
 					String k = loaded.getName().toLowerCase();
 					if( zones.get(k) == loaded ) {
@@ -1559,6 +1589,11 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 			//  Publish everything at once
 			zoneSet = new ZoneSet(Collections.unmodifiableMap(zones), def, Collections.unmodifiableMap(byFile));
+			for(String k : new ArrayList<String>(zoneErrors.keySet())) {
+				if( k.endsWith(".txt") && !seen.containsKey(k) ) {
+					zoneErrors.remove(k);
+				}
+			}
 
 			//  NOTIFY secondaries about new zones and changed serials (RFC 1996)
 			ZoneNotifier n = notifier;
@@ -1593,41 +1628,97 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 		us.bringardner.parley.net.server.ServerMain.run("DnsServer", args, PROP_DNS_PROPERTIES, DEFAULT_PROPERTIES_FILE_NAME, () -> {
 			DnsServer svr = new DnsServer();
-			return java.util.Collections.singletonList(new us.bringardner.parley.net.server.ServerMain.Service() {
-				@Override
-				public String name() {
-					return "DnsServer";
-				}
-
-				@Override
-				public void startAndWait(long timeoutMillis) throws IOException {
-					svr.start(true);
-					try {
-						svr.awaitStarted(timeoutMillis);
-					} catch (InterruptedException e) {
-						Thread.currentThread().interrupt();
-						throw new IOException("Interrupted while the DNS server started", e);
-					}
-				}
-
-				@Override
-				public int port() {
-					return Integer.getInteger(PROP_PORT, Message.DNSPORT);
-				}
-
-				@Override
-				public void stop(long timeoutMillis) throws InterruptedException {
-					svr.stopAndWait(timeoutMillis);
-				}
-
-				@Override
-				public void awaitStop() throws InterruptedException {
-					while( svr.isRunning() ) {
-						Thread.sleep(1000);
-					}
-				}
-			});
+			javax.management.MBeanServer mbeans = java.lang.management.ManagementFactory.getPlatformMBeanServer();
+			return java.util.Collections.singletonList(service(svr, "DnsServer",
+					bean -> svr.registerManagement(mbeans, "DnsServer"), n -> svr.unregisterManagement()));
 		});
+	}
+
+	/** Registers the management bean it is given; returns its name. */
+	@FunctionalInterface
+	public interface ManagementRegistrar {
+		javax.management.ObjectName register(Object bean) throws javax.management.JMException;
+	}
+
+	/** The management bean ({@link DnsServerMXBean}) for this server, to register with any MBean server */
+	public Object managementBean() throws javax.management.NotCompliantMBeanException {
+		return new javax.management.StandardMBean(new DnsServerManagement(this), DnsServerMXBean.class, true);
+	}
+
+	/**
+	 * The DNS server as a service of parley-net's launcher (see {@link DnsServerProvider}) or of main():
+	 * started and stopped by it, with its management bean registered while it runs.
+	 * <p>
+	 * The DNS server keeps some state per JVM (the shutdown flag, the TCP listener), so one runs in a
+	 * JVM at a time; it can be stopped and started again.
+	 * @param register registers the management bean (null: none)
+	 * @param unregister unregisters it when the server stops
+	 */
+	public static us.bringardner.parley.net.server.ServerMain.Service service(DnsServer svr, String name,
+			ManagementRegistrar register, java.util.function.Consumer<javax.management.ObjectName> unregister) {
+		final javax.management.ObjectName[] bean = new javax.management.ObjectName[1];
+		Runnable unregisterBean = () -> {
+			javax.management.ObjectName n;
+			synchronized(bean) {
+				n = bean[0];
+				bean[0] = null;
+			}
+			if( n != null && unregister != null ) {
+				unregister.accept(n);
+			}
+		};
+		return new us.bringardner.parley.net.server.ServerMain.Service() {
+			@Override
+			public String name() {
+				return name;
+			}
+
+			@Override
+			public void startAndWait(long timeoutMillis) throws IOException {
+				//  (a server stopped before in this JVM left the flag set)
+				setShutdown(false);
+				svr.start(true);
+				try {
+					svr.awaitStarted(timeoutMillis);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+					throw new IOException("Interrupted while the DNS server started", e);
+				}
+				if( register != null ) {
+					try {
+						javax.management.ObjectName n = register.register(svr.managementBean());
+						synchronized(bean) {
+							bean[0] = n;
+						}
+					} catch (javax.management.JMException | RuntimeException e) {
+						svr.logError("Can't register the DNS server's management bean; it runs without it", e);
+					}
+				}
+			}
+
+			@Override
+			public int port() {
+				int p = svr.getTcpPort();
+				return p > 0 ? p : Integer.getInteger(PROP_PORT, Message.DNSPORT);
+			}
+
+			@Override
+			public void stop(long timeoutMillis) throws InterruptedException {
+				try {
+					svr.stopAndWait(timeoutMillis);
+				} finally {
+					unregisterBean.run();
+				}
+			}
+
+			@Override
+			public void awaitStop() throws InterruptedException {
+				while( svr.isRunning() ) {
+					Thread.sleep(1000);
+				}
+				unregisterBean.run();
+			}
+		};
 	}
 
 	public List<Message> query(QueryData req) {
@@ -1768,6 +1859,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			failedToStart(new StartupException("Can't create admin socket on "+adminBindAddress+":"+getAdminPort()+": "+ex, ex, -2));
 			return;
 		}
+		startedAt = System.currentTimeMillis();
 		startLatch.countDown();
 		if( running && !isShutdown() ) {
 			startMaintenance();
@@ -2676,9 +2768,11 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				return ret;
 			}
 			ZoneUpdater.Result r;
+			//  An UPDATE changes the zone's own records: a zone with $INHERIT is built from them and its
+			//  primary's again (a signed zone is updated without its DNSSEC records, then signed again)
+			Zone own = zone.getOwn();
 			try {
-				//  (a signed zone is updated without its DNSSEC records, then signed again)
-				r = ZoneUpdater.apply(zone.getUnsigned(), reqMsg);
+				r = ZoneUpdater.apply(own, reqMsg);
 			} catch(RuntimeException ex) {
 				//  e.g. a record the zone file reader can't take: nothing was changed
 				logError("UPDATE of "+zone.getName()+" failed", ex);
@@ -2692,14 +2786,15 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				return ret;
 			}
 			//  Signed first: a change that can't be signed is not made (round 5 #88)
-				Zone served = prepareZone(r.zone, zone, true, zoneSet.zones, true);
+				Zone served = own.getInheritFrom() != null ? withInherited(r.zone, zoneSet.zones)
+						: prepareZone(r.zone, zone, true, zoneSet.zones, true);
 				if( served == null ) {
 					logError("UPDATE of "+zone.getName()+" not made: the zone can't be signed");
 					ret.setResponseCodeServerFailure();
 					return ret;
 				}
 				try {
-					writeJournal(zone, r.journal, req);
+					writeJournal(own, r.journal, req);
 				} catch(IOException ex) {
 					logError("Can't write the journal of "+zone.getName()+"; the update was not made", ex);
 					ret.setResponseCodeServerFailure();
@@ -2713,6 +2808,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				if( nf != null ) {
 					nf.notifyZone(served);
 				}
+				republishHeirs(served);
 			}
 			ret.getHeader().setRCODE(r.rcode);
 		}
@@ -2785,6 +2881,130 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 		Zone def = cur.defaultZone == old ? updated : cur.defaultZone;
 		zoneSet = new ZoneSet(Collections.unmodifiableMap(zones), def, Collections.unmodifiableMap(byFile));
+	}
+
+	/** When it started serving (ms since the epoch), or 0 */
+	public long getStartedAt() {
+		return running ? startedAt : 0;
+	}
+
+	/** The TCP port it serves, once started */
+	public int getTcpPort() {
+		return servingTcpPort;
+	}
+
+	/** The names of the TSIG keys that may send dynamic updates */
+	public java.util.Set<String> getUpdateKeyNames() {
+		return updateKeys;
+	}
+
+	/** The folder of the zone files, once they are loaded */
+	public File getZoneDirectory() {
+		return zoneDir;
+	}
+
+	/** Zone files that failed to load and zones that can't inherit, as "file or zone: why", sorted */
+	public List<String> getZoneErrors() {
+		List<String> ret = new ArrayList<String>();
+		for(Map.Entry<String, String> e : new java.util.TreeMap<String, String>(zoneErrors).entrySet()) {
+			ret.add(e.getKey()+": "+e.getValue());
+		}
+		return ret;
+	}
+
+	/**
+	 * Register the management bean ({@link DnsServerMXBean}) as
+	 * {@code us.bringardner.parley:type=Dns,name=NAME} (with {@code ,instance=N} when the name is taken);
+	 * it is unregistered when the server stops. main() does this on the platform MBean server, where
+	 * the JVM's own settings (com.sun.management.jmxremote.*) make it reachable remotely.
+	 * @return its name
+	 */
+	public javax.management.ObjectName registerManagement(javax.management.MBeanServer mbeans, String name)
+			throws javax.management.JMException {
+		String base = "us.bringardner.parley:type=Dns,name="+javax.management.ObjectName.quote(name);
+		if( name.matches("[A-Za-z0-9_.\\-]+") ) {
+			base = "us.bringardner.parley:type=Dns,name="+name;
+		}
+		for(int i = 1;; i++) {
+			javax.management.ObjectName n = new javax.management.ObjectName(i == 1 ? base : base+",instance="+i);
+			try {
+				mbeans.registerMBean(new javax.management.StandardMBean(new DnsServerManagement(this), DnsServerMXBean.class, true), n);
+				managementServer = mbeans;
+				managementName = n;
+				return n;
+			} catch(javax.management.InstanceAlreadyExistsException e) {
+				if( i > 100 ) {
+					throw e;
+				}
+			}
+		}
+	}
+
+	void unregisterManagement() {
+		javax.management.ObjectName n = managementName;
+		javax.management.MBeanServer m = managementServer;
+		managementName = null;
+		if( n != null && m != null ) {
+			try {
+				m.unregisterMBean(n);
+			} catch(javax.management.JMException ignore) {
+				//  gone already
+			}
+		}
+	}
+
+	/**
+	 * The zone to serve for a zone with an $INHERIT line: its own records plus its primary's
+	 * (see {@link Zone#inherit(Zone, Zone)}). When the primary isn't served, or inherits from
+	 * another zone itself, only the zone's own records are served (logged). Such a zone is
+	 * not signed: DNSSEC keys for it are not used (logged).
+	 * @param own the zone as loaded (and updated)
+	 * @param zones the zones served (or about to be), by lower case name
+	 */
+	private Zone withInherited(Zone own, Map<String, Zone> zones) {
+		String from = own.getInheritFrom();
+		Zone parent = zones.get(from);
+		String key = "zone "+own.getName().toLowerCase();
+		if( parent == null ) {
+			String why = "inherits from "+from+", which is not served: serving only its own records";
+			logError("Zone "+own.getName()+" "+why);
+			zoneErrors.put(key, why);
+			return own;
+		}
+		if( parent.getOwn().getInheritFrom() != null ) {
+			String why = "inherits from "+from+", which inherits from "+parent.getOwn().getInheritFrom()
+					+" itself: only one level is supported, serving only its own records";
+			logError("Zone "+own.getName()+" "+why);
+			zoneErrors.put(key, why);
+			return own;
+		}
+		zoneErrors.remove(key);
+		List<DnssecKey> keys = dnssecKeys.get(Canonical.key(own.getName()));
+		if( keys != null && !keys.isEmpty() ) {
+			logError("DNSSEC: "+own.getName()+" inherits from "+from+", and such zones are not signed: its keys in "
+					+getDnssecKeyDir()+" are not used");
+		}
+		return Zone.inherit(own, parent.getUnsigned());
+	}
+
+	/**
+	 * After a zone changed (an UPDATE, signed again with a new serial): the zones that inherit
+	 * from it are built again and published, and their secondaries get a NOTIFY.
+	 */
+	private void republishHeirs(Zone parent) {
+		String key = parent.getName().toLowerCase();
+		ZoneSet cur = zoneSet;
+		for(Zone z : new ArrayList<Zone>(cur.zones.values())) {
+			Zone own = z.getOwn();
+			if( key.equals(own.getInheritFrom()) ) {
+				Zone served = withInherited(own, zoneSet.zones);
+				publishUpdatedZone(z, served);
+				ZoneNotifier nf = notifier;
+				if( nf != null ) {
+					nf.notifyZone(served);
+				}
+			}
+		}
 	}
 
 	/** Most SVCB/HTTPS AliasMode records followed for the additional section. */
@@ -3289,6 +3509,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			if( nf != null ) {
 				nf.notifyZone(served);
 			}
+			republishHeirs(served);
 			ret++;
 		}
 		return ret;
@@ -3340,6 +3561,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 
 	public void stop() 	{
+		unregisterManagement();
 		running = false;
 		shutdown = true;
 		//  TCP (NioServer) doesn't watch the shutdown flag: stop accepting and close connections

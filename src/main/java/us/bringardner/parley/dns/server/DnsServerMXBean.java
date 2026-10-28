@@ -1,0 +1,62 @@
+package us.bringardner.parley.dns.server;
+
+/**
+ * The DNS server as JMX sees it ({@code us.bringardner.parley:type=Dns,name=DnsServer}), for
+ * management tools such as parley-mail-admin. It is an MXBean, so every attribute is a JMX open
+ * type and a generic client (JConsole) can read it.
+ * <p>
+ * Records are not changed here: send a dynamic update (RFC 2136), signed with a key in
+ * {@code parley.dns.updateKeys}, to {@link #getTcpPort()}. The update is journaled and the
+ * secondaries are told, as for any other update.
+ *
+ * @since 2.0.0
+ */
+public interface DnsServerMXBean {
+
+	/** RUNNING or STOPPED */
+	String getState();
+
+	/** When it started (ms since the epoch), or 0 */
+	long getStarted();
+
+	/** The TCP port it answers on (dynamic updates go there) */
+	int getTcpPort();
+
+	/** Whether it resolves names that are not in its zones for clients that ask */
+	boolean isRecursionAvailable();
+
+	/** The names of the TSIG keys allowed to send dynamic updates (never the secrets) */
+	String[] getUpdateKeyNames();
+
+	/** The folder of the zone files */
+	String getZoneDirectory();
+
+	/** Every zone served, by name */
+	DnsZoneInfo[] getZones();
+
+	/**
+	 * The records of a zone, with the inherited ones marked (see {@code $INHERIT} in the README).
+	 * @throws IllegalArgumentException if the zone isn't served
+	 */
+	DnsRecordInfo[] getRecords(String zone);
+
+	/** Zone files that failed to load, or zones that can't inherit: "file or zone: why" */
+	String[] getErrors();
+
+	/**
+	 * Read the zone files again (changed files only; a zone that fails keeps its previous version)
+	 * and build the inheriting zones again.
+	 */
+	void reload() throws Exception;
+
+	/**
+	 * Make the zone file of a domain that inherits from another zone (a {@code $INHERIT} line and an
+	 * SOA like the primary's, serial 1) and load it. The domain then serves the primary's records
+	 * until it adds or overrides some.
+	 * @param zone the domain, e.g. example.com
+	 * @param inheritFrom the zone it inherits from, which must be served (e.g. the primary domain)
+	 * @throws IllegalArgumentException if the name isn't a domain name, the zone exists or
+	 *  inheritFrom isn't served
+	 */
+	void createInheritingZone(String zone, String inheritFrom) throws Exception;
+}

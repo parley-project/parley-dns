@@ -111,6 +111,112 @@ public class Zone implements DNS {
 		return s == null ? this : s.unsigned;
 	}
 
+	//  $INHERIT: the zone whose records this one serves too (lower case, no trailing dot), or null
+	private String inheritFrom;
+
+	//  Set on a zone built by inherit(): the zone as loaded (and updated), before the inherited records
+	private Zone own;
+
+	/**
+	 * The zone this one inherits from (its $INHERIT line), lower case without the trailing dot, or null
+	 * if it inherits nothing.
+	 */
+	public String getInheritFrom() {
+		return inheritFrom;
+	}
+
+	/**
+	 * The zone's own records, without the inherited ones (see {@link #inherit(Zone, Zone)}): itself
+	 * if it inherits nothing. Dynamic updates change these, and the journal belongs to them.
+	 */
+	public Zone getOwn() {
+		Zone u = getUnsigned();
+		return u.own == null ? u : u.own;
+	}
+
+	/** @return true if this zone was built by {@link #inherit(Zone, Zone)} (it holds inherited records). */
+	public boolean isInherited() {
+		return getUnsigned().own != null;
+	}
+
+	/**
+	 * A record type that inherit() never copies: the SOA (the zone keeps its own) and DNSSEC data,
+	 * which belongs to the zone it was signed for.
+	 */
+	static boolean isNotInherited(int type) {
+		return type == SOA || type == DNSKEY || type == RRSIG || type == NSEC || type == NSEC3
+				|| type == NSEC3PARAM || type == DS;
+	}
+
+	/**
+	 * The zone served for a zone with an $INHERIT line: its own records, plus every record of
+	 * 'parent' (the primary zone) under the same relative name, renamed into this zone.
+	 * <ul>
+	 * <li>A record of a type this zone has at that name is overridden: this zone's records of that type
+	 *     are served, the parent's of that type are not (e.g. its own MX replaces the inherited MX, and
+	 *     its own TXT at the apex replaces every inherited TXT there).</li>
+	 * <li>A CNAME can't share its name (RFC 1034 3.6.2): an own CNAME hides everything inherited at its
+	 *     name, and an inherited CNAME is left out where this zone has records of its own.</li>
+	 * <li>The parent's SOA and DNSSEC records are never inherited. Record data is copied as written:
+	 *     names in it (an MX's mail server, a CNAME's target) are not renamed, so they keep pointing at
+	 *     the parent's hosts.</li>
+	 * <li>The SOA's serial is the sum of this zone's and the parent's (modulo 2^32), so it goes up when
+	 *     either changes and secondaries transfer the zone again.</li>
+	 * </ul>
+	 * @param own the zone as loaded (and updated), with its $INHERIT line
+	 * @param parent the zone it inherits from, unsigned
+	 * @return a new zone; {@link #getOwn()} gives 'own' back
+	 */
+	public static Zone inherit(Zone own, Zone parent) {
+		Zone z = own.copyForUpdate();
+		z.own = own;
+		String apex = stripDot(own.name);
+		String parentApex = stripDot(parent.name).toLowerCase(java.util.Locale.ROOT);
+		//  the types this zone has at each name (lower case)
+		java.util.Map<String, java.util.Set<Integer>> ownTypes = new java.util.HashMap<String, java.util.Set<Integer>>();
+		for(int i=0; i < own.names.size(); i++ ) {
+			java.util.Set<Integer> types = ownTypes.computeIfAbsent(
+					stripDot(own.names.get(i).toString()).toLowerCase(java.util.Locale.ROOT), k -> new java.util.HashSet<Integer>());
+			for(RR rr : own.rrs.get(i)) {
+				types.add(rr.getType());
+			}
+		}
+		//  the apex has the SOA, kept apart from the records
+		ownTypes.computeIfAbsent(apex.toLowerCase(java.util.Locale.ROOT), k -> new java.util.HashSet<Integer>()).add(SOA);
+		List<RR> add = new ArrayList<RR>();
+		for(int i=0; i < parent.names.size(); i++ ) {
+			String pn = stripDot(parent.names.get(i).toString());
+			String lower = pn.toLowerCase(java.util.Locale.ROOT);
+			String target;
+			if( lower.equals(parentApex) ) {
+				target = apex;
+			} else if( lower.endsWith("."+parentApex) ) {
+				target = pn.substring(0, pn.length()-parentApex.length()-1)+"."+apex;
+			} else {
+				continue;
+			}
+			java.util.Set<Integer> types = ownTypes.get(target.toLowerCase(java.util.Locale.ROOT));
+			for(RR rr : parent.rrs.get(i)) {
+				int t = rr.getType();
+				if( isNotInherited(t) ) {
+					continue;
+				}
+				if( types != null && (types.contains(CNAME) || t == CNAME || types.contains(t)) ) {
+					continue;
+				}
+				RR c = rr.copy();
+				c.setName(target);
+				add.add(c);
+			}
+		}
+		z.addRecords(add);
+		Soa soa = (Soa)own.soa.copy();
+		soa.setSerial(own.soa.getSerial()+parent.soa.getSerial());
+		z.replaceSoa(soa);
+		z.setWildCards(true);
+		return z;
+	}
+
 	public List<Name> getNames() {
 		return names;
 	}
@@ -1202,7 +1308,7 @@ public class Zone implements DNS {
 		return n.endsWith(".") ? n.substring(0, n.length()-1) : n;
 	}
 
-	/** $ORIGIN, $TTL and $INCLUDE (RFC 1035 5.1, RFC 2308 4). */
+	/** $ORIGIN, $TTL and $INCLUDE (RFC 1035 5.1, RFC 2308 4), and Parley's $INHERIT. */
 	private void directive(File file, List<String> list, int depth) throws IOException {
 		String d = list.get(0).toUpperCase(java.util.Locale.ROOT);
 		switch(d) {
@@ -1251,6 +1357,24 @@ public class Zone implements DNS {
 				originSet = savedOriginSet;
 				lastOwner = savedOwner;
 			}
+			break;
+		}
+		case "$INHERIT": {
+			//  Parley's own: serve the records of another zone (the primary) too, see inherit()
+			if( list.size() != 2 ) {
+				throw new IllegalArgumentException("$INHERIT needs one zone name");
+			}
+			if( depth > 0 ) {
+				throw new IllegalArgumentException("$INHERIT must be in the zone file itself, not in a file it includes");
+			}
+			if( inheritFrom != null ) {
+				throw new IllegalArgumentException("$INHERIT is given twice");
+			}
+			String from = stripDot(list.get(1)).toLowerCase(java.util.Locale.ROOT);
+			if( from.isEmpty() || from.equals(stripDot(name).toLowerCase(java.util.Locale.ROOT)) ) {
+				throw new IllegalArgumentException("$INHERIT needs another zone's name");
+			}
+			inheritFrom = from;
 			break;
 		}
 		default:
@@ -1684,6 +1808,7 @@ public class Zone implements DNS {
 		z.includedFiles = includedFiles;
 		z.presignedSigs = presignedSigs;
 		z.presignedNsec3 = presignedNsec3;
+		z.inheritFrom = inheritFrom;
 		z.names = new ArrayList<Name>(names);
 		z.rrs = new ArrayList<List<RR>>();
 		for(List<RR> l : rrs) {

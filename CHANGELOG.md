@@ -2,6 +2,17 @@
 
 ## parley-dns 2.0.0 (unreleased)
 
+### Added
+
+- **`$INHERIT zone`** in a zone file: the zone serves the records of another zone (the primary domain's) too,
+  renamed into it, and its own records add to them or override them by name and type. Updates change the
+  zone's own records; a change to the primary reaches every zone that inherits from it. See the README.
+- **JMX**: `us.bringardner.parley:type=Dns,name=…` (`DnsServerMXBean`): state, the zones (own and inherited
+  serials and records), each zone's records marked own or inherited, load errors, reload, and making an
+  inheriting zone for a new domain. `DnsServer.main` registers it on the platform MBean server.
+- **`DnsServerProvider`**: `dns` in parley-net's launcher (`parley.servers`), so DNS runs and is managed
+  like every Parley server (`us.bringardner.parley:type=Server,name=dns`), with its `Dns` bean while it runs.
+
 ### Changed
 
 - **`DnsServer.main` runs the server as a service** with parley-net's `ServerMain.run`: settings from the command
