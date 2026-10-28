@@ -43,6 +43,68 @@ Each `<zone>.txt` file in `parley.dns.zoneDir` is one zone, in the RFC 1035 mast
  +  Parentheses can span lines anywhere in a record, and `;` starts a comment except inside quotes.
  +  A zone file that fails to load is reported with the file name and line number (and the previous version keeps being served).
 
+# Inherited zones ($INHERIT)
+
+A domain can serve the records of another zone, the primary domain's, so many domains share one set of
+records: `$INHERIT bringardner.us.` in `example.com.txt` (in the zone file itself, once; the file still needs its
+own SOA).
+
+ +  Every record of the primary is served in the domain under the same relative name: the primary's `www`
+    is `www.example.com`, its apex MX is example.com's MX. The record data is copied as written, so names in
+    it (an MX's mail server, a CNAME's target) still point at the primary's hosts.
+ +  The domain's own records add to them, or override them by name and type: an own MX replaces the
+    inherited MX, and an own TXT at a name replaces every inherited TXT there. An own CNAME hides everything
+    inherited at its name, and an inherited CNAME is left out where the domain has records of its own.
+ +  The primary's SOA and DNSSEC records are not inherited. The SOA served is the domain's, with the sum of
+    the two serials, so it goes up when either zone changes and secondaries transfer the domain again.
+ +  An inherited NS record below the apex (a delegation) is left out where the domain has records of its
+    own at or below its name, so it doesn't send them elsewhere.
+ +  Dynamic updates of the domain change its own records (and its journal); an update or edit of the
+    primary reaches every domain that inherits from it. Only one level: a primary can't inherit itself.
+    An update sees only the domain's own records: deleting an inherited record changes nothing (override
+    it with a record of its own instead), a prerequisite on an inherited record fails, and an SOA
+    prerequisite compares the domain's own serial.
+ +  When the primary isn't served (its file removed or broken), the domain keeps serving what it served
+    with it; at a start without the primary it serves only its own records. A serial that goes down (the
+    `$INHERIT` line removed, say) is logged: raise the zone file's serial above the one served.
+ +  Inheriting zones are not signed (DNSSEC keys for them are not used).
+
+# Mail domains (parley.dns.mailSettings)
+
+With `parley.dns.mailSettings` naming the mail servers' shared settings (the mail queue's `queue.properties`,
+which parley-mail-admin's Domains page edits), the mail domains need no zone files:
+
+ +  Each domain in its `domains` that has no zone of its own is served as a zone inheriting from
+    `parley.dns.masterZone` (as with `$INHERIT` above, with an SOA like the master's, serial 1), made in memory.
+    A domain added there is served within the maintenance round; one removed is no longer served.
+ +  Its zone file is written only when one of its records is changed (a dynamic update, e.g. from
+    parley-mail-admin's DNS page), so the change can be journaled beside it; from then on it is a zone with a
+    file, its own records overriding the master's, and it stays served if the domain leaves the list.
+    Writing it is refused while an old journal of that zone is there.
+ +  DKIM: a mail domain signs with the shared key (parley-smtp's `dkim.shared`), whose record
+    (`selector._domainkey`) it inherits from the master zone, so it needs no zone file for it. A domain
+    with a key of its own has that key's record in its own zone (which then has a file). The keys in
+    `dkim.keys` aren't served from the settings.
+ +  The master zone answers `domain._report._dmarc.master` with `v=DMARC1` for each listed domain outside
+    the master's own (RFC 7489 7.1), so the reports an inherited DMARC record asks for, at an address in the
+    master domain, are sent.
+ +  Problems (a name that isn't a domain) are logged and reported with the zone
+    errors (JMX `getErrors`); the rest is served.
+ +  These records are not part of zone transfers: a secondary gets the zones' own and inherited records.
+
+# Management (JMX)
+
+`us.bringardner.parley:type=Dns,name=…` (`DnsServerMXBean`, an MXBean any JMX client can read) gives the
+server's state, its zones (inherited from, served and own serials, record counts, signed), a zone's records
+marked own or inherited, the zone files that failed to load, `reload()`, and `createInheritingZone(domain, primary)`,
+which writes the domain's zone file (an `$INHERIT` line and an SOA like the primary's) and loads it. Records are
+changed with dynamic updates signed with a key in `parley.dns.updateKeys`, sent to its TCP port.
+
+`DnsServer.main` runs parley-net's launcher with the DNS server (`DnsServerProvider`, `dns` in
+`parley.servers`), as the other Parley servers' main methods do: on the platform MBean server (reach it with
+the JVM's `com.sun.management.jmxremote.*` settings) the server is `us.bringardner.parley:type=Server,name=dns`,
+like every Parley server, and its `Dns` bean is registered while it runs. One DNS server runs in a JVM.
+
 # Dynamic update (RFC 2136)
 
 Allowed for requests signed with a key in `parley.dns.updateKeys`, or unsigned from an address in `parley.dns.updateAllow` (over TCP, or over UDP from this machine); everyone else gets REFUSED. Prerequisites, adds and all three kinds of delete are supported, with the RFC's rules (the apex SOA and NS RRset can't be deleted, never the last NS, no other data next to a CNAME). An update is all or nothing.
@@ -221,6 +283,7 @@ A bind address of `localhost` means this host's own name (its network address), 
 | `parley.dns.dnsDir` | `/data/services/dns/config` | Directory for the dynamic entries file, the TSIG key file and the root hints (`sbelt.prop`) |
 | `parley.dns.zoneDir` | `zones` | Directory of the zone files (`<zone>.txt`); a changed file is reloaded |
 | `parley.dns.masterZone` | required | The default zone: answers for the common domains (see Major Features) come from it |
+| `parley.dns.mailSettings` | none | The mail servers' shared settings (the mail queue's `queue.properties`): its domains are served from the master zone with no zone files (see Mail domains) |
 | `parley.dns.dynamicFileName` | `dynamic.txt` | Dynamic entries file, relative to `parley.dns.dnsDir` (used without a database) |
 | `parley.dns.debug` | true | Debug logging checks; false skips the work of building debug messages |
 | `parley.dns.recursionAvailable` | true | Recursion available: resolve names that are not in our zones for clients that ask for it |

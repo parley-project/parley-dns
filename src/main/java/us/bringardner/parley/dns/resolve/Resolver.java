@@ -33,6 +33,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -429,6 +430,8 @@ public class Resolver  extends DnsBaseClass
 
 		Iterator<Object> it = p.keySet().iterator();
 
+		//  The file's list replaces the one of an earlier start in this JVM (it used to be added to it)
+		List<RemoteServer> fromFile = new ArrayList<RemoteServer>();
 		while( it.hasNext() ) {
 			String key = (String)it.next();
 			RemoteServer svr = new RemoteServer(key);
@@ -437,7 +440,11 @@ public class Resolver  extends DnsBaseClass
 			String parts[] = val.split(",");
 			String ip4 = parts[0];
 			svr.addAddress(key,ip4);
-			sbelt.add(svr);
+			fromFile.add(svr);
+		}
+		if( !fromFile.isEmpty() ) {
+			sbelt.clear();
+			sbelt.addAll(fromFile);
 		}
 		//sbeltSize = sbelt.size();
 
