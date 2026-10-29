@@ -57,6 +57,29 @@ final class SharedZone {
 		return warnings;
 	}
 
+	/** The file's text as it is now (UTF-8), or null when there is no file. */
+	String fileText() throws IOException {
+		if( !file.exists() ) {
+			return null;
+		}
+		return new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
+	}
+
+	/**
+	 * Check a text as this shared zone, as {@link #read()} checks the file.
+	 * @return its SOA serial (unsigned)
+	 * @throws IOException naming the file and line if it isn't a valid shared zone
+	 */
+	long check(String t) throws IOException {
+		Zone z = parse(CHECK, t, file.getAbsoluteFile().getParentFile());
+		return Integer.toUnsignedLong(z.getSoa().getSerial());
+	}
+
+	/** Read the file at the next {@link #read()} even if its time and length look unchanged. */
+	void forget() {
+		stamp = null;
+	}
+
 	/**
 	 * Read the file again if it changed, checking it as a zone.
 	 * @return true if a new version was read

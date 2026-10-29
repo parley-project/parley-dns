@@ -59,4 +59,28 @@ public interface DnsServerMXBean {
 	 *  already, or the shared zone isn't set or can't be read
 	 */
 	void createInheritingZone(String zone) throws Exception;
+
+	/** The shared zone's file ({@code parley.dns.sharedZone}), or null when it isn't set */
+	String getSharedZoneFile();
+
+	/**
+	 * The text of the shared zone's file as it is now.
+	 * @throws IllegalStateException if {@code parley.dns.sharedZone} isn't set or its file doesn't exist
+	 */
+	String getSharedZoneText() throws Exception;
+
+	/**
+	 * Replace the shared zone's file with this text and serve it at once: every listed domain and
+	 * every zone with {@code $INHERIT} serves the new records. The text is checked as the file is
+	 * when it is read, the file is replaced whole, and the one it replaces is kept as
+	 * {@code <file>.previous}.
+	 * @param text the new text (line ends written as \n)
+	 * @param expected the text it replaces, as {@link #getSharedZoneText()} returned it, so a change
+	 *  made since isn't lost; null to replace whatever is there
+	 * @throws IllegalArgumentException if the text isn't a valid shared zone, or its SOA serial isn't
+	 *  higher than the file's (secondaries would not see the change)
+	 * @throws IllegalStateException if the shared zone isn't set, or its file changed since
+	 *  {@code expected} was read
+	 */
+	void setSharedZoneText(String text, String expected) throws Exception;
 }

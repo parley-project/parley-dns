@@ -167,6 +167,47 @@ public class TestDnsManagement {
 	}
 
 	@Test
+	public void editTheSharedZone() throws Exception {
+		File f = new File(dir, "shared.zone");
+		assertEquals(f.getAbsolutePath(), bean.getSharedZoneFile());
+		String before = bean.getSharedZoneText();
+		assertEquals(TestInheritedZones.primary(10, ""), before);
+
+		//  a record added (sent with \r\n line ends, as a browser does): the inheriting zone serves it at once
+		String after = TestInheritedZones.primary(11, "added\tIN\tA\t10.9.9.9\n");
+		bean.setSharedZoneText(after.replace("\n", "\r\n"), before);
+		assertEquals(after, new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8));
+		assertEquals(after, bean.getSharedZoneText());
+		assertEquals(before, new String(Files.readAllBytes(new File(dir, "shared.zone.previous").toPath()), StandardCharsets.UTF_8));
+		assertEquals("[A 10.9.9.9 (inherited)]", records("child.test", "added.child.test").toString());
+		assertEquals(16, zone("child.test").getSerial());
+
+		//  refused, and the file left as it is: the serial not raised, not a zone, a $INHERIT line,
+		//  an empty text, and a change made since the text was read
+		assertThrows(IllegalArgumentException.class, () -> bean.setSharedZoneText(TestInheritedZones.primary(11, "x\tIN\tA\t10.0.0.1\n"), after));
+		assertThrows(IllegalArgumentException.class, () -> bean.setSharedZoneText("not a zone\n", after));
+		assertThrows(IllegalArgumentException.class, () -> bean.setSharedZoneText("$INHERIT\n"+TestInheritedZones.primary(12, ""), after));
+		assertThrows(IllegalArgumentException.class, () -> bean.setSharedZoneText("  \n", after));
+		assertThrows(IllegalStateException.class, () -> bean.setSharedZoneText(TestInheritedZones.primary(12, ""), before));
+		assertEquals(after, bean.getSharedZoneText());
+		assertEquals("[A 10.9.9.9 (inherited)]", records("child.test", "added.child.test").toString());
+
+		//  null for expected: whatever is there is replaced
+		bean.setSharedZoneText(TestInheritedZones.primary(12, ""), null);
+		assertEquals("[]", records("child.test", "added.child.test").toString());
+		assertEquals(0, bean.getErrors().length);
+	}
+
+	@Test
+	public void noSharedZone() throws Exception {
+		System.clearProperty(DnsServer.PROP_SHARED_ZONE);
+		server.loadZones();
+		assertNull(bean.getSharedZoneFile());
+		assertThrows(IllegalStateException.class, () -> bean.getSharedZoneText());
+		assertThrows(IllegalStateException.class, () -> bean.setSharedZoneText(TestInheritedZones.primary(11, ""), null));
+	}
+
+	@Test
 	public void unregisteredWhenStopped() throws Exception {
 		ObjectName n = new ObjectName("us.bringardner.parley:type=Dns,name=DnsServer");
 		assertTrue(mbeans.isRegistered(n));

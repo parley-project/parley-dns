@@ -181,6 +181,96 @@ class DnsServerManagement implements DnsServerMXBean {
 		}
 	}
 
+	@Override
+	public String getSharedZoneFile() {
+		SharedZone s = server.getSharedZone();
+		return s == null ? null : s.getFile().getPath();
+	}
+
+	@Override
+	public String getSharedZoneText() throws Exception {
+		SharedZone s = requireShared();
+		String t = s.fileText();
+		if( t == null ) {
+			throw new IllegalStateException("The shared zone's file "+s.getFile()+" doesn't exist");
+		}
+		return t;
+	}
+
+	@Override
+	public void setSharedZoneText(String text, String expected) throws Exception {
+		//  (the server's lock, as for createInheritingZone)
+		synchronized(server) {
+			writeShared(text, expected);
+		}
+	}
+
+	private SharedZone requireShared() {
+		SharedZone s = server.getSharedZone();
+		if( s == null ) {
+			throw new IllegalStateException(DnsServer.PROP_SHARED_ZONE+" is not set: there is no shared zone");
+		}
+		return s;
+	}
+
+	private void writeShared(String text, String expected) throws Exception {
+		SharedZone s = requireShared();
+		if( text == null || text.trim().isEmpty() ) {
+			throw new IllegalArgumentException("The shared zone's text is empty");
+		}
+		String t = lines(text);
+		if( !t.endsWith("\n") ) {
+			t += "\n";
+		}
+		String now = s.fileText();
+		if( expected != null && (now == null || !lines(now).equals(lines(expected))) ) {
+			throw new IllegalStateException("The shared zone was changed since it was read: read it again and make the change again");
+		}
+		long serial;
+		try {
+			serial = s.check(t);
+		} catch(java.io.IOException e) {
+			throw new IllegalArgumentException(e.getMessage(), e);
+		}
+		if( now != null ) {
+			long old = -1;
+			try {
+				old = s.check(now);
+			} catch(java.io.IOException e) {
+				//  the file there isn't valid: any serial replaces it
+			}
+			if( old >= 0 && serial <= old ) {
+				throw new IllegalArgumentException("Raise the SOA serial: it is "+serial+" and must be higher than "+old
+						+", so secondaries see the change");
+			}
+		}
+		File f = s.getFile().getAbsoluteFile();
+		File dir = f.getParentFile();
+		File tmp = File.createTempFile("."+f.getName(), ".tmp", dir);
+		try {
+			Files.write(tmp.toPath(), t.getBytes(StandardCharsets.UTF_8));
+			if( f.exists() ) {
+				try {
+					Files.setPosixFilePermissions(tmp.toPath(), Files.getPosixFilePermissions(f.toPath()));
+				} catch(UnsupportedOperationException e) {
+					//  not a POSIX file system
+				}
+				Files.copy(f.toPath(), new File(dir, f.getName()+".previous").toPath(),
+						java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.COPY_ATTRIBUTES);
+			}
+			Files.move(tmp.toPath(), f.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+		} finally {
+			tmp.delete();
+		}
+		//  (read even if an edit in the same millisecond left its time and length as they were)
+		s.forget();
+		server.loadZones();
+	}
+
+	private static String lines(String t) {
+		return t.replace("\r\n", "\n").replace('\r', '\n');
+	}
+
 	private static String strip(String n) {
 		return n.endsWith(".") ? n.substring(0, n.length()-1) : n;
 	}
