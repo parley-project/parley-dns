@@ -1466,7 +1466,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				Long prevModified = oldSeen == null ? null : oldSeen.get(fileName);
 				Zone z = null;
 				if( prev != null && prevModified != null && prevModified.longValue() == zoneStamp(modified, prev) ) {
-					//  (its own records: the inherited ones are added again below, the primary may have changed)
+					//  (its own records: the inherited ones are added again below, the shared zone may have changed)
 					z = prev.getOwn();
 				} else {
 					try {
@@ -1507,7 +1507,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			for(Map.Entry<String, Zone> e : new ArrayList<Map.Entry<String, Zone>>(byFile.entrySet())) {
 				Zone loaded = e.getValue();
 				if( loaded.getInheritFrom() != null ) {
-					//  built from its primary below (and not signed)
+					//  built from the shared zone below (and not signed)
 					continue;
 				}
 				Zone served = prepareZone(loaded, old.byFile.get(e.getKey()), false, unsignedByName);
@@ -1519,7 +1519,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 					}
 				}
 			}
-			//  $INHERIT: each such zone gets the records of its primary too (after the primaries are signed);
+			//  $INHERIT: each such zone gets the shared zone's records too (after the zones without $INHERIT are signed);
 			//  the errors about inheriting are found again
 			zoneErrors.keySet().removeIf(k -> k.startsWith("zone "));
 			for(Map.Entry<String, Zone> e : new ArrayList<Map.Entry<String, Zone>>(byFile.entrySet())) {
@@ -1559,7 +1559,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				if( before != null && serialBefore(z.getSoa().getSerial(), before.getSoa().getSerial()) ) {
 					logError("Zone "+z.getName()+": its serial went down, from "+Integer.toUnsignedString(before.getSoa().getSerial())
 							+" to "+Integer.toUnsignedString(z.getSoa().getSerial())+"; secondaries won't transfer it. Raise the serial in its zone file"
-							+(z.isInherited() || before.isInherited() ? " (an inheriting zone serves its own serial plus its primary's)" : ""));
+							+(z.isInherited() || before.isInherited() ? " (an inheriting zone serves its own serial plus the shared zone's)" : ""));
 				}
 			}
 			//  NOTIFY secondaries about new zones and changed serials (RFC 1996)
@@ -2894,7 +2894,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			}
 			ZoneUpdater.Result r;
 			//  An UPDATE changes the zone's own records: a zone with $INHERIT is built from them and its
-			//  primary's again (a signed zone is updated without its DNSSEC records, then signed again)
+			//  the shared zone's again (a signed zone is updated without its DNSSEC records, then signed again)
 			Zone own = zone.getOwn();
 			if( own.isVirtual() ) {
 				//  A mail domain's zone has no file until its records change: write it now, for the journal

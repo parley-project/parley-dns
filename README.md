@@ -143,8 +143,8 @@ its name, plus its own:
 
 `us.bringardner.parley:type=Dns,name=…` (`DnsServerMXBean`, an MXBean any JMX client can read) gives the
 server's state, its zones (inherited from, served and own serials, record counts, signed), a zone's records
-marked own or inherited, the zone files that failed to load, `reload()`, and `createInheritingZone(domain, primary)`,
-which writes the domain's zone file (an `$INHERIT` line and an SOA like the primary's) and loads it. Records are
+marked own or inherited, the zone files that failed to load, `reload()`, and `createInheritingZone(domain)`,
+which writes the domain's zone file (an `$INHERIT` line and an SOA like the shared zone's, serial 1) and loads it. Records are
 changed with dynamic updates signed with a key in `parley.dns.updateKeys`, sent to its TCP port.
 
 `DnsServer.main` runs parley-net's launcher with the DNS server (`DnsServerProvider`, `dns` in
