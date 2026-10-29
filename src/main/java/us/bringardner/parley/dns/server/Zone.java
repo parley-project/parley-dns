@@ -407,155 +407,15 @@ public class Zone implements DNS {
 		String rrName = fixName((String)list.get(0));
 
 
-		switch ( type ) {
-		case  A:  	rr = new A(rrName,dnsClass);
-		((A)rr).setAddress((String)list.get(3));
-		break;
-		case NS:	rr = new Ns(rrName,dnsClass);
-		((Ns)rr).setNs(fixName((String)list.get(3)));
-		break;
-		case CNAME:	rr = new Cname(rrName,dnsClass);
-		((Cname)rr).setCname(fixName((String)list.get(3)));
-		break;
-		case PTR:	rr = new Ptr(rrName,dnsClass);
-		((Ptr)rr).setPtr(fixName((String)list.get(3)));
-		break;
-		case MX:	rr = new Mx(rrName,dnsClass);
-		if( list.size() > 4 ) {
-			((Mx)rr).setPref((short)Integer.parseInt((String)list.get(3)));
-			((Mx)rr).setExchange(fixName((String)list.get(4)));
-		} else {
-			//  Some 'asshole' ignored the preference!
-			((Mx)rr).setExchange(fixName((String)list.get(3)));
+		//  (the readers of every type: RecordTypes)
+		RecordTypes.Def def = RecordTypes.get(type);
+		if( type == SOA ) {
+			throw new IllegalArgumentException("SOA records can only be at the start of a file");
 		}
-		break;
-
-
-		case SOA: throw new IllegalArgumentException("SOA records can only be at the start of a file");
-		case HINFO: Hinfo hi = new Hinfo(rrName,dnsClass);
-		rr = hi;
-		hi.setCpu((String)list.get(3));
-		hi.setOs((String)list.get(4));
-		break;
-
-
-		case TXT:
-			Txt txt = new Txt(rrName,dnsClass);
-			rr = txt;
-			txt.setStrings(characterStrings(list, 3));
-			break;
-
-		case AAAA:	rr = new AAAA(rrName,dnsClass);
-		((AAAA)rr).setAddress((String)list.get(3));
-		break;
-
-		case SRV: {
-			//  _service._proto.name TTL IN SRV priority weight port target
-			if( list.size() < 7 ) {
-				throw new IllegalArgumentException("SRV needs priority weight port target");
-			}
-			Srv srv = new Srv(rrName,dnsClass);
-			srv.setPriority(Integer.parseInt((String)list.get(3)));
-			srv.setWeight(Integer.parseInt((String)list.get(4)));
-			srv.setPort(Integer.parseInt((String)list.get(5)));
-			String target = (String)list.get(6);
-			srv.setTarget(target.equals(".") ? "" : fixName(target));
-			rr = srv;
-			break;
+		if( def == null || def.reader == null ) {
+			throw new IllegalArgumentException("Invalid or unsupported type "+type+" from '"+(String)list.get(2));
 		}
-
-		case SVCB:
-		case HTTPS: {
-			//  name TTL IN HTTPS priority target [key=value ...] (RFC 9460)
-			if( list.size() < 5 ) {
-				throw new IllegalArgumentException(Utility.TYPENAMES[type]+" needs priority and target");
-			}
-			Svcb svcb = type == HTTPS ? new Https(rrName,dnsClass) : new Svcb(rrName,dnsClass);
-			svcb.setPriority(Integer.parseInt((String)list.get(3)));
-			String target = (String)list.get(4);
-			svcb.setTarget(target.equals(".") ? "" : fixName(target));
-			svcb.setParams(new ArrayList<String>(list.subList(5, list.size())));
-			rr = svcb;
-			break;
-		}
-
-		case CAA: {
-			//  name TTL IN CAA flags tag "value"
-			if( list.size() < 6 ) {
-				throw new IllegalArgumentException("CAA needs flags tag value");
-			}
-			Caa caa = new Caa(rrName,dnsClass);
-			caa.setFlags(Integer.parseInt((String)list.get(3)));
-			caa.setTag((String)list.get(4));
-			caa.setValue((String)list.get(5));
-			rr = caa;
-			break;
-		}
-
-		case SSHFP: {
-			//  name TTL IN SSHFP algorithm fptype fingerprint (hex, may be split)
-			if( list.size() < 6 ) {
-				throw new IllegalArgumentException("SSHFP needs algorithm, fingerprint type and fingerprint");
-			}
-			us.bringardner.parley.dns.Sshfp fp = new us.bringardner.parley.dns.Sshfp(rrName,dnsClass);
-			fp.setAlgorithm(Integer.parseInt((String)list.get(3)));
-			fp.setFingerprintType(Integer.parseInt((String)list.get(4)));
-			fp.setFingerprint(String.join("", list.subList(5, list.size())));
-			rr = fp;
-			break;
-		}
-
-		case DS: {
-			//  name TTL IN DS keytag algorithm digesttype digest (the digest may be split)
-			if( list.size() < 7 ) {
-				throw new IllegalArgumentException("DS needs key tag, algorithm, digest type and digest");
-			}
-			us.bringardner.parley.dns.Ds ds = new us.bringardner.parley.dns.Ds(rrName,dnsClass);
-			ds.setKeyTag(Integer.parseInt((String)list.get(3)));
-			ds.setAlgorithm(Integer.parseInt((String)list.get(4)));
-			ds.setDigestType(Integer.parseInt((String)list.get(5)));
-			ds.setDigest(String.join("", list.subList(6, list.size())));
-			rr = ds;
-			break;
-		}
-
-		//  DNSSEC records: a zone signed elsewhere (dnssec-signzone, ...)
-		case DNSKEY:
-		case RRSIG:
-		case NSEC:
-		case NSEC3:
-		case NSEC3PARAM:
-			rr = PresignedRecords.parse(type, rrName, dnsClass, new ArrayList<String>(list.subList(3, list.size())), this::fixName);
-			break;
-
-		case RP: {
-			//  name TTL IN RP mbox-dname txt-dname (RFC 1183)
-			if( list.size() < 5 ) {
-				throw new IllegalArgumentException("RP needs mbox and txt names");
-			}
-			us.bringardner.parley.dns.Rp rp = new us.bringardner.parley.dns.Rp(rrName,dnsClass);
-			rp.setMboxDname(fixName((String)list.get(3)));
-			rp.setTxtDname(fixName((String)list.get(4)));
-			rr = rp;
-			break;
-		}
-
-		case SPF: Spf spf = new Spf(rrName,dnsClass);
-		rr = spf;
-		spf.setStrings(characterStrings(list, 3));
-		break;
-
-		case MD:
-		case MF:
-		case MB:
-		case MG:
-		case MR:
-		case NULL:
-		case WKS:
-		case MINFO:
-
-		default : throw new IllegalArgumentException("Invalid or unsupported type "+type+" from '"+(String)list.get(2));
-		}
+		rr = def.reader.read(type, rrName, dnsClass, list, this::fixName);
 
 		//  A TTL given in the file is used as is (it used to be raised to the
 		//  SOA's TTL); records without one get $TTL or the SOA's TTL.
@@ -1792,15 +1652,13 @@ public class Zone implements DNS {
 		}
 	}
 
-	/** Types a dynamic update can add (the ones the zone file reader understands). */
+	/**
+	 * Types a dynamic update can add: the ones the zone file reader understands that can be changed
+	 * (see {@link RecordTypes}), apart from SOA, which an update replaces.
+	 */
 	public static boolean isUpdatableType(int type) {
-		switch(type) {
-		case A: case AAAA: case NS: case CNAME: case PTR: case MX: case TXT: case SPF:
-		case HINFO: case SRV: case CAA: case SVCB: case HTTPS: case DS: case SSHFP:
-			return true;
-		default:
-			return false;
-		}
+		RecordTypes.Def d = RecordTypes.get(type);
+		return d != null && d.editable && type != SOA;
 	}
 
 	/**
@@ -1876,9 +1734,24 @@ public class Zone implements DNS {
 			String t = rr.getRdataAsString();
 			return t.endsWith(".") ? t : t+".";
 		}
+		case RP: {
+			//  Absolute, as PTR's
+			us.bringardner.parley.dns.Rp rp = (us.bringardner.parley.dns.Rp)rr;
+			return absoluteName(rp.getMboxDname())+" "+absoluteName(rp.getTxtDname());
+		}
+		case SOA: {
+			//  On one line, without the comments a zone file has
+			Soa s = (Soa)rr;
+			return absoluteName(s.getMname())+" "+absoluteName(s.getRname())+" "+Integer.toUnsignedLong(s.getSerial())
+					+" "+s.getRefreash()+" "+s.getRetry()+" "+s.getExpire()+" "+s.getMinimum();
+		}
 		default:
 			return rr.getRdataAsString();
 		}
+	}
+
+	private static String absoluteName(String n) {
+		return n == null || n.isEmpty() ? "." : n.endsWith(".") ? n : n+".";
 	}
 
 	private static String quote(String s) {

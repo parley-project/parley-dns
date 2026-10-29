@@ -64,23 +64,42 @@ public interface DnsServerMXBean {
 	String getSharedZoneFile();
 
 	/**
-	 * The text of the shared zone's file as it is now.
-	 * @throws IllegalStateException if {@code parley.dns.sharedZone} isn't set or its file doesn't exist
+	 * The record types zone files can have, in a form's order: their data's example and whether
+	 * they can be changed (dynamic updates, the shared zone's record calls). Management tools build
+	 * their record forms from this, so a type the server learns needs no change there.
 	 */
-	String getSharedZoneText() throws Exception;
+	DnsRecordType[] getRecordTypes();
 
 	/**
-	 * Replace the shared zone's file with this text and serve it at once: every listed domain and
-	 * every zone with {@code $INHERIT} serves the new records. The text is checked as the file is
-	 * when it is read, the file is replaced whole, and the one it replaces is kept as
-	 * {@code <file>.previous}.
-	 * @param text the new text (line ends written as \n)
-	 * @param expected the text it replaces, as {@link #getSharedZoneText()} returned it, so a change
-	 *  made since isn't lost; null to replace whatever is there
-	 * @throws IllegalArgumentException if the text isn't a valid shared zone, or its SOA serial isn't
-	 *  higher than the file's (secondaries would not see the change)
-	 * @throws IllegalStateException if the shared zone isn't set, or its file changed since
-	 *  {@code expected} was read
+	 * The shared zone's records as its file has them, the SOA first: owners relative to the domain
+	 * ({@code @}, {@code www}, {@code *}), relative names in the data left relative ({@code 10 mail}).
+	 * @throws IllegalStateException if {@code parley.dns.sharedZone} isn't set, or its file is
+	 *  missing or not a valid shared zone
 	 */
-	void setSharedZoneText(String text, String expected) throws Exception;
+	DnsRecordInfo[] getSharedRecords() throws Exception;
+
+	/**
+	 * Add records to the shared zone: one per value, of the type at the name; values it has
+	 * already are left. The TTL becomes the TTL of every record of that name and type (RFC 2181 5.2).
+	 * Each change to the shared zone writes its file whole (its comments are not kept), keeps the
+	 * one it replaces as {@code <file>.previous}, raises its serial and is served at once.
+	 * @param name relative to the domain: {@code @} (or empty), {@code www}, {@code *}
+	 * @throws IllegalArgumentException if a value isn't valid data of the type, or the type can't be changed
+	 */
+	void addSharedRecords(String name, String type, long ttl, String[] values) throws Exception;
+
+	/**
+	 * Replace one record of the shared zone (found by name, type and data, as
+	 * {@link #getSharedRecords()} gives them) with another: any name, type, TTL and data. The TTL
+	 * becomes the TTL of every record of the new name and type. The SOA stays an SOA at {@code @};
+	 * its serial is raised past the file's if the new one isn't higher.
+	 * @throws IllegalStateException if the record isn't there (changed meanwhile)
+	 */
+	void changeSharedRecord(String name, String type, String data, String newName, String newType, long ttl, String newData) throws Exception;
+
+	/**
+	 * Delete one record of the shared zone (found by name, type and data). The SOA can't be deleted.
+	 * @throws IllegalStateException if the record isn't there (changed meanwhile)
+	 */
+	void deleteSharedRecord(String name, String type, String data) throws Exception;
 }

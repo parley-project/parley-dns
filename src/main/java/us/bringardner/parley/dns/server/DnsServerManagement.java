@@ -1,6 +1,7 @@
 package us.bringardner.parley.dns.server;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -96,13 +97,16 @@ class DnsServerManagement implements DnsServerMXBean {
 		}
 		Zone served = z.getUnsigned();
 		List<DnsRecordInfo> ret = new ArrayList<DnsRecordInfo>();
+		//  the SOA (the zone's own: an inheriting zone's serial is its own plus the shared zone's)
+		Soa soa = served.getSoa();
+		ret.add(new DnsRecordInfo(strip(z.getName()), "SOA", soa.getTTL(), Zone.rdataText(soa), false));
 		for(List<RR> l : served.getRrs()) {
 			for(RR rr : l) {
 				ret.add(new DnsRecordInfo(strip(rr.getName()), Utility.TYPENAMES[rr.getType()], rr.getTTL(),
 						Zone.rdataText(rr), !ownKeys.contains(Zone.recordKey(rr))));
 			}
 		}
-		ret.sort((a, b) -> {
+		ret.subList(1, ret.size()).sort((a, b) -> {
 			int c = a.getName().compareToIgnoreCase(b.getName());
 			return c != 0 ? c : a.getType().compareTo(b.getType());
 		});
@@ -188,21 +192,143 @@ class DnsServerManagement implements DnsServerMXBean {
 	}
 
 	@Override
-	public String getSharedZoneText() throws Exception {
-		SharedZone s = requireShared();
-		String t = s.fileText();
-		if( t == null ) {
-			throw new IllegalStateException("The shared zone's file "+s.getFile()+" doesn't exist");
+	public DnsRecordType[] getRecordTypes() {
+		List<DnsRecordType> ret = new ArrayList<DnsRecordType>();
+		for(RecordTypes.Def d : RecordTypes.all()) {
+			ret.add(new DnsRecordType(d.name(), d.example, d.editable));
 		}
-		return t;
+		return ret.toArray(new DnsRecordType[0]);
 	}
 
 	@Override
-	public void setSharedZoneText(String text, String expected) throws Exception {
-		//  (the server's lock, as for createInheritingZone)
-		synchronized(server) {
-			writeShared(text, expected);
+	public DnsRecordInfo[] getSharedRecords() throws Exception {
+		SharedZone s = requireShared();
+		List<DnsRecordInfo> ret = new ArrayList<DnsRecordInfo>();
+		for(SharedZone.Rec r : current(s)) {
+			ret.add(new DnsRecordInfo(r.name, r.type, r.ttl, r.data, false));
 		}
+		return ret.toArray(new DnsRecordInfo[0]);
+	}
+
+	@Override
+	public void addSharedRecords(String name, String type, long ttl, String[] values) throws Exception {
+		String n = sharedName(name);
+		String t = editableType(type);
+		if( t.equals("SOA") ) {
+			throw new IllegalArgumentException("The shared zone has one SOA: change it instead");
+		}
+		List<String> add = new ArrayList<String>();
+		for(String v : values == null ? new String[0] : values) {
+			if( v != null && !v.trim().isEmpty() ) {
+				add.add(v.trim());
+			}
+		}
+		if( add.isEmpty() ) {
+			throw new IllegalArgumentException("No value to add");
+		}
+		editShared(recs -> {
+			for(String v : add) {
+				boolean have = false;
+				for(SharedZone.Rec r : recs) {
+					have |= r.same(n, t, v);
+				}
+				if( !have ) {
+					recs.add(after(recs, n), new SharedZone.Rec(n, ttl, t, v));
+				}
+			}
+			setTtl(recs, n, t, ttl);
+		});
+	}
+
+	@Override
+	public void changeSharedRecord(String name, String type, String data, String newName, String newType, long ttl, String newData) throws Exception {
+		String n = sharedName(name);
+		String nn = sharedName(newName);
+		String nt = editableType(newType);
+		String t = type == null ? "" : type.trim().toUpperCase(Locale.ROOT);
+		if( newData == null || newData.trim().isEmpty() ) {
+			throw new IllegalArgumentException("The record needs data");
+		}
+		if( t.equals("SOA") != nt.equals("SOA") || (nt.equals("SOA") && !nn.equals("@")) ) {
+			throw new IllegalArgumentException("The SOA stays the SOA, at @");
+		}
+		String nd = newData.trim();
+		editShared(recs -> {
+			int i = find(recs, n, t, data);
+			recs.remove(i);
+			boolean have = false;
+			for(SharedZone.Rec r : recs) {
+				have |= r.same(nn, nt, nd);
+			}
+			if( !have ) {
+				recs.add(nt.equals("SOA") ? 0 : n.equalsIgnoreCase(nn) ? i : after(recs, nn), new SharedZone.Rec(nn, ttl, nt, nd));
+			}
+			setTtl(recs, nn, nt, ttl);
+		});
+	}
+
+	@Override
+	public void deleteSharedRecord(String name, String type, String data) throws Exception {
+		String n = sharedName(name);
+		String t = type == null ? "" : type.trim().toUpperCase(Locale.ROOT);
+		if( t.equals("SOA") ) {
+			throw new IllegalArgumentException("The shared zone's SOA can't be deleted");
+		}
+		editShared(recs -> recs.remove(find(recs, n, t, data)));
+	}
+
+	private static int find(List<SharedZone.Rec> recs, String name, String type, String data) {
+		for(int i=0; i < recs.size(); i++ ) {
+			if( recs.get(i).same(name, type, data == null ? "" : data) ) {
+				return i;
+			}
+		}
+		throw new IllegalStateException("The shared zone has no record "+name+" "+type+" "+data+" (changed meanwhile? read it again)");
+	}
+
+	/** Where a record of this name goes: after the last record of the name, or at the end. */
+	private static int after(List<SharedZone.Rec> recs, String name) {
+		for(int i=recs.size()-1; i > 0; i-- ) {
+			if( recs.get(i).name.equalsIgnoreCase(name) ) {
+				return i+1;
+			}
+		}
+		return recs.size();
+	}
+
+	private static void setTtl(List<SharedZone.Rec> recs, String name, String type, long ttl) {
+		for(int i=0; i < recs.size(); i++ ) {
+			SharedZone.Rec r = recs.get(i);
+			if( r.name.equalsIgnoreCase(name) && r.type.equals(type) && r.ttl != ttl ) {
+				recs.set(i, new SharedZone.Rec(r.name, ttl, r.type, r.data));
+			}
+		}
+	}
+
+	/** A shared zone owner: @ for the domain, or a name below it, never absolute. */
+	private static String sharedName(String name) {
+		String n = name == null ? "" : name.trim();
+		if( n.isEmpty() || n.equals("@") ) {
+			return "@";
+		}
+		if( n.endsWith(".") ) {
+			throw new IllegalArgumentException("Names in the shared zone are relative to each domain: "+n
+					+" ends with a dot (write www, not www.example.com.)");
+		}
+		return n.toLowerCase(Locale.ROOT);
+	}
+
+	private static String editableType(String type) {
+		String t = type == null ? "" : type.trim().toUpperCase(Locale.ROOT);
+		for(RecordTypes.Def d : RecordTypes.all()) {
+			if( d.name().equals(t) ) {
+				if( !d.editable ) {
+					throw new IllegalArgumentException(t+" records can't be changed: signing makes them");
+				}
+				return t;
+			}
+		}
+		throw new IllegalArgumentException("Unknown record type "+type);
 	}
 
 	private SharedZone requireShared() {
@@ -213,37 +339,69 @@ class DnsServerManagement implements DnsServerMXBean {
 		return s;
 	}
 
-	private void writeShared(String text, String expected) throws Exception {
-		SharedZone s = requireShared();
-		if( text == null || text.trim().isEmpty() ) {
-			throw new IllegalArgumentException("The shared zone's text is empty");
+	private static List<SharedZone.Rec> current(SharedZone s) throws IOException {
+		String t = s.fileText();
+		if( t == null ) {
+			throw new IllegalStateException("The shared zone's file "+s.getFile()+" doesn't exist");
 		}
-		String t = lines(text);
-		if( !t.endsWith("\n") ) {
-			t += "\n";
-		}
-		String now = s.fileText();
-		if( expected != null && (now == null || !lines(now).equals(lines(expected))) ) {
-			throw new IllegalStateException("The shared zone was changed since it was read: read it again and make the change again");
-		}
-		long serial;
 		try {
-			serial = s.check(t);
-		} catch(java.io.IOException e) {
-			throw new IllegalArgumentException(e.getMessage(), e);
+			return s.records(t);
+		} catch(IOException e) {
+			throw new IllegalStateException(e.getMessage()+" (fix the file by hand)", e);
 		}
-		if( now != null ) {
-			long old = -1;
+	}
+
+	/**
+	 * Change the shared zone's records and write its file: the serial is raised past the file's
+	 * (unless the change set a higher one), the text is checked, the file replaced whole (the one
+	 * it replaces kept as file.previous) and the zones loaded again, so it is served at once.
+	 */
+	private void editShared(java.util.function.Consumer<List<SharedZone.Rec>> change) throws Exception {
+		//  (the server's lock, as for createInheritingZone)
+		synchronized(server) {
+			SharedZone s = requireShared();
+			List<SharedZone.Rec> recs = new ArrayList<SharedZone.Rec>(current(s));
+			long old = serial(recs.get(0));
+			change.accept(recs);
+			SharedZone.Rec soa = recs.get(0);
+			if( serial(soa) <= old ) {
+				String[] f = soa.data.trim().split("\\s+");
+				f[2] = Long.toString(old+1 > 0xFFFFFFFFL ? 1 : old+1);
+				recs.set(0, new SharedZone.Rec(soa.name, soa.ttl, soa.type, String.join(" ", f)));
+			}
+			String t = SharedZone.text(recs);
 			try {
-				old = s.check(now);
-			} catch(java.io.IOException e) {
-				//  the file there isn't valid: any serial replaces it
+				s.check(t);
+			} catch(IOException e) {
+				throw new IllegalArgumentException(explain(e.getMessage(), recs), e);
 			}
-			if( old >= 0 && serial <= old ) {
-				throw new IllegalArgumentException("Raise the SOA serial: it is "+serial+" and must be higher than "+old
-						+", so secondaries see the change");
+			write(s, t);
+		}
+	}
+
+	private static long serial(SharedZone.Rec soa) {
+		String[] f = soa.data.trim().split("\\s+");
+		try {
+			return f.length < 3 ? -1 : Long.parseLong(f[2]);
+		} catch(NumberFormatException e) {
+			throw new IllegalArgumentException("The SOA's serial isn't a number: "+f[2]);
+		}
+	}
+
+	/** A check's error, naming the record of the line it gives rather than the line of a file nobody has seen. */
+	private static String explain(String message, List<SharedZone.Rec> recs) {
+		java.util.regex.Matcher m = java.util.regex.Pattern.compile("at line (\\d+): (.*)", java.util.regex.Pattern.DOTALL).matcher(String.valueOf(message));
+		if( m.find() ) {
+			int i = Integer.parseInt(m.group(1)) - SharedZone.HEADER.split("\n").length - 1;
+			if( i >= 0 && i < recs.size() ) {
+				SharedZone.Rec r = recs.get(i);
+				return "Not a valid record: "+r.name+" "+r.type+" "+r.data+" ("+m.group(2).trim()+")";
 			}
 		}
+		return message;
+	}
+
+	private void write(SharedZone s, String t) throws Exception {
 		File f = s.getFile().getAbsoluteFile();
 		File dir = f.getParentFile();
 		File tmp = File.createTempFile("."+f.getName(), ".tmp", dir);
@@ -265,10 +423,6 @@ class DnsServerManagement implements DnsServerMXBean {
 		//  (read even if an edit in the same millisecond left its time and length as they were)
 		s.forget();
 		server.loadZones();
-	}
-
-	private static String lines(String t) {
-		return t.replace("\r\n", "\n").replace('\r', '\n');
 	}
 
 	private static String strip(String n) {

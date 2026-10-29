@@ -75,6 +75,116 @@ final class SharedZone {
 		return Integer.toUnsignedLong(z.getSoa().getSerial());
 	}
 
+	/** A record as the shared zone's file has it: owner relative, data as written. */
+	static final class Rec {
+		final String name;
+		final long ttl;
+		final String type;
+		final String data;
+
+		Rec(String name, long ttl, String type, String data) {
+			this.name = name;
+			this.ttl = ttl;
+			this.type = type;
+			this.data = data;
+		}
+
+		/** The same record (TTL aside): names and name data compared without case, text data as is. */
+		boolean same(String n, String t, String d) {
+			return name.equalsIgnoreCase(n) && type.equalsIgnoreCase(t)
+					&& (textData(type) ? data.trim().equals(d.trim()) : data.trim().equalsIgnoreCase(d.trim()));
+		}
+	}
+
+	/** Types whose data holds no names (it is copied as is, never made relative). */
+	static boolean textData(String type) {
+		switch(type.toUpperCase(Locale.ROOT)) {
+		case "TXT": case "SPF": case "HINFO": case "CAA": case "SSHFP": case "DS":
+			return true;
+		default:
+			return false;
+		}
+	}
+
+	/** The records of a text, the SOA first, owners and names in the data relative to the domain. */
+	List<Rec> records(String t) throws IOException {
+		Zone z = parse(CHECK, t, file.getAbsoluteFile().getParentFile());
+		List<Rec> ret = new ArrayList<Rec>();
+		ret.add(rec(z.getSoa()));
+		for(List<us.bringardner.parley.dns.RR> l : z.getRrs()) {
+			for(us.bringardner.parley.dns.RR rr : l) {
+				if( rr.getType() != us.bringardner.parley.dns.DNS.SOA ) {
+					ret.add(rec(rr));
+				}
+			}
+		}
+		return ret;
+	}
+
+	private static Rec rec(us.bringardner.parley.dns.RR rr) {
+		String type = us.bringardner.parley.dns.Utility.TYPENAMES[rr.getType()];
+		String data = Zone.rdataText(rr);
+		if( !textData(type) ) {
+			StringBuilder b = new StringBuilder();
+			for(String tok : data.trim().split("\\s+")) {
+				if( b.length() > 0 ) {
+					b.append(' ');
+				}
+				b.append(relativeName(tok));
+			}
+			data = b.toString();
+		}
+		return new Rec(relativeOwner(rr.getName()), rr.getTTL(), type, data);
+	}
+
+	/** A name in record data relative to the domain (@ for the domain), others as they are. */
+	private static String relativeName(String tok) {
+		String l = tok.toLowerCase(Locale.ROOT);
+		if( l.equals(CHECK+".") ) {
+			return "@";
+		}
+		if( l.endsWith("."+CHECK+".") ) {
+			return tok.substring(0, tok.length()-CHECK.length()-2);
+		}
+		return tok;
+	}
+
+	private static String relativeOwner(String owner) {
+		String n = strip(owner);
+		if( n.equalsIgnoreCase(CHECK) ) {
+			return "@";
+		}
+		if( n.toLowerCase(Locale.ROOT).endsWith("."+CHECK) ) {
+			return n.substring(0, n.length()-CHECK.length()-1);
+		}
+		return n+".";
+	}
+
+	/** The lines before the records in a file {@link #text} writes. */
+	static final String HEADER = "; The shared zone (parley.dns.sharedZone): the records every listed domain serves under its own\n"
+			+"; name, and zones with $INHERIT inherit. Written by the DNS server when its records are changed\n"
+			+"; (parley-mail-admin's DNS page); the file before each change is kept as <file>.previous.\n";
+
+	/** The file's text for these records (the SOA first). */
+	static String text(List<Rec> recs) {
+		StringBuilder b = new StringBuilder(HEADER);
+		for(Rec r : recs) {
+			b.append(r.name).append('\t').append(r.ttl).append("\tIN\t").append(r.type).append('\t');
+			if( r.type.equals("SOA") ) {
+				String[] f = r.data.trim().split("\\s+");
+				b.append(f[0]).append(' ').append(f[1]).append(" (");
+				for(int i=2; i < f.length; i++ ) {
+					b.append(' ').append(f[i]);
+				}
+				b.append(" )");
+			} else {
+				b.append(r.data.trim());
+			}
+			b.append('\n');
+		}
+		return b.toString();
+	}
+
 	/** Read the file at the next {@link #read()} even if its time and length look unchanged. */
 	void forget() {
 		stamp = null;
