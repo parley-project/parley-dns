@@ -34,22 +34,13 @@ import java.util.Collections;
 import java.util.List;
 
 import us.bringardner.parley.dns.A;
-import us.bringardner.parley.dns.AAAA;
-import us.bringardner.parley.dns.Caa;
-import us.bringardner.parley.dns.Cname;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Hinfo;
-import us.bringardner.parley.dns.Https;
 import us.bringardner.parley.dns.Message;
-import us.bringardner.parley.dns.Mx;
 import us.bringardner.parley.dns.Name;
 import us.bringardner.parley.dns.Ns;
-import us.bringardner.parley.dns.Ptr;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Soa;
-import us.bringardner.parley.dns.Spf;
-import us.bringardner.parley.dns.Srv;
-import us.bringardner.parley.dns.Svcb;
 import us.bringardner.parley.dns.Txt;
 import us.bringardner.parley.dns.Utility;
 /**
