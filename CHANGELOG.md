@@ -4,6 +4,9 @@
 
 ### Added
 
+- **The settings this module reads are listed** in `META-INF/parley/settings.list`, so a Parley server's
+  start-up check (parley-net's `KnownSettings`, To-Do 2.16) knows them and warns only about a setting
+  nothing reads. A test checks the list has every name the code here reads.
 - **The shared zone** (`parley.dns.sharedZone`): a zone file written with relative names, served under the name
   of every listed domain (relative names in its data too), with RFC 4592 wildcards for their hosts. It is read
   again when it changes; one that fails to load is reported with its file and line and the version read last
