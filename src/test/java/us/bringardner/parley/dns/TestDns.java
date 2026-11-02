@@ -112,7 +112,7 @@ public class TestDns implements DNS {
 		//  System properties win over the properties file: point the server at the fixtures on the class path
 		System.setProperty(DnsServer.PROP_DNS_DIR, Fixtures.file("TestFiles").getPath());
 		System.setProperty(DnsServer.PROP_ZONE_DIR, Fixtures.file("TestFiles/zones").getPath());
-		System.setProperty("logLevel","ERROR");
+		System.setProperty("parley.log.level","ERROR");
 		System.setProperty("parley.dns.useDatabase","false");
 		//  The server rewrites the dynamic file on every admin change, so work on a
 		//  copy instead of the checked-in TestFiles/dynamic.txt. (The properties

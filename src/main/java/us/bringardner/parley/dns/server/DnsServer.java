@@ -160,7 +160,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public static final String PROP_TSIG_KEY_FILE = "parley.dns.tsigKeyFile";
 	/** TSIG keys (names) whose signed requests may transfer zones, from any address. */
 	public static final String PROP_AXFR_KEYS = "parley.dns.axfrKeys";
-	/** Largest clock difference (seconds) accepted in a TSIG signed request, and the fudge we sign with (default 300). */
+	/** Largest clock difference accepted in a TSIG signed request, and the fudge we sign with, a duration (default 5m). */
 	public static final String PROP_TSIG_FUDGE = "parley.dns.tsigFudge";
 	/** TSIG keys (names) whose signed UPDATE requests may change zones (RFC 2136). */
 	public static final String PROP_UPDATE_KEYS = "parley.dns.updateKeys";
@@ -170,7 +170,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public static final String PROP_NOTIFY_KEY = "parley.dns.notifyKey";
 	/** Attempts per NOTIFY (default 5). */
 	public static final String PROP_NOTIFY_RETRIES = "parley.dns.notifyRetries";
-	/** First wait (ms) for a NOTIFY answer, doubled after each attempt (default 2000). */
+	/** First wait for a NOTIFY answer, a duration, doubled after each attempt (default 2s). */
 	public static final String PROP_NOTIFY_TIMEOUT = "parley.dns.notifyTimeout";
 	public static final String PROP_USE_DATABASE = "parley.dns.useDatabase";
 	/**
@@ -620,10 +620,12 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 
 		//First find and load any external property file 
-		String propertyFile = getProperty(PROP_DNS_PROPERTIES,DEFAULT_PROPERTIES_FILE_NAME);
-
-		//  Look for a file that may change these values.
-		File f = new File(propertyFile).getCanonicalFile();;
+		//  Look for a file that may change these values: the one named, else parley-dns.properties in
+		//  Parley's administrator folder (/etc/parley, %ProgramData%\Parley or $PARLEY_CONF's), like every server's
+		String propertyFile = getProperty(PROP_DNS_PROPERTIES);
+		File f = (propertyFile == null || propertyFile.trim().isEmpty()
+				? new File(us.bringardner.parley.net.server.ServerMain.confDir(), DEFAULT_PROPERTIES_FILE_NAME)
+				: new File(propertyFile.trim())).getCanonicalFile();
 
 
 		Properties prop1 = System.getProperties();
@@ -665,7 +667,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		loadZones();
 		loadDynamic();
 
-		int alltimeout = intProperty(PROP_TIMEOUT, 5000);
+		int alltimeout = durationProperty(PROP_TIMEOUT, 5000);
 		int dnsPort = intProperty(PROP_PORT, Message.DNSPORT);
 
 		InetAddress bindAddress = InetAddress.getLoopbackAddress();
@@ -681,7 +683,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 		//  (parley.dns.udpTimeout used to overwrite the general timeout instead of
 		//  setting the UDP one, so it changed the TCP timeout and not UDP's)
-		int udpTimeout = intProperty(PROP_UDP_TIMEOUT, alltimeout);
+		int udpTimeout = durationProperty(PROP_UDP_TIMEOUT, alltimeout);
 		UDPProsessor.setMaxResponseSize(intProperty(PROP_UDP_MAX_RESPONSE, UDPProsessor.getMaxResponseSize()));
 		Edns.setServerUdpSize(intProperty(PROP_EDNS_UDP_SIZE, Edns.DEFAULT_UDP_SIZE));
 		String refs = stringProperty(PROP_ZONE_CUT_REFERRALS);
@@ -713,9 +715,9 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		if( (tmp=stringProperty(PROP_TCP_BIND_ADDRESS)) != null) {
 			tcpAddress = createBindAddress(tmp);
 		}
-		int tcpTimeout = intProperty(PROP_TCP_TIMEOUT, alltimeout);
+		int tcpTimeout = durationProperty(PROP_TCP_TIMEOUT, alltimeout);
 		int tcpMaxConnections = intProperty(PROP_TCP_MAX_CONNECTIONS, TCPProsessor.DEFAULT_MAX_CONNECTIONS);
-		int tcpIdleTimeout = intProperty(PROP_TCP_IDLE_TIMEOUT, TCPProsessor.DEFAULT_IDLE_TIMEOUT);
+		int tcpIdleTimeout = durationProperty(PROP_TCP_IDLE_TIMEOUT, TCPProsessor.DEFAULT_IDLE_TIMEOUT);
 		int tcpMaxPerClient = intProperty(PROP_TCP_MAX_CONNECTIONS_PER_CLIENT, TCPProsessor.DEFAULT_MAX_CONNECTIONS_PER_CLIENT);
 
 		log("TCP bindAddress = "+tcpAddress+":"+tcpPort+" backlog="+backlog+" timeout="+tcpTimeout
@@ -746,10 +748,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			adminBindAddress = createBindAddress(tmp);
 		}
 		adminMaxConnections = Math.max(1, intProperty(PROP_ADMIN_MAX_CONNECTIONS, 8));
-		adminIdleTimeout = intProperty(PROP_ADMIN_IDLE_TIMEOUT, adminIdleTimeout);
+		adminIdleTimeout = durationProperty(PROP_ADMIN_IDLE_TIMEOUT, adminIdleTimeout);
 		adminMaxLine = intProperty(PROP_ADMIN_MAX_LINE, adminMaxLine);
 		//  0 or less would turn the time limit off (8 slow clients could lock out the admin port)
-		adminAuthTimeout = Math.max(1, intProperty(PROP_ADMIN_AUTH_TIMEOUT, adminAuthTimeout));
+		adminAuthTimeout = Math.max(1, durationProperty(PROP_ADMIN_AUTH_TIMEOUT, adminAuthTimeout));
 		if( stringProperty(PROP_ADMIN_SECRET) == null && !adminBindAddress.isLoopbackAddress() ) {
 			logError("Admin port listens on "+adminBindAddress+" but "+PROP_ADMIN_SECRET
 					+" is not set: only clients on this machine will be accepted");
@@ -774,6 +776,25 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 * @return the integer value of a property, or def if it is not set or empty
 	 * @throws IOException naming the property if the value is not a number
 	 */
+	/** A duration property in milliseconds (see parley-core's Durations), or def if it is not set or empty */
+	int durationProperty(String name, int def) throws IOException {
+		String tmp = stringProperty(name);
+		if( tmp == null ) {
+			return def;
+		}
+		try {
+			return us.bringardner.parley.core.util.Durations.toIntMillis(us.bringardner.parley.core.util.Durations.parse(tmp));
+		} catch(IllegalArgumentException ex) {
+			throw new IOException("Invalid duration for "+name+": "+ex.getMessage());
+		}
+	}
+
+	/** A duration property in whole seconds (rounded up), for settings DNS keeps in seconds, or def (seconds) */
+	int durationSecondsProperty(String name, int def) throws IOException {
+		long ms = durationProperty(name, (int) Math.min(Integer.MAX_VALUE, def * 1000L));
+		return (int) Math.min(Integer.MAX_VALUE, (ms + 999) / 1000);
+	}
+
 	int intProperty(String name, int def) throws IOException {
 		String tmp = stringProperty(name);
 		if( tmp == null ) {
@@ -1020,7 +1041,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				keys = keys.with(Tsig.KeyRing.load(f));
 			}
 			setTsigKeys(keys);
-			setTsigFudge(intProperty(PROP_TSIG_FUDGE, Tsig.DEFAULT_FUDGE));
+			setTsigFudge(durationSecondsProperty(PROP_TSIG_FUDGE, Tsig.DEFAULT_FUDGE));
 			setAxfrKeys(stringProperty(PROP_AXFR_KEYS));
 			setUpdateKeys(stringProperty(PROP_UPDATE_KEYS));
 			setUpdateAllow(stringProperty(PROP_UPDATE_ALLOW));
@@ -1028,16 +1049,13 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			notifyKeyName = stringProperty(PROP_NOTIFY_KEY);
 			String kd = stringProperty(PROP_DNSSEC_KEY_DIR);
 			setDnssecKeyDir(kd == null ? null : new File(kd));
-			String validity = stringProperty(PROP_DNSSEC_VALIDITY);
-			if( validity != null ) {
-				setDnssecValidity(Utility.toSeconds(validity));
-			}
+			setDnssecValidity(durationSecondsProperty(PROP_DNSSEC_VALIDITY, dnssecValidity));
 			setDnssecNsec3(stringProperty(PROP_DNSSEC_NSEC3),
 					us.bringardner.parley.dns.dnssec.Nsec3Params.parse(intProperty(PROP_DNSSEC_NSEC3_ITERATIONS, 0),
 							stringProperty(PROP_DNSSEC_NSEC3_SALT)));
 			setNotifyTargets(stringProperty(PROP_NOTIFY),
 					intProperty(PROP_NOTIFY_RETRIES, ZoneNotifier.DEFAULT_RETRIES),
-					intProperty(PROP_NOTIFY_TIMEOUT, ZoneNotifier.DEFAULT_TIMEOUT));
+					durationProperty(PROP_NOTIFY_TIMEOUT, ZoneNotifier.DEFAULT_TIMEOUT));
 		} catch(IOException ex) {
 			throw new IllegalArgumentException(ex);
 		}

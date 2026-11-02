@@ -318,7 +318,7 @@ WantedBy=multi-user.target
 
 ## Configuration properties
 
-Set them in the properties file (`parley.dns.configFile`, see below) or with `-D` on the command line; `-D` wins. Every parley-dns property starts with `parley.dns.`.
+Set them in the properties file (`parley.dns.configFile`, see below) or with `-D` on the command line; `-D` wins. Every parley-dns property starts with `parley.dns.`. Times are durations: a whole number with `ms`, `s`, `m`, `h` or `d` (`5s`, `3h`); a number alone is milliseconds, so write DNS times in seconds with `s`.
 
 A bind address of `localhost` means this host's own name (its network address), not the loopback interface, so the server is reachable from the network; a warning is logged. Use `127.0.0.1` to listen on loopback only.
 
@@ -326,8 +326,8 @@ A bind address of `localhost` means this host's own name (its network address), 
 
 | Property | Default | Meaning |
 |---|---|---|
-| `parley.dns.configFile` | `parley-dns.properties` (current directory) | The properties file to load at startup |
-| `parley.dns.dnsDir` | `/data/services/dns/config` | Directory for the dynamic entries file, the TSIG key file and the root hints (`sbelt.prop`) |
+| `parley.dns.configFile` | `parley-dns.properties` in Parley's administrator folder (`/etc/parley`, Windows `%ProgramData%\Parley`, or the folder of `$PARLEY_CONF`) | The properties file to load at startup |
+| `parley.dns.dnsDir` | `/data/services/dns/config` | Directory for the dynamic entries file, the TSIG key file and the root hints (`root.hints`, `name=address` lines; without it the built-in root servers are used) |
 | `parley.dns.zoneDir` | `zones` | Directory of the zone files (`<zone>.txt`); a changed file is reloaded |
 | `parley.dns.masterZone` | required | The primary domain's zone; it serves the listed domains' DMARC report authorizations |
 | `parley.dns.sharedZone` | none | The shared zone's file, served under every listed domain's name and inherited by zones with `$INHERIT` (see Listed domains and the shared zone) |
@@ -349,14 +349,14 @@ TCP is served by parley-net's `NioServer` (a few reactor threads read and write 
 | `parley.dns.bindAddress` | loopback | Listen address |
 | `parley.dns.udpPort` / `parley.dns.tcpPort` | `parley.dns.port` | Per-protocol port |
 | `parley.dns.udpBindAddress` / `parley.dns.tcpBindAddress` | `parley.dns.bindAddress` | Per-protocol listen address |
-| `parley.dns.timeout` | 5000 | Socket timeout (ms) for both protocols |
-| `parley.dns.udpTimeout` / `parley.dns.tcpTimeout` | `parley.dns.timeout` | Per-protocol socket timeouts (ms); how often the UDP listeners check for shutdown (TCP: no longer used) |
+| `parley.dns.timeout` | `5s` | Socket timeout for both protocols |
+| `parley.dns.udpTimeout` / `parley.dns.tcpTimeout` | `parley.dns.timeout` | Per-protocol socket timeouts; how often the UDP listeners check for shutdown (TCP: no longer used) |
 | `parley.dns.udpProcCount` | 10 | UDP listener threads |
 | `parley.dns.tcpProcCount` | 1 | TCP reactor threads, which read and write every connection (requests are answered on a pool of up to `parley.dns.tcpMaxConnections` threads) |
 | `parley.dns.tcpBacklog` | 10 | TCP listen backlog |
 | `parley.dns.tcpMaxConnections` | 64 | TCP connections served at once; more are closed immediately |
 | `parley.dns.tcpMaxConnectionsPerClient` | 8 | TCP connections from one client address; more are closed immediately (0: no limit) |
-| `parley.dns.tcpIdleTimeout` | 10000 | An idle TCP connection is closed after this many ms; a message that has started must also arrive within it |
+| `parley.dns.tcpIdleTimeout` | `10s` | An idle TCP connection is closed after this long; a message that has started must also arrive within it |
 | `parley.dns.udpMaxResponse` | 512 | Largest UDP response (bytes) to clients without EDNS; bigger answers are truncated (TC) and clients retry over TCP |
 | `parley.dns.ednsUdpSize` | 1232 | Largest UDP response to EDNS clients (512–4096; the client's own size is used if smaller). Responses echo an OPT record; EDNS versions other than 0 get BADVERS |
 | `parley.dns.zoneCutReferrals` | true | Names at or below NS records below a zone's apex (a delegation) get a referral (NS + glue, not authoritative) instead of NXDOMAIN / an authoritative answer. Set false if your zones put NS records on ordinary hosts |
@@ -368,17 +368,17 @@ TCP is served by parley-net's `NioServer` (a few reactor threads read and write 
 |---|---|---|
 | `parley.dns.resolvers` | 10 | Resolver threads (for names not in the cache; cached answers to UDP queries are sent by the UDP threads directly) |
 | `parley.dns.resolverMaxBacklog` | 200 | Queued recursive queries; when full, clients get SERVFAIL (a CNAME answer is sent without the target's records). Logged at most every 10 s |
-| `parley.dns.resolverMaxQueueAge` | 3000 | A queued recursive query that waited longer than this (ms) is dropped: its client has given up (0: never) |
+| `parley.dns.resolverMaxQueueAge` | `3s` | A queued recursive query that waited longer than this is dropped: its client has given up (0: never) |
 | `parley.dns.resolverVirtualThreads` | true | Resolver threads are virtual threads where the JVM has them (Java 21+) |
-| `parley.dns.resolveTimeout` | 4000 | Total time (ms) for one resolution, including referrals and CNAME hops |
+| `parley.dns.resolveTimeout` | `4s` | Total time for one resolution, including referrals and CNAME hops |
 | `parley.dns.maxCacheEntries` | 10000 | Resolver cache size (LRU) |
-| `parley.dns.cacheSweepSeconds` | 60 | How often expired cache entries are removed |
-| `parley.dns.maxCacheAge` | 1800000 | Upper bound (ms) on how long anything is cached |
-| `parley.dns.maxNegativeTtl` | 10800 | Upper bound (s) for caching "does not exist" answers |
+| `parley.dns.cacheSweepInterval` | `60s` | How often expired cache entries are removed (at least 1s) |
+| `parley.dns.maxCacheAge` | `30m` | Upper bound on how long anything is cached |
+| `parley.dns.maxNegativeTtl` | `3h` | Upper bound for caching "does not exist" answers |
 | `parley.dns.maxDelegations` | 10000 | Learned delegations kept (LRU) |
-| `parley.dns.delegationMaxAge` | 3600 | Seconds a learned delegation is used before a fresh referral replaces it |
-| `parley.dns.upstreamHoldOffMin` | 5 | Seconds an upstream server address is skipped after 3 failures in a row; doubled for each further failure |
-| `parley.dns.upstreamHoldOffMax` | 600 | Longest hold-off (s). When every address of a zone is held off, the one that comes back first is still tried, at most once a second, so recursion recovers within seconds of an outage ending |
+| `parley.dns.delegationMaxAge` | `1h` | How long a learned delegation is used before a fresh referral replaces it |
+| `parley.dns.upstreamHoldOffMin` | `5s` | How long an upstream server address is skipped after 3 failures in a row; doubled for each further failure |
+| `parley.dns.upstreamHoldOffMax` | `10m` | Longest hold-off. When every address of a zone is held off, the one that comes back first is still tried, at most once a second, so recursion recovers within seconds of an outage ending |
 | `parley.dns.dnssecValidation` | false | Validate the answers of recursive queries with DNSSEC (see "Validating") |
 | `parley.dns.dnssecTrustAnchors` | the root zone's keys (built in) | File of trust anchors (DS or DNSKEY records), relative to `parley.dns.dnsDir` |
 
@@ -394,9 +394,9 @@ The admin port runs on parley-net's `Server` (one thread per session, virtual th
 | `parley.dns.adminSecret` | none | Shared secret for the admin port (challenge-response). Without it only local clients are accepted. `DnsAdminClient` reads the same property |
 | `parley.dns.adminTls` | false | TLS on the admin port, using the standard `javax.net.ssl.keyStore` / `keyStorePassword` properties (client: `javax.net.ssl.trustStore`). `DnsAdminClient` reads the same property. Recommended when `parley.dns.adminBindAddress` is not loopback: the challenge-response protects the secret, not the session |
 | `parley.dns.adminMaxConnections` | 8 | Admin sessions at once |
-| `parley.dns.adminIdleTimeout` | 600000 | Idle admin sessions are closed after this many ms |
+| `parley.dns.adminIdleTimeout` | `10m` | Idle admin sessions are closed after this long |
 | `parley.dns.adminMaxLine` | 8192 | Longest admin command line in bytes; a longer line ends the session |
-| `parley.dns.adminAuthTimeout` | 30000 | With `parley.dns.adminSecret` set, a session that hasn't authenticated after this many ms is closed |
+| `parley.dns.adminAuthTimeout` | `30s` | With `parley.dns.adminSecret` set, a session that hasn't authenticated after this long is closed |
 
 ### Database
 
@@ -416,10 +416,10 @@ The admin port runs on parley-net's `Server` (one thread per session, virtual th
 | `parley.dns.notify` | none | Secondaries to send NOTIFY (RFC 1996) to when a zone is loaded or its SOA serial changes, e.g. `192.0.2.2, [2001:db8::2]:53`. Bump the serial when you edit a zone. Dynamic entries don't change the serial, so secondaries only see them at their next transfer |
 | `parley.dns.notifyKey` | none | TSIG key to sign NOTIFY messages with; the secondary's answer must then be signed too |
 | `parley.dns.notifyRetries` | 5 | Attempts per NOTIFY |
-| `parley.dns.notifyTimeout` | 2000 | First wait (ms) for a NOTIFY answer, doubled after each attempt |
+| `parley.dns.notifyTimeout` | `2s` | First wait for a NOTIFY answer, doubled after each attempt |
 | `parley.dns.tsigKeys` | none | TSIG keys (RFC 8945) as `name:algorithm:base64secret`, e.g. `xfr.example:hmac-sha256:...`. Algorithms: hmac-sha256 (recommended), hmac-sha512, hmac-sha384, hmac-sha224, hmac-sha1, hmac-md5. Generate a secret with `openssl rand -base64 32`. A request signed with a known key gets a signed response; a bad signature, an unknown key or a clock too far off (see `parley.dns.tsigFudge`) gets NOTAUTH and is not answered. A signed UPDATE or zone transfer request is acted on once. The same UPDATE sent again (a retransmission, or a replay) gets the first answer again without being applied a second time; the same transfer request gets NOTAUTH with BADTIME. Plain queries may be repeated |
 | `parley.dns.tsigKeyFile` | none | A file of TSIG keys, one `name algorithm secret` per line (`#` comments); relative to `parley.dns.dnsDir`. Keeps the secrets out of the properties file |
-| `parley.dns.tsigFudge` | 300 | Largest clock difference (seconds, 1-65535) accepted in a signed request; also the fudge used when signing NOTIFY. The window is the smaller of this and the fudge in the request, so a client can't widen it |
+| `parley.dns.tsigFudge` | `5m` | Largest clock difference (1s to 65535s) accepted in a signed request; also the fudge used when signing NOTIFY. The window is the smaller of this and the fudge in the request, so a client can't widen it |
 | `parley.dns.updateKeys` | none | TSIG key names whose signed dynamic UPDATE requests (RFC 2136, e.g. `nsupdate -k`) may change zones |
 | `parley.dns.updateAllow` | none | Addresses / networks allowed to send unsigned UPDATE requests. Over UDP this applies to this machine (loopback) only, because a UDP source address can be forged: other addresses must send over TCP (`nsupdate -v`) or sign with a key. Prefer `parley.dns.updateKeys` |
 

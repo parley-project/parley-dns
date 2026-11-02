@@ -20,7 +20,7 @@ parley.dns.adminTls
 parley.dns.axfrAllow
 parley.dns.axfrKeys
 parley.dns.bindAddress
-parley.dns.cacheSweepSeconds
+parley.dns.cacheSweepInterval
 parley.dns.configFile
 parley.dns.debug
 parley.dns.delegationMaxAge

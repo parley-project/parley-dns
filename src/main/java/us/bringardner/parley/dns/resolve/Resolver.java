@@ -58,7 +58,8 @@ public class Resolver  extends DnsBaseClass
 
 	private static final String PROP_RESOLVER_COUNT = "parley.dns.resolvers";
 	public static final String PROP_MAX_CACHE_ENTRIES = "parley.dns.maxCacheEntries";
-	public static final String PROP_CACHE_SWEEP_SECONDS = "parley.dns.cacheSweepSeconds";
+	/** How often expired cache entries are removed, a duration (default 60s). */
+	public static final String PROP_CACHE_SWEEP_INTERVAL = "parley.dns.cacheSweepInterval";
 	//  Periodically removes expired cache entries
 	private static java.util.concurrent.ScheduledExecutorService cacheSweeper;
 
@@ -66,21 +67,25 @@ public class Resolver  extends DnsBaseClass
 
 
 
+	/** The file of root (or other starting) servers in parley.dns.dnsDir, name=address lines; the built-in list is used without it */
+	public static final String ROOT_HINTS_FILE = "root.hints";
+
 	private static final List<RemoteServer> sbelt = new CopyOnWriteArrayList<RemoteServer>();
 	//  this is used to 'round robin' the starting server	
 	//  so that we don't always use the same one (spread the load)
 	//private static int current=0;
 	//private static int sbeltSize;
 	public static final String PROP_MAX_DELEGATIONS = "parley.dns.maxDelegations";
-	/** Total time (ms) for one resolution, including referrals and CNAME hops (default 4000). */
+	/** Total time for one resolution, including referrals and CNAME hops, a duration (default 4s). */
 	public static final String PROP_RESOLVE_TIMEOUT = "parley.dns.resolveTimeout";
 	private static volatile long resolveTimeout = 4000;
-	/** seconds, default 10800 (3 hours) */
+	/** The longest a negative answer is cached, a duration (default 3h). */
 	public static final String PROP_MAX_NEGATIVE_TTL = "parley.dns.maxNegativeTtl";
+	/** The longest a delegation is kept, a duration (default 1h). */
 	public static final String PROP_DELEGATION_MAX_AGE = "parley.dns.delegationMaxAge";
-	/** Seconds an upstream address is skipped after repeated failures (first hold-off, doubled for each further failure). */
+	/** How long an upstream address is skipped after repeated failures, a duration (first hold-off, doubled for each further failure). */
 	public static final String PROP_UPSTREAM_HOLD_OFF_MIN = "parley.dns.upstreamHoldOffMin";
-	/** Longest hold-off (seconds) for an upstream address that keeps failing. */
+	/** Longest hold-off for an upstream address that keeps failing, a duration. */
 	public static final String PROP_UPSTREAM_HOLD_OFF_MAX = "parley.dns.upstreamHoldOffMax";
 	/** Validate the answers of recursive queries with DNSSEC (default false). */
 	public static final String PROP_DNSSEC_VALIDATION = "parley.dns.dnssecValidation";
@@ -414,7 +419,7 @@ public class Resolver  extends DnsBaseClass
 		}
 
 
-		java.io.File f = new File(dnsDir,"sbelt.prop");
+		java.io.File f = new File(dnsDir, ROOT_HINTS_FILE);
 
 
 		//  First load the properties from the file
@@ -452,7 +457,7 @@ public class Resolver  extends DnsBaseClass
 
 		if( (tmp=prop.getProperty(PROP_MAX_DNS_CACHE_AGE)) != null ) {
 			try {
-				Cache.setDefaultMaxAge(Long.parseLong(tmp));
+				Cache.setDefaultMaxAge(us.bringardner.parley.core.util.Durations.parse(tmp));
 			} catch(Exception ex) {
 				Resolver logger = new Resolver();
 				logger.logError("Error setting maxCacheAge",ex);
@@ -474,14 +479,14 @@ public class Resolver  extends DnsBaseClass
 
 		if( (tmp=prop.getProperty(PROP_MAX_NEGATIVE_TTL)) != null ) {
 			try {
-				Cache.setMaxNegativeTtl(Long.parseLong(tmp.trim()));
+				Cache.setMaxNegativeTtl(us.bringardner.parley.core.util.Durations.parse(tmp) / 1000L);
 			} catch(Exception ex) {
 				new Resolver().logError("Error setting "+PROP_MAX_NEGATIVE_TTL,ex);
 			}
 		}
 		if( (tmp=prop.getProperty(PROP_RESOLVE_TIMEOUT)) != null ) {
 			try {
-				setResolveTimeout(Long.parseLong(tmp.trim()));
+				setResolveTimeout(us.bringardner.parley.core.util.Durations.parse(tmp));
 			} catch(Exception ex) {
 				new Resolver().logError("Error setting "+PROP_RESOLVE_TIMEOUT,ex);
 			}
@@ -495,7 +500,7 @@ public class Resolver  extends DnsBaseClass
 		}
 		if( (tmp=prop.getProperty(PROP_DELEGATION_MAX_AGE)) != null ) {
 			try {
-				setDelegationMaxAge(Long.parseLong(tmp.trim())*1000L);
+				setDelegationMaxAge(us.bringardner.parley.core.util.Durations.parse(tmp));
 			} catch(Exception ex) {
 				new Resolver().logError("Error setting "+PROP_DELEGATION_MAX_AGE,ex);
 			}
@@ -503,14 +508,14 @@ public class Resolver  extends DnsBaseClass
 
 		if( (tmp=prop.getProperty(PROP_UPSTREAM_HOLD_OFF_MIN)) != null ) {
 			try {
-				ServerA.HOLD_OFF_MIN = Math.max(1, Long.parseLong(tmp.trim()))*1000L;
+				ServerA.HOLD_OFF_MIN = Math.max(1000L, us.bringardner.parley.core.util.Durations.parse(tmp));
 			} catch(Exception ex) {
 				new Resolver().logError("Error setting "+PROP_UPSTREAM_HOLD_OFF_MIN,ex);
 			}
 		}
 		if( (tmp=prop.getProperty(PROP_UPSTREAM_HOLD_OFF_MAX)) != null ) {
 			try {
-				ServerA.DEACTIVATE = Math.max(1, Long.parseLong(tmp.trim()))*1000L;
+				ServerA.DEACTIVATE = Math.max(1000L, us.bringardner.parley.core.util.Durations.parse(tmp));
 			} catch(Exception ex) {
 				new Resolver().logError("Error setting "+PROP_UPSTREAM_HOLD_OFF_MAX,ex);
 			}
@@ -561,9 +566,9 @@ public class Resolver  extends DnsBaseClass
 		}
 		if( (tmp=prop.getProperty(ResolverThread.PROP_RESOLVER_MAX_QUEUE_AGE)) != null ) {
 			try {
-				ResolverThread.setMaxQueueAge(Long.parseLong(tmp.trim()));
-			} catch(NumberFormatException ex) {
-				new Resolver().logError("Invalid number for "+ResolverThread.PROP_RESOLVER_MAX_QUEUE_AGE+": '"+tmp+"'");
+				ResolverThread.setMaxQueueAge(us.bringardner.parley.core.util.Durations.parse(tmp));
+			} catch(IllegalArgumentException ex) {
+				new Resolver().logError("Invalid duration for "+ResolverThread.PROP_RESOLVER_MAX_QUEUE_AGE+": "+ex.getMessage());
 			}
 		}
 		if( (tmp=prop.getProperty(ResolverThread.PROP_RESOLVER_VIRTUAL_THREADS)) != null ) {
@@ -627,12 +632,14 @@ public class Resolver  extends DnsBaseClass
 		if( cacheSweeper != null ) {
 			return;
 		}
-		long seconds = 60;
-		String tmp = prop.getProperty(PROP_CACHE_SWEEP_SECONDS);
-		if( tmp != null ) {
+		long millis = 60_000;
+		String tmp = prop.getProperty(PROP_CACHE_SWEEP_INTERVAL);
+		if( tmp != null && !tmp.trim().isEmpty() ) {
 			try {
-				seconds = Math.max(1, Long.parseLong(tmp.trim()));
-			} catch(Exception ex) {}
+				millis = Math.max(1000L, us.bringardner.parley.core.util.Durations.parse(tmp));
+			} catch(IllegalArgumentException ex) {
+				new Resolver().logError("Invalid duration for "+PROP_CACHE_SWEEP_INTERVAL+": "+ex.getMessage());
+			}
 		}
 		cacheSweeper = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(new NamedThreadFactory("ResolverCacheSweeper"));
 		cacheSweeper.scheduleWithFixedDelay(() -> {
@@ -641,7 +648,7 @@ public class Resolver  extends DnsBaseClass
 			} catch(Throwable ex) {
 				new Resolver().logError("Cache sweep failed",ex);
 			}
-		}, seconds, seconds, java.util.concurrent.TimeUnit.SECONDS);
+		}, millis, millis, java.util.concurrent.TimeUnit.MILLISECONDS);
 	}
 
 	private static synchronized void stopCacheSweeper() {

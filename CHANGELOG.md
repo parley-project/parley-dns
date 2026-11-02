@@ -2,6 +2,16 @@
 
 ## parley-dns 2.0.0 (unreleased)
 
+### Changed (2026-11-02: durations, the settings file's place, root hints; To-Do 2.19)
+
+- **Times are durations** (`5s`, `30m`, `3h`; a bare number is ms, so 1.x's seconds need an `s`): every timeout,
+  `maxCacheAge`, `resolverMaxQueueAge`, `resolveTimeout`, and the ones that were in seconds, `maxNegativeTtl`,
+  `delegationMaxAge`, `upstreamHoldOffMin`/`Max`, `tsigFudge` and `dnssecValidity` (`14d`). `cacheSweepSeconds` is
+  `parley.dns.cacheSweepInterval`.
+- **`parley-dns.properties` is looked for in Parley's administrator folder** (`/etc/parley`, `%ProgramData%\Parley`, or
+  `$PARLEY_CONF`'s), as every server's settings file is, not the current directory, when `parley.dns.configFile` isn't set.
+- **The root hints file is `root.hints`** in `parley.dns.dnsDir` (was `sbelt.prop`).
+
 ### Added
 
 - **The settings this module reads are listed** in `META-INF/parley/settings.list`, so a Parley server's
