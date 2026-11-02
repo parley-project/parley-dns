@@ -2,6 +2,11 @@
 
 ## parley-dns 2.0.0 (unreleased)
 
+### Changed (2026-11-02: parley-net's IPrincipal split, To-Do 3.2)
+
+- **The admin port's permission is `ADMIN`** (was `admin`), as the other servers name it; permission names are
+  compared case-sensitively. The admin principal is an identity only (parley-net 2.0.0).
+
 ### Changed (2026-11-02: the database settings, To-Do 2.19)
 
 - **The database settings are `parley.dns.jdbc.*`**: `parley.dns.jdbc.url`, `.driver`, `.user` and `.password` (were

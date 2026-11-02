@@ -76,7 +76,7 @@ public class DnsAdminProcessor extends AbstractCommandProcessor implements DnsAd
 	public static final int DEFAULT_AUTH_TIMEOUT = 30*1000;
 
 	/** Everything an admin may do (there is one kind of admin: who knows the secret, or is local) */
-	static final IPermission ADMIN = new Permission("admin");
+	static final IPermission ADMIN = new Permission("ADMIN");
 
 	private final DnsServer server;
 	//  This session's commands, by name
@@ -109,10 +109,6 @@ public class DnsAdminProcessor extends AbstractCommandProcessor implements DnsAd
 	/** Who is logged in once the challenge is answered (or the client is local, without a secret) */
 	private static IPrincipal adminPrincipal() {
 		AbstractPrincipal p = new AbstractPrincipal("admin") {
-			@Override
-			public boolean authenticate(byte[] credentials) {
-				return false;
-			}
 		};
 		p.add(ADMIN);
 		return new ImmutablePrincipal(p);
