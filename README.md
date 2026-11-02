@@ -402,10 +402,10 @@ The admin port runs on parley-net's `Server` (one thread per session, virtual th
 
 | Property | Default | Meaning |
 |---|---|---|
-| `parley.dns.useDatabase` | only if `parley.dns.jdbcUrl` is set | Use the database for dynamic records |
-| `parley.dns.jdbcUrl` | none | JDBC URL of the database |
-| `parley.dns.jdbcDriver` | none | JDBC driver class to load (not needed for JDBC 4 drivers on the class path) |
-| `parley.dns.jdbcUser` / `parley.dns.jdbcPassword` | none | Database login |
+| `parley.dns.useDatabase` | only if `parley.dns.jdbc.url` is set | Use the database for dynamic records |
+| `parley.dns.jdbc.url` | none | JDBC URL of the database |
+| `parley.dns.jdbc.driver` | none | JDBC driver class to load (not needed for JDBC 4 drivers on the class path) |
+| `parley.dns.jdbc.user` / `parley.dns.jdbc.password` | none | Database login |
 
 ### Zone transfer, TSIG, dynamic update
 
@@ -450,7 +450,7 @@ Most keep the rest of their name (`JDns.adminPort` is `parley.dns.adminPort`); t
 | `JDns.udp.bindAddress` | `parley.dns.udpBindAddress` |
 | `JDns.dump.file` | `parley.dns.udpDumpFile` |
 | `JDns.ra` | `parley.dns.recursionAvailable` |
-| `JDns.jdbcURL`, `JDns.jdbcClass` | `parley.dns.jdbcUrl`, `parley.dns.jdbcDriver` |
+| `JDns.jdbcURL`, `JDns.jdbcClass` | `parley.dns.jdbc.url`, `parley.dns.jdbc.driver` |
 | `JDns.useDataBase` | `parley.dns.useDatabase` |
 | `JDns.properties` | `parley.dns.configFile`; the default file is now `parley-dns.properties` (was `JDns.properties`) |
 | `echoCommand` (NsLookup) | `parley.dns.nslookup.echoCommand` |

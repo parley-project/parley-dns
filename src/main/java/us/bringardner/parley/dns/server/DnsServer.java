@@ -118,11 +118,11 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public static final String PROP_TCP_MAX_CONNECTIONS_PER_CLIENT = "parley.dns.tcpMaxConnectionsPerClient";
 	/** Address the admin port listens on. Default: loopback only. Use 0.0.0.0 for all interfaces. */
 	public static final String PROP_ADMIN_BIND_ADDRESS = "parley.dns.adminBindAddress";
-	public static final String PROP_JDBC_URL = "parley.dns.jdbcUrl";
+	public static final String PROP_JDBC_URL = "parley.dns.jdbc.url";
 	/** JDBC driver class to load (optional with JDBC 4 drivers). */
-	public static final String PROP_JDBC_CLASS = "parley.dns.jdbcDriver";
-	public static final String PROP_JDBC_USER = "parley.dns.jdbcUser";
-	public static final String PROP_JDBC_PASSWORD = "parley.dns.jdbcPassword";
+	public static final String PROP_JDBC_CLASS = "parley.dns.jdbc.driver";
+	public static final String PROP_JDBC_USER = "parley.dns.jdbc.user";
+	public static final String PROP_JDBC_PASSWORD = "parley.dns.jdbc.password";
 	/**
 	 * Shared secret for the admin port (challenge-response, see AdminAuth).
 	 * Without it only clients on this machine may use the admin port.
@@ -450,7 +450,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 * Factory because the connection will not remain open
 	 */
 	/**
-	 * Open a JDBC connection from parley.dns.jdbcDriver / jdbcUrl / jdbcUser / jdbcPassword.
+	 * Open a JDBC connection from parley.dns.jdbc.driver / .url / .user / .password.
 	 * @throws SQLException if it can't be opened. (It used to log and return
 	 * null, and every caller then failed with a NullPointerException.)
 	 */
@@ -1217,7 +1217,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 	/**
 	 * parley.dns.useDatabase=true/false decides. If it is not set, the database is
-	 * used only when parley.dns.jdbcUrl is configured. (The old default was 'true',
+	 * used only when parley.dns.jdbc.url is configured. (The old default was 'true',
 	 * so a server without a database tried to connect on every dynamic update
 	 * and reload, logged errors and hit NullPointerExceptions.)
 	 */

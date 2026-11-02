@@ -36,10 +36,10 @@ parley.dns.domainList
 parley.dns.dynamicFileName
 parley.dns.ednsUdpSize
 parley.dns.exitOnFatalError
-parley.dns.jdbcDriver
-parley.dns.jdbcPassword
-parley.dns.jdbcUrl
-parley.dns.jdbcUser
+parley.dns.jdbc.driver
+parley.dns.jdbc.password
+parley.dns.jdbc.url
+parley.dns.jdbc.user
 parley.dns.masterZone
 parley.dns.maxCacheAge
 parley.dns.maxCacheEntries
@@ -83,3 +83,9 @@ parley.dns.upstreamHoldOffMin
 parley.dns.useDatabase
 parley.dns.zoneCutReferrals
 parley.dns.zoneDir
+
+# 2.0.0 (To-Do 2.19): the database settings are a component
+renamed parley.dns.jdbcUrl parley.dns.jdbc.url
+renamed parley.dns.jdbcDriver parley.dns.jdbc.driver
+renamed parley.dns.jdbcUser parley.dns.jdbc.user
+renamed parley.dns.jdbcPassword parley.dns.jdbc.password

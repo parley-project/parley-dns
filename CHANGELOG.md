@@ -2,6 +2,11 @@
 
 ## parley-dns 2.0.0 (unreleased)
 
+### Changed (2026-11-02: the database settings, To-Do 2.19)
+
+- **The database settings are `parley.dns.jdbc.*`**: `parley.dns.jdbc.url`, `.driver`, `.user` and `.password` (were
+  `parley.dns.jdbcUrl`, `jdbcDriver`, `jdbcUser`, `jdbcPassword`, which are no longer read; the start-up check names the new ones).
+
 ### Changed (2026-11-02: durations, the settings file's place, root hints; To-Do 2.19)
 
 - **Times are durations** (`5s`, `30m`, `3h`; a bare number is ms, so 1.x's seconds need an `s`): every timeout,
