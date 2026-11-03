@@ -1711,7 +1711,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 	/**
 	 * The zones of the listed domains with no zone of their own: each inherits the shared zone and
-	 * has an SOA like its, serial 1, as {@link DnsServerManagement#createInheritingZone} would write;
+	 * has an SOA like its, serial 1, as {@link SharedZoneText#inheritingZone} writes;
 	 * no file is written until one of its records is changed.
 	 */
 	private List<Zone> listedDomainZones(ListedDomains ld, Map<String, Zone> zones) {

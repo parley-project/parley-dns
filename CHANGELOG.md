@@ -3,6 +3,15 @@
 ## parley-dns 2.0.0 (unreleased)
 
 
+### Changed (2026-11-03: the DNS server reads zone files, it doesn't write them, To-Do 15.5)
+
+- **`DnsServerMXBean` no longer writes files**: `createInheritingZone`, `addSharedRecords`, `changeSharedRecord` and
+  `deleteSharedRecord` are gone (the server's only writes are its dynamic updates' journals, and a listed domain's
+  zone file when an update first changes it). The bean keeps the read side (`getSharedZoneFile`, `getSharedRecords`,
+  `getRecordTypes`, `getErrors`, `reload`). New `SharedZoneText`: a shared zone's records from its text, a text
+  checked as the server checks the file, a text for records (with the caller's header), an inheriting zone's text,
+  and which record types can be changed, for the program that manages the files (parley-mail-admin writes them).
+
 ### Changed (2026-11-03: DMARC report authorizations, To-Do 15.4)
 
 - **The listed domains' DMARC report authorizations are answered only when they are true**: the master zone answers

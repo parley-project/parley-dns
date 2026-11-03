@@ -142,28 +142,20 @@ public class TestDnsManagement {
 	}
 
 	@Test
-	public void createInheritingZone() throws Exception {
-		bean.createInheritingZone("New.Example.");
-		File f = new File(dir, "new.example.txt");
-		String text = new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
+	public void aNewInheritingZoneFileIsServedAfterAReload() throws Exception {
+		// the server writes no zone file: whoever manages them does (SharedZoneText gives the text)
+		String shared = new String(Files.readAllBytes(new File(dir, "shared.zone").toPath()), StandardCharsets.UTF_8);
+		String text = SharedZoneText.inheritingZone("New.Example.", shared);
 		assertTrue(text.contains("$INHERIT\n"), text);
+		write("new.example.txt", text);
+		bean.reload();
 		DnsZoneInfo z = zone("new.example");
 		assertEquals(Zone.SHARED, z.getInheritFrom());
 		assertEquals(0, z.getOwnRecords());
 		assertEquals(11, z.getSerial());
 		assertEquals("[A 10.0.0.80 (inherited)]", records("new.example", "www.new.example").toString());
-		Zone served = server.getZone("new.example");
 		// the shared zone's SOA, read under the new domain's name
-		assertEquals("ns1.new.example", served.getSoa().getMname());
-
-		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("new.example"));
-		// an old journal of the name would be replayed into the new zone: refused
-		write("old.example.txt.jnl", "base 1\nbegin\nadd ghost.old.example. 300 IN A 6.6.6.6\nend\n");
-		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("old.example"));
-		assertFalse(new File(dir, "old.example.txt").exists());
-		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("../evil"));
-		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("bad_name.example"));
-		assertThrows(IllegalArgumentException.class, () -> bean.createInheritingZone("child.test"), "has a file already");
+		assertEquals("ns1.new.example", server.getZone("new.example").getSoa().getMname());
 	}
 
 	@Test
@@ -206,47 +198,31 @@ public class TestDnsManagement {
 		assertTrue(recs.contains("_dmarc TXT 300 \"v=DMARC1; p=quarantine\""), recs.toString());
 		assertEquals(1, recs.stream().filter(r -> r.contains(" SOA ")).count(), recs.toString());
 
-		//  added: served by the inheriting zone at once, the serial raised, the file before kept
-		bean.addSharedRecords("FTP", "a", 600, new String[] { "10.0.0.21", " 10.0.0.22 ", "" });
-		assertEquals("[A 10.0.0.21 (inherited), A 10.0.0.22 (inherited)]", records("child.test", "ftp.child.test").toString());
-		assertTrue(shared().get(0).contains(" postmaster 11 "), shared().get(0));
-		assertEquals(16, zone("child.test").getSerial());
-		assertTrue(new File(dir, "shared.zone.previous").exists());
-		String written = new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
-		assertTrue(written.startsWith(SharedZone.HEADER), written);
-		//  adding one it has changes nothing but the TTL of the set
-		bean.addSharedRecords("ftp", "A", 1200, new String[] { "10.0.0.21" });
-		assertTrue(shared().contains("ftp A 1200 10.0.0.22"), shared().toString());
-
-		//  every field of a record changed: name, type, TTL and data
-		bean.changeSharedRecord("ftp", "A", "10.0.0.22", "files", "CNAME", 900, "www");
+		//  the file rewritten from its records (as a managing program would), a record added: served
+		//  by the inheriting zone after a reload
+		List<SharedZoneText.Record> list = new ArrayList<SharedZoneText.Record>(
+				SharedZoneText.records(new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8)));
+		SharedZoneText.Record soa = list.get(0);
+		list.set(0, new SharedZoneText.Record("@", soa.getTtl(), "SOA", soa.getData().replace(" 10 3600", " 11 3600")));
+		list.add(new SharedZoneText.Record("ftp", 600, "A", "10.0.0.21"));
+		String text = SharedZoneText.text(list, "; written by a test\n");
+		assertEquals(11, SharedZoneText.check(text));
+		write("shared.zone", text);
+		bean.reload();
 		assertEquals("[A 10.0.0.21 (inherited)]", records("child.test", "ftp.child.test").toString());
-		assertTrue(shared().contains("files CNAME 900 www"), shared().toString());
-		assertEquals(1, records("child.test", "files.child.test").size());
+		assertEquals(16, zone("child.test").getSerial());
+		assertTrue(shared().contains("ftp A 600 10.0.0.21"), shared().toString());
+		assertEquals(recs.size()+1, shared().size(), "the same records, round trip, plus the one added");
+	}
 
-		//  the SOA: changed; a serial that isn't higher is raised past the file's
-		String soa = bean.getSharedRecords()[0].getData();
-		bean.changeSharedRecord("@", "SOA", soa, "@", "SOA", 300, "ns1 hostmaster 5 3600 1800 1209600 600");
-		String now = shared().get(0);
-		assertTrue(now.contains(" hostmaster 14 3600 1800 1209600 600"), now);
-
-		bean.deleteSharedRecord("files", "CNAME", "www");
-		assertEquals("[]", records("child.test", "files.child.test").toString());
-
-		//  refused, and the file left as it was
-		String before = new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
-		assertThrows(IllegalArgumentException.class, () -> bean.addSharedRecords("x", "MX", 300, new String[] { "ten mail" }), "not MX data");
-		assertThrows(IllegalArgumentException.class, () -> bean.addSharedRecords("x.example.", "A", 300, new String[] { "10.0.0.1" }), "absolute");
-		assertThrows(IllegalArgumentException.class, () -> bean.addSharedRecords("@", "SOA", 300, new String[] { soa }), "a second SOA");
-		assertThrows(IllegalArgumentException.class, () -> bean.addSharedRecords("x", "RRSIG", 300, new String[] { "x" }), "signing makes it");
-		assertThrows(IllegalArgumentException.class, () -> bean.addSharedRecords("x", "BOGUS", 300, new String[] { "x" }));
-		assertThrows(IllegalArgumentException.class, () -> bean.addSharedRecords("x", "A", 300, new String[] { " " }), "no value");
-		assertThrows(IllegalArgumentException.class, () -> bean.deleteSharedRecord("@", "SOA", now.substring(now.indexOf("SOA ")+8)));
-		assertThrows(IllegalArgumentException.class, () -> bean.changeSharedRecord("ftp", "A", "10.0.0.21", "@", "SOA", 300, "a b 1 1 1 1 1"));
-		assertThrows(IllegalStateException.class, () -> bean.deleteSharedRecord("nothere", "A", "10.0.0.1"), "not there");
-		assertThrows(IllegalStateException.class, () -> bean.changeSharedRecord("ftp", "A", "10.0.0.99", "ftp", "A", 300, "10.0.0.98"));
-		assertEquals(before, new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8));
-		assertEquals(0, bean.getErrors().length);
+	@Test
+	public void aSharedZoneTextIsCheckedAsTheServerChecksTheFile() {
+		String good = TestInheritedZones.primary(10, "");
+		assertThrows(IOException.class, () -> SharedZoneText.check(good+"x\tIN\tMX\tten mail\n"), "not MX data");
+		assertThrows(IOException.class, () -> SharedZoneText.check("$INHERIT\n"+good), "no $INHERIT");
+		assertThrows(IllegalArgumentException.class, () -> SharedZoneText.editableType("RRSIG"), "signing makes it");
+		assertThrows(IllegalArgumentException.class, () -> SharedZoneText.editableType("BOGUS"));
+		assertEquals("CNAME", SharedZoneText.editableType(" cname "));
 	}
 
 	@Test
@@ -264,7 +240,6 @@ public class TestDnsManagement {
 		server.loadZones();
 		assertNull(bean.getSharedZoneFile());
 		assertThrows(IllegalStateException.class, () -> bean.getSharedRecords());
-		assertThrows(IllegalStateException.class, () -> bean.addSharedRecords("x", "A", 300, new String[] { "10.0.0.1" }));
 	}
 
 	@Test

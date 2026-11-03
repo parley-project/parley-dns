@@ -2,12 +2,15 @@ package us.bringardner.parley.dns.server;
 
 /**
  * The DNS server as JMX sees it ({@code us.bringardner.parley:type=Dns,name=DnsServer}), for
- * management tools such as parley-mail-admin. It is an MXBean, so every attribute is a JMX open
- * type and a generic client (JConsole) can read it.
+ * management tools. It is an MXBean, so every attribute is a JMX open type and a generic client
+ * (JConsole) can read it.
  * <p>
- * Records are not changed here: send a dynamic update (RFC 2136), signed with a key in
- * {@code parley.dns.updateKeys}, to {@link #getTcpPort()}. The update is journaled and the
- * secondaries are told, as for any other update.
+ * Nothing here changes a zone: the server reads zone files and doesn't write them. A zone's records
+ * are changed with a dynamic update (RFC 2136), signed with a key in {@code parley.dns.updateKeys},
+ * sent to {@link #getTcpPort()}; it is journaled and the secondaries are told, as for any other
+ * update. The shared zone's file, and a new zone file, are written by whoever manages them
+ * ({@link SharedZoneText} reads, checks and writes their text); the server reads a changed file
+ * again ({@link #reload()} at once).
  *
  * @since 2.0.0
  */
@@ -49,23 +52,12 @@ public interface DnsServerMXBean {
 	 */
 	void reload() throws Exception;
 
-	/**
-	 * Make the zone file of a domain that inherits the shared zone (a {@code $INHERIT} line and an
-	 * SOA like the shared zone's, serial 1) and load it. The domain then serves the shared zone's
-	 * records until it adds or overrides some. A listed domain gets its file this way when one of
-	 * its records changes.
-	 * @param zone the domain, e.g. example.com
-	 * @throws IllegalArgumentException if the name isn't a domain name, the zone has a file
-	 *  already, or the shared zone isn't set or can't be read
-	 */
-	void createInheritingZone(String zone) throws Exception;
-
 	/** The shared zone's file ({@code parley.dns.sharedZone}), or null when it isn't set */
 	String getSharedZoneFile();
 
 	/**
 	 * The record types zone files can have, in a form's order: their data's example and whether
-	 * they can be changed (dynamic updates, the shared zone's record calls). Management tools build
+	 * they can be changed (dynamic updates, a managed shared zone). Management tools build
 	 * their record forms from this, so a type the server learns needs no change there.
 	 */
 	DnsRecordType[] getRecordTypes();
@@ -77,29 +69,4 @@ public interface DnsServerMXBean {
 	 *  missing or not a valid shared zone
 	 */
 	DnsRecordInfo[] getSharedRecords() throws Exception;
-
-	/**
-	 * Add records to the shared zone: one per value, of the type at the name; values it has
-	 * already are left. The TTL becomes the TTL of every record of that name and type (RFC 2181 5.2).
-	 * Each change to the shared zone writes its file whole (its comments are not kept), keeps the
-	 * one it replaces as {@code <file>.previous}, raises its serial and is served at once.
-	 * @param name relative to the domain: {@code @} (or empty), {@code www}, {@code *}
-	 * @throws IllegalArgumentException if a value isn't valid data of the type, or the type can't be changed
-	 */
-	void addSharedRecords(String name, String type, long ttl, String[] values) throws Exception;
-
-	/**
-	 * Replace one record of the shared zone (found by name, type and data, as
-	 * {@link #getSharedRecords()} gives them) with another: any name, type, TTL and data. The TTL
-	 * becomes the TTL of every record of the new name and type. The SOA stays an SOA at {@code @};
-	 * its serial is raised past the file's if the new one isn't higher.
-	 * @throws IllegalStateException if the record isn't there (changed meanwhile)
-	 */
-	void changeSharedRecord(String name, String type, String data, String newName, String newType, long ttl, String newData) throws Exception;
-
-	/**
-	 * Delete one record of the shared zone (found by name, type and data). The SOA can't be deleted.
-	 * @throws IllegalStateException if the record isn't there (changed meanwhile)
-	 */
-	void deleteSharedRecord(String name, String type, String data) throws Exception;
 }

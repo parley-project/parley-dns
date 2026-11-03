@@ -119,7 +119,7 @@ mail and DNS share one list:
  +  These records are not part of zone transfers: a secondary gets the zones' own and inherited records.
 
 **A domain with records of its own** has a zone file with a `$INHERIT` line (in the file itself, once; the file
-still needs its own SOA; JMX `createInheritingZone` writes one). It serves the shared zone's records, read under
+still needs its own SOA; `SharedZoneText.inheritingZone(domain, sharedText)` gives that text). It serves the shared zone's records, read under
 its name, plus its own:
 
  +  Its own records add to the shared ones, or override them by name and type: an own MX replaces the
@@ -147,9 +147,13 @@ its name, plus its own:
 
 `us.bringardner.parley:type=Dns,name=…` (`DnsServerMXBean`, an MXBean any JMX client can read) gives the
 server's state, its zones (inherited from, served and own serials, record counts, signed), a zone's records
-marked own or inherited, the zone files that failed to load, `reload()`, and `createInheritingZone(domain)`,
-which writes the domain's zone file (an `$INHERIT` line and an SOA like the shared zone's, serial 1) and loads it. Records are
-changed with dynamic updates signed with a key in `parley.dns.updateKeys`, sent to its TCP port.
+marked own or inherited, the zone files that failed to load, `reload()`, the shared zone's file and records,
+and the record types. Nothing there changes a zone: the server reads zone files and never writes them, apart
+from dynamic updates (RFC 2136, journaled, and a listed domain's zone file when an update first changes it).
+Records are changed with dynamic updates signed with a key in `parley.dns.updateKeys`, sent to its TCP port. The
+shared zone's file and a new domain's zone file are written by whoever manages them: `SharedZoneText` reads,
+checks (as the server does) and writes their text, with no file access of its own; after writing, call
+`reload()` to have them served at once (the server also reads a changed file at its next maintenance round).
 
 `DnsServer.main` runs the DNS server alone in its process with parley-net's `ServerMain.run`: settings from
 `parley-dns.properties` in the settings folder (or the file `parley.dns.configFile` names), the JVM's `-D` options and
