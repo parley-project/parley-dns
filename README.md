@@ -106,9 +106,13 @@ mail and DNS share one list:
     parley-mail-admin's DNS page), so the change can be journaled beside it; from then on it is a zone with a
     file (below), and it stays served if the domain leaves the list. Writing it is refused while an old
     journal of that zone is there.
- +  The master zone answers `domain._report._dmarc.master` with `v=DMARC1` for each listed domain outside
-    the master's own (RFC 7489 7.1), so the reports a shared DMARC record asks for, at an address in the
-    master domain, are sent.
+ +  **DMARC report authorizations** (RFC 7489 7.1), with no zone file per domain: the master zone answers
+    `domain._report._dmarc.master` with `v=DMARC1` for each listed domain outside the master's own whose
+    DMARC record, as served (from the shared zone or the domain's own zone), sends reports (`rua=` or `ruf=`)
+    to a `mailto:` address in the master's domain. So a shared DMARC record like
+    `"v=DMARC1; p=quarantine; rua=mailto:dmarc@example.net"` in the shared zone has its reports accepted at
+    example.net for every listed domain; a domain whose own record sends them elsewhere gets none, nor
+    does one with no `rua`/`ruf`. `parley.dns.reportAuthorizations=false` turns them off.
  +  Names in the list that aren't domain names are left out and reported with the zone errors. A list that
     can't be read keeps the domains read last (reported). Without a shared zone the listed domains aren't
     served (reported).
@@ -333,6 +337,7 @@ A bind address of `localhost` means this host's own name (its network address), 
 | `parley.dns.dnsDir` | `/data/services/dns/config` | Directory for the dynamic entries file, the TSIG key file and the root hints (`root.hints`, `name=address` lines; without it the built-in root servers are used) |
 | `parley.dns.zoneDir` | `zones` | Directory of the zone files (`<zone>.txt`); a changed file is reloaded |
 | `parley.dns.masterZone` | required | The primary domain's zone; it serves the listed domains' DMARC report authorizations |
+| `parley.dns.reportAuthorizations` | true | Answer the listed domains' DMARC report authorizations in the master zone (see Listed domains and the shared zone) |
 | `parley.dns.sharedZone` | none | The shared zone's file, served under every listed domain's name and inherited by zones with `$INHERIT` (see Listed domains and the shared zone) |
 | `parley.dns.domainList` | `PropertiesDomainList` when `parley.dns.domainList.file` is set | The class of the domain list (parley-net's `IDomainList`); its settings are `parley.dns.domainList.<name>` |
 | `parley.dns.domainList.file` | none | `PropertiesDomainList`: the properties file holding the list (the mail queue's `queue.properties`) |

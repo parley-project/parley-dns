@@ -53,9 +53,9 @@ public class TestListedDomains {
 	public void setup() throws Exception {
 		dir = Files.createTempDirectory("listed").toFile();
 		keys = Files.createTempDirectory("listedsettings").toFile();
-		write(new File(dir, "primary.test.txt"), TestInheritedZones.primary(10, DKIM));
+		write(new File(dir, "primary.test.txt"), reportsToPrimary(TestInheritedZones.primary(10, DKIM)));
 		write(new File(dir, "child.test.txt"), TestInheritedZones.child(5, ""));
-		write(new File(dir, "shared.zone"), TestInheritedZones.primary(10, DKIM));
+		write(new File(dir, "shared.zone"), reportsToPrimary(TestInheritedZones.primary(10, DKIM)));
 		settings = new File(keys, "queue.properties");
 		settings("primary.test,child.test,Mail.Example.");
 		savedDir = System.getProperty(DnsServer.PROP_ZONE_DIR);
@@ -70,6 +70,13 @@ public class TestListedDomains {
 		server.loadZones();
 		server.setRecursionAvailable(false);
 		server.setUpdateAllow("127.0.0.1");
+	}
+
+	static final String DMARC = "\"v=DMARC1; p=quarantine; rua=mailto:dmarc@primary.test\"";
+
+	/** The zone's DMARC record sends its aggregate reports to an address at primary.test */
+	static String reportsToPrimary(String zone) {
+		return zone.replace("\"v=DMARC1; p=quarantine\"", DMARC);
 	}
 
 	private void settings(String domains) throws IOException {
@@ -168,7 +175,7 @@ public class TestListedDomains {
 		assertEquals("[x.wild.mail.example A 10.0.0.99]", answers(ask("x.wild.mail.example", DNS.A)).toString());
 		assertEquals(NXDOMAIN, ask("nothing.mail.example", DNS.A).getResponseCode());
 		assertEquals("\"v=spf1 mx -all\"", answers(ask("mail.example", DNS.TXT)).get(0).replace("mail.example TXT ", ""));
-		assertEquals("[_dmarc.mail.example TXT \"v=DMARC1; p=quarantine\"]", answers(ask("_dmarc.mail.example", DNS.TXT)).toString());
+		assertEquals("[_dmarc.mail.example TXT "+DMARC+"]", answers(ask("_dmarc.mail.example", DNS.TXT)).toString());
 		Message soa = ask("mail.example", DNS.SOA);
 		assertEquals(1, soa.getAnswerCount());
 		assertEquals("mail.example", strip(soa.getAnswer().get(0).getName()));
@@ -214,7 +221,40 @@ public class TestListedDomains {
 		assertEquals(DNS.NOERROR, above.getResponseCode());
 		assertEquals(0, above.getAnswerCount());
 		// the master zone's own DMARC record is untouched
-		assertEquals("[_dmarc.primary.test TXT \"v=DMARC1; p=quarantine\"]", answers(ask("_dmarc.primary.test", DNS.TXT)).toString());
+		assertEquals("[_dmarc.primary.test TXT "+DMARC+"]", answers(ask("_dmarc.primary.test", DNS.TXT)).toString());
+	}
+
+	@Test
+	public void onlyWhenTheDomainsDmarcRecordSendsReportsThere() throws Exception {
+		// child.test has a zone file: its own DMARC record, reports to another address
+		write(new File(dir, "child.test.txt"), TestInheritedZones.child(6, "_dmarc\tIN\tTXT\t\"v=DMARC1; p=none; rua=mailto:reports@elsewhere.example!10m\"\n"));
+		server.loadZones();
+		assertEquals(NXDOMAIN, ask("child.test._report._dmarc.primary.test", DNS.TXT).getResponseCode(), "its reports go elsewhere");
+		assertEquals("v=DMARC1", txt(ask("mail.example._report._dmarc.primary.test", DNS.TXT)), "the shared zone's still come here");
+
+		// ruf= counts too, with a size limit and in capitals
+		write(new File(dir, "child.test.txt"), TestInheritedZones.child(7, "_dmarc\tIN\tTXT\t\"v=DMARC1; p=none; ruf=MAILTO:Fail@Primary.Test!5m\"\n"));
+		server.loadZones();
+		assertEquals("v=DMARC1", txt(ask("child.test._report._dmarc.primary.test", DNS.TXT)));
+
+		// a shared zone with no rua or ruf authorizes nothing
+		write(new File(dir, "shared.zone"), TestInheritedZones.primary(11, DKIM));
+		server.loadZones();
+		assertEquals(NXDOMAIN, ask("mail.example._report._dmarc.primary.test", DNS.TXT).getResponseCode());
+	}
+
+	@Test
+	public void theAuthorizationsCanBeTurnedOff() throws Exception {
+		String saved = System.getProperty(DnsServer.PROP_REPORT_AUTHORIZATIONS);
+		System.setProperty(DnsServer.PROP_REPORT_AUTHORIZATIONS, "false");
+		try {
+			server.loadZones();
+			assertEquals(NXDOMAIN, ask("mail.example._report._dmarc.primary.test", DNS.TXT).getResponseCode());
+		} finally {
+			restore(DnsServer.PROP_REPORT_AUTHORIZATIONS, saved);
+		}
+		server.loadZones();
+		assertEquals("v=DMARC1", txt(ask("mail.example._report._dmarc.primary.test", DNS.TXT)));
 	}
 
 	@Test

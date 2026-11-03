@@ -58,6 +58,7 @@ parley.dns.resolverMaxQueueAge
 parley.dns.resolverVirtualThreads
 parley.dns.resolvers
 parley.dns.sharedZone
+parley.dns.reportAuthorizations
 parley.dns.tcpBacklog
 parley.dns.tcpBindAddress
 parley.dns.tcpIdleTimeout

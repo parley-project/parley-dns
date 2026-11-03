@@ -3,6 +3,13 @@
 ## parley-dns 2.0.0 (unreleased)
 
 
+### Changed (2026-11-03: DMARC report authorizations, To-Do 15.4)
+
+- **The listed domains' DMARC report authorizations are answered only when they are true**: the master zone answers
+  `domain._report._dmarc.master` only when the listed domain's DMARC record, as served, sends reports (`rua=` or
+  `ruf=`) to an address in the master's domain; before, every listed domain was authorized whatever its record said.
+  New setting `parley.dns.reportAuthorizations` (default true) turns them off.
+
 ### Changed (2026-11-03: the launcher moved to parley-mail-admin)
 
 - **`DnsServerProvider` moved to parley-mail-admin** with the launcher; this module registers no server provider.

@@ -13,9 +13,10 @@ import us.bringardner.parley.net.server.IDomainList;
  * {@code domains=}, so mail and DNS share one list). Each listed domain with no zone file is
  * served from the shared zone in memory; one with a zone file is served from it.
  * <p>
- * The master zone also serves, for each listed domain outside it, the DMARC report
- * authorization (RFC 7489 7.1) at {@code domain._report._dmarc.master}, so reports a listed
- * domain's DMARC record asks for reach the master zone's address.
+ * The master zone also serves, for each listed domain outside it whose DMARC record sends reports
+ * (rua= or ruf=) to an address in the master's domain, the DMARC report authorization (RFC 7489
+ * 7.1) at {@code domain._report._dmarc.master}, so those reports are accepted; with no zone file per
+ * domain. {@code parley.dns.reportAuthorizations=false} turns it off.
  */
 final class ListedDomains {
 
@@ -72,6 +73,45 @@ final class ListedDomains {
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * Whether one of these DMARC records (a domain's {@code _dmarc} TXT records) sends aggregate (rua)
+	 * or failure (ruf) reports to a mailto: address in this domain (exactly: a receiver checks the
+	 * domain of the address, RFC 7489 7.1).
+	 */
+	static boolean reportsTo(java.util.List<String> records, String domain) {
+		String d = strip(domain).toLowerCase(Locale.ROOT);
+		for(String r : records) {
+			if( r == null || !r.trim().regionMatches(true, 0, "v=DMARC1", 0, 8) ) {
+				continue;
+			}
+			for(String tag : r.split(";")) {
+				int eq = tag.indexOf('=');
+				if( eq < 0 ) {
+					continue;
+				}
+				String k = tag.substring(0, eq).trim().toLowerCase(Locale.ROOT);
+				if( !k.equals("rua") && !k.equals("ruf") ) {
+					continue;
+				}
+				for(String uri : tag.substring(eq+1).split(",")) {
+					String u = uri.trim();
+					int bang = u.indexOf('!');
+					if( bang >= 0 ) {
+						u = u.substring(0, bang); // a size limit
+					}
+					if( !u.regionMatches(true, 0, "mailto:", 0, 7) ) {
+						continue;
+					}
+					int at = u.lastIndexOf('@');
+					if( at >= 0 && strip(u.substring(at+1)).toLowerCase(Locale.ROOT).equals(d) ) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
 	}
 
 	/** Whether a name has served names below it (an empty non-terminal: NODATA, not NXDOMAIN). */

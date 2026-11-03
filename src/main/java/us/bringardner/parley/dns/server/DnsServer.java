@@ -188,6 +188,13 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 * {@link SharedZone}.
 	 */
 	public static final String PROP_SHARED_ZONE = "parley.dns.sharedZone";
+	/**
+	 * Whether the master zone answers the DMARC report authorizations (RFC 7489 7.1) of the listed
+	 * domains: {@code <domain>._report._dmarc.<master>} TXT {@code v=DMARC1}, for a listed domain
+	 * whose DMARC record (as served, from the shared zone or its own zone) sends reports (rua= or
+	 * ruf=) to an address in the master zone's domain. Default true. See {@link ListedDomains}.
+	 */
+	public static final String PROP_REPORT_AUTHORIZATIONS = "parley.dns.reportAuthorizations";
 	/** Directory of the zones' DNSSEC keys (K&lt;zone&gt;.+alg+tag.key and .private). Default: the zone directory. A zone with keys is signed. */
 	public static final String PROP_DNSSEC_KEY_DIR = "parley.dns.dnssecKeyDir";
 	/** How long DNSSEC signatures are valid, e.g. 14d (the default); zones are signed again when a quarter of it is left. */
@@ -291,6 +298,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	private volatile ListedDomains listedDomains;
 	//  The shared zone (parley.dns.sharedZone), or null
 	private volatile SharedZone sharedZone;
+	//  parley.dns.reportAuthorizations, read with the listed domains
+	private volatile boolean reportAuthorizations = true;
 
 	/**
 	 * Dynamic A records: lower case name -> unmodifiable list holding one A.
@@ -1612,6 +1621,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 * is set. A list that can't be read keeps the domains read last (the error is in the zone errors).
 	 */
 	private ListedDomains readListedDomains() {
+		reportAuthorizations = !"false".equalsIgnoreCase(getProperty(PROP_REPORT_AUTHORIZATIONS, "true").trim());
 		String cls = getProperty(PROP_DOMAIN_LIST, null);
 		String file = getProperty(PROP_DOMAIN_LIST+"."+PropertiesDomainList.FILE, null);
 		if( blank(cls) && blank(file) ) {
@@ -1740,16 +1750,25 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		return ret;
 	}
 
-	/** A DMARC report authorization of a listed domain, at a name the zone has no records at. */
+	/**
+	 * A DMARC report authorization of a listed domain, at a name the zone has no records at: only
+	 * when it is on ({@link #PROP_REPORT_AUTHORIZATIONS}) and the domain's DMARC record sends its
+	 * reports to an address in the master zone's domain.
+	 */
 	private List<RR> listedRecords(String target, Zone zone) {
 		ListedDomains ld = listedDomains;
-		if( ld == null ) {
+		if( ld == null || !reportAuthorizations ) {
 			return null;
 		}
 		boolean master = zone == zoneSet.defaultZone;
 		String text = ld.txt(target, master ? defaultZoneName : null);
 		if( text == null || !(stripDot(target).toLowerCase().equals(stripDot(zone.getName()).toLowerCase())
 				|| stripDot(target).toLowerCase().endsWith("."+stripDot(zone.getName()).toLowerCase())) ) {
+			return null;
+		}
+		String t = stripDot(target).toLowerCase(java.util.Locale.ROOT);
+		String domain = t.substring(0, t.length()-(ListedDomains.REPORT+stripDot(defaultZoneName).toLowerCase(java.util.Locale.ROOT)).length());
+		if( !ListedDomains.reportsTo(dmarcRecords(domain), stripDot(defaultZoneName)) ) {
 			return null;
 		}
 		us.bringardner.parley.dns.Txt txt = new us.bringardner.parley.dns.Txt(stripDot(target));
@@ -1762,7 +1781,29 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 	private boolean listedNamesBelow(String target, Zone zone) {
 		ListedDomains ld = listedDomains;
-		return ld != null && ld.hasNamesBelow(target, zone == zoneSet.defaultZone ? defaultZoneName : null);
+		return ld != null && reportAuthorizations && ld.hasNamesBelow(target, zone == zoneSet.defaultZone ? defaultZoneName : null);
+	}
+
+	/** The text of the TXT records this server serves at _dmarc.DOMAIN (from whichever zone serves it). */
+	private List<String> dmarcRecords(String domain) {
+		List<String> ret = new ArrayList<String>();
+		String name = "_dmarc."+domain;
+		Zone z = null;
+		for(Name n = new Name(name); n != null && (z = getZone(n.toString())) == null; ) {
+			n = n.getParentName();
+		}
+		if( z == null ) {
+			return ret;
+		}
+		List<RR> list = z.getMatchingRRs(name);
+		if( list != null ) {
+			for(RR rr : list) {
+				if( rr instanceof us.bringardner.parley.dns.Txt ) {
+					ret.add(((us.bringardner.parley.dns.Txt)rr).getText());
+				}
+			}
+		}
+		return ret;
 	}
 
 	/** The shared zone (parley.dns.sharedZone), or null when it isn't set. */
