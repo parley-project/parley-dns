@@ -95,15 +95,15 @@ www             A       192.0.2.80
     can't have a `$INHERIT` line.
 
 **The listed domains** (`parley.dns.domainList`) are the domains served from the shared zone. The list comes
-from parley-net's `IDomainList`; by default (`PropertiesDomainList`) it is the `domains` setting of the mail
-queue's `queue.properties` (`parley.dns.domainList.file`), which parley-mail-admin's Domains page edits, so
-mail and DNS share one list:
+from parley-net's `IDomainList`; by default (`PropertiesDomainList`) it is the `domains` setting of a properties
+file (`parley.dns.domainList.file`), which other servers can read too, so they share one list (parley-mail-admin,
+for example, points it at the mail queue's `queue.properties`, so mail and DNS share one list):
 
  +  Each listed domain with no zone file is served from the shared zone, in memory, with an SOA like the
     shared zone's (serial 1 plus the shared zone's). A domain added to the list is served within the
     maintenance round; one removed is no longer served. Negative answers carry the domain's own SOA.
  +  Its zone file is written only when one of its records is changed (a dynamic update, e.g. from
-    parley-mail-admin's DNS page), so the change can be journaled beside it; from then on it is a zone with a
+    a management tool), so the change can be journaled beside it; from then on it is a zone with a
     file (below), and it stays served if the domain leaves the list. Writing it is refused while an old
     journal of that zone is there.
  +  **DMARC report authorizations** (RFC 7489 7.1), with no zone file per domain: the master zone answers
@@ -158,10 +158,10 @@ checks (as the server does) and writes their text, with no file access of its ow
 `DnsServer.main` runs the DNS server alone in its process with parley-net's `ServerMain.run`: settings from
 `parley-dns.properties` in the settings folder (or the file `parley.dns.configFile` names), the JVM's `-D` options and
 the command line; its `Dns` bean (`us.bringardner.parley:type=Dns,name=dns`) is on the platform MBean server while it
-runs (reach it with the JVM's `com.sun.management.jmxremote.*` settings). The mail suite runs DNS with its own launcher
-(parley-mail-admin's `DnsMain`, id `dns`), which makes the server from its own configuration (the server then reads
-only that, its TCP and admin servers and the resolver too) and adds the `type=Server,name=dns` bean the admin
-manages. One DNS server runs in a JVM (the resolver and its cache are shared).
+runs (reach it with the JVM's `com.sun.management.jmxremote.*` settings). An application that runs servers can make
+the DNS server from a configuration of its own (the server then reads only that, its TCP and admin servers and the
+resolver too); for an example, see parley-mail-admin's `DnsMain`. One DNS server runs in a JVM (the resolver and
+its cache are shared).
 
 # Dynamic update (RFC 2136)
 

@@ -9,8 +9,8 @@ import us.bringardner.parley.net.server.IDomainList;
 
 /**
  * The listed domains ({@code parley.dns.domainList}): the domains served from the shared zone,
- * from parley-net's {@link IDomainList} (by default the mail queue's {@code queue.properties}
- * {@code domains=}, so mail and DNS share one list). Each listed domain with no zone file is
+ * from parley-net's {@link IDomainList} (by default {@code PropertiesDomainList}: one setting of a
+ * properties file, which other servers can read too, so they share one list). Each listed domain with no zone file is
  * served from the shared zone in memory; one with a zone file is served from it.
  * <p>
  * The master zone also serves, for each listed domain outside it whose DMARC record sends reports

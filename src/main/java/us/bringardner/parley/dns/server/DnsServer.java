@@ -176,8 +176,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	/**
 	 * The listed domains: the class of the {@link us.bringardner.parley.net.server.IDomainList} that
 	 * lists them (default {@link PropertiesDomainList}); its own settings are read with this prefix
-	 * and a dot, e.g. parley.dns.domainList.file (the mail queue's queue.properties, whose domains=
-	 * the mail admin edits) and parley.dns.domainList.key (default domains). Each listed domain is
+	 * and a dot, e.g. parley.dns.domainList.file (a properties file, such as the one an application
+	 * keeps its domains in) and parley.dns.domainList.key (default domains). Each listed domain is
 	 * served from the shared zone. Default: none listed. See {@link ListedDomains}.
 	 */
 	public static final String PROP_DOMAIN_LIST = "parley.dns.domainList";
@@ -668,8 +668,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			return;
 		}
 
-		//  A server made with a configuration of its own (a launcher's: parley-mail-admin's launcher has
-		//  already read parley-dns.properties into it) reads only that, and leaves the JVM's system
+		//  A server made with a configuration of its own (by an application that runs it, which has
+		//  read its settings into it) reads only that, and leaves the JVM's system
 		//  properties alone. A server alone in its JVM loads its settings file into the system properties.
 		if( getConfiguration() != null ) {
 			log("Using the server's own configuration");
@@ -1482,7 +1482,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			}
 			File [] list = getZoneFiles(); 
 			if( list == null || list.length == 0 ) {
-				throw new IOException("No zone file in "+zoneDir+" ("+PROP_ZONE_DIR+"): at least the primary domain's zone, <domain>.txt, is needed (parley.dns.masterZone names the domain; parley-servers-setup --dns-domain makes one)");			
+				throw new IOException("No zone file in "+zoneDir+" ("+PROP_ZONE_DIR+"): at least the primary domain's zone, <domain>.txt, is needed (parley.dns.masterZone names the domain)");			
 			}
 			defaultZoneName = getProperty(PROP_DEFAULT_ZONE,null);
 			log(PROP_DEFAULT_ZONE+"= "+defaultZoneName);
@@ -1862,8 +1862,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		//  The DNS server alone in this process (parley-net's ServerMain.run): its settings are
 		//  parley-dns.properties in the settings folder, or the file parley.dns.configFile names, and the
 		//  command line. Its management bean is on the platform MBean server
-		//  (us.bringardner.parley:type=Dns,name=dns). (The mail suite runs DNS with its launcher:
-		//  parley-mail-admin's DnsMain.)
+		//  (us.bringardner.parley:type=Dns,name=dns).
 		javax.management.MBeanServer mbeans = java.lang.management.ManagementFactory.getPlatformMBeanServer();
 		us.bringardner.parley.net.server.ServerMain.run("DnsServer", args, PROP_DNS_PROPERTIES, DEFAULT_PROPERTIES_FILE_NAME,
 				() -> java.util.Collections.singletonList(service(new DnsServer(), "DNS server", bean -> {
@@ -1891,7 +1890,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	}
 
 	/**
-	 * The DNS server as a service of a launcher (parley-mail-admin's) or of main():
+	 * The DNS server as a service of main() or of an application that runs servers:
 	 * started and stopped by it, with its management bean registered while it runs.
 	 * <p>
 	 * The DNS server keeps some state per JVM (the shutdown flag, the TCP listener), so one runs in a
