@@ -1710,17 +1710,24 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		if( ld == null || ld.domains().isEmpty() ) {
 			return ret;
 		}
+		//  only the listed domains with no zone of their own need the shared zone
+		List<String> missing = new ArrayList<String>();
+		for(String d : ld.domains()) {
+			if( !zones.containsKey(d) ) {
+				missing.add(d);
+			}
+		}
+		if( missing.isEmpty() ) {
+			return ret;
+		}
 		SharedZone sz = sharedZone;
 		if( sz == null || !sz.isReady() ) {
-			String why = "the listed domains aren't served: "+(sz == null ? PROP_SHARED_ZONE+" is not set" : "the shared zone can't be read");
-			zoneErrors.put("listed domain "+ld.domains(), why);
+			String why = "the listed domains with no zone file "+missing+" aren't served: "+(sz == null ? PROP_SHARED_ZONE+" is not set" : "the shared zone can't be read");
+			zoneErrors.put("listed domain "+missing, why);
 			logError(why);
 			return ret;
 		}
-		for(String d : ld.domains()) {
-			if( zones.containsKey(d) ) {
-				continue;
-			}
+		for(String d : missing) {
 			try {
 				Zone v = new Zone(new File(zoneDir, d+".txt"), Zone.inheritingText(d, sz.under(d, zoneDir).getSoa()));
 				zones.put(d, v);

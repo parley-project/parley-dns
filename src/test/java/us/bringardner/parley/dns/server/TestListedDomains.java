@@ -272,9 +272,24 @@ public class TestListedDomains {
 		DnsServer none = new DnsServer();
 		none.loadZones();
 		assertNull(none.getZone("mail.example"));
-		assertTrue(String.join("\n", none.getZoneErrors()).contains(DnsServer.PROP_SHARED_ZONE+" is not set"), none.getZoneErrors().toString());
+		String errors = String.join("\n", none.getZoneErrors());
+		assertTrue(errors.contains(DnsServer.PROP_SHARED_ZONE+" is not set"), errors);
+		// the error names only the domain that needs the shared zone
+		assertTrue(errors.contains("[mail.example]"), errors);
 		// a zone with a file is still served, from its own records
 		assertNotNull(none.getZone("child.test"));
+	}
+
+	@Test
+	public void listedDomainsWithTheirOwnZonesNeedNoSharedZone() throws Exception {
+		// a fresh install: the list holds only domains with zone files (the primary zone)
+		write(settings, "domains=primary.test\n");
+		System.clearProperty(DnsServer.PROP_SHARED_ZONE);
+		DnsServer own = new DnsServer();
+		own.loadZones();
+		String errors = String.join("\n", own.getZoneErrors());
+		assertFalse(errors.contains("aren't served"), errors);
+		assertNotNull(own.getZone("primary.test"));
 	}
 
 	@Test
