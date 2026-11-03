@@ -145,7 +145,7 @@ public class TestDnsManagement {
 	public void aNewInheritingZoneFileIsServedAfterAReload() throws Exception {
 		// the server writes no zone file: whoever manages them does (SharedZoneText gives the text)
 		String shared = new String(Files.readAllBytes(new File(dir, "shared.zone").toPath()), StandardCharsets.UTF_8);
-		String text = SharedZoneText.inheritingZone("New.Example.", shared);
+		String text = SharedZoneText.inheritingZone("New.Example.", shared, dir);
 		assertTrue(text.contains("$INHERIT\n"), text);
 		write("new.example.txt", text);
 		bean.reload();
@@ -213,6 +213,17 @@ public class TestDnsManagement {
 		assertEquals(16, zone("child.test").getSerial());
 		assertTrue(shared().contains("ftp A 600 10.0.0.21"), shared().toString());
 		assertEquals(recs.size()+1, shared().size(), "the same records, round trip, plus the one added");
+	}
+
+	@Test
+	public void aSharedZoneWithAnIncludeIsReadFromItsFolder() throws Exception {
+		write("common.inc", "ftp\tIN\tA\t10.0.0.21\n");
+		write("shared.zone", TestInheritedZones.primary(11, "$INCLUDE common.inc\n"));
+		bean.reload();
+		assertTrue(shared().contains("ftp A 300 10.0.0.21"), shared().toString());
+		String shared = new String(Files.readAllBytes(new File(dir, "shared.zone").toPath()), StandardCharsets.UTF_8);
+		assertTrue(SharedZoneText.inheritingZone("new.example", shared, dir).contains("$INHERIT"));
+		assertEquals(11, SharedZoneText.check(shared, dir));
 	}
 
 	@Test

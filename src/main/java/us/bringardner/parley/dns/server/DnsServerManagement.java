@@ -122,7 +122,8 @@ class DnsServerManagement implements DnsServerMXBean {
 	@Override
 	public String getSharedZoneFile() {
 		SharedZone s = server.getSharedZone();
-		return s == null ? null : s.getFile().getPath();
+		//  absolute: a management tool elsewhere resolves it against its own working directory otherwise
+		return s == null ? null : s.getFile().getAbsolutePath();
 	}
 
 	@Override
@@ -158,7 +159,7 @@ class DnsServerManagement implements DnsServerMXBean {
 			throw new IllegalStateException("The shared zone's file "+f+" doesn't exist");
 		}
 		try {
-			return SharedZoneText.records(new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8));
+			return SharedZoneText.records(new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8), f.getAbsoluteFile().getParentFile());
 		} catch(IOException e) {
 			throw new IllegalStateException(e.getMessage()+" ("+f+")", e);
 		}

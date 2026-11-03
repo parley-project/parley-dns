@@ -82,11 +82,18 @@ final class ListedDomains {
 	 */
 	static boolean reportsTo(java.util.List<String> records, String domain) {
 		String d = strip(domain).toLowerCase(Locale.ROOT);
+		String dmarc = null;
 		for(String r : records) {
-			if( r == null || !r.trim().regionMatches(true, 0, "v=DMARC1", 0, 8) ) {
-				continue;
+			String[] tags = r == null ? new String[0] : r.split(";");
+			if( tags.length > 0 && tags[0].replaceAll("\\s", "").equalsIgnoreCase("v=DMARC1") ) {
+				if( dmarc != null ) {
+					return false; // more than one DMARC record: none applies (RFC 7489 6.6.3)
+				}
+				dmarc = r;
 			}
-			for(String tag : r.split(";")) {
+		}
+		if( dmarc != null ) {
+			for(String tag : dmarc.split(";")) {
 				int eq = tag.indexOf('=');
 				if( eq < 0 ) {
 					continue;

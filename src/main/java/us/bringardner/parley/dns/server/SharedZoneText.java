@@ -82,12 +82,30 @@ public final class SharedZoneText {
 	 * @throws IOException naming the line if it isn't a valid shared zone
 	 */
 	public static long check(String text) throws IOException {
-		return Integer.toUnsignedLong(parse(text).getSoa().getSerial());
+		return check(text, null);
+	}
+
+	/**
+	 * As {@link #check(String)}, with {@code $INCLUDE} files relative to this folder (the shared zone
+	 * file's, as the DNS server reads it).
+	 * @param dir the folder, or null for the working directory
+	 */
+	public static long check(String text, File dir) throws IOException {
+		return Integer.toUnsignedLong(parse(text, dir).getSoa().getSerial());
 	}
 
 	/** The records of a shared zone's text, the SOA first, owners and names in the data relative to the domain. */
 	public static List<Record> records(String text) throws IOException {
-		Zone z = parse(text);
+		return records(text, null);
+	}
+
+	/**
+	 * As {@link #records(String)}, with {@code $INCLUDE} files relative to this folder (the shared
+	 * zone file's).
+	 * @param dir the folder, or null for the working directory
+	 */
+	public static List<Record> records(String text, File dir) throws IOException {
+		Zone z = parse(text, dir);
 		List<Record> ret = new ArrayList<Record>();
 		ret.add(rec(z.getSoa()));
 		for(List<us.bringardner.parley.dns.RR> l : z.getRrs()) {
@@ -131,12 +149,14 @@ public final class SharedZoneText {
 	 * SOA like the shared zone's under that domain, serial 1 (the server adds the shared zone's).
 	 * @param domain the domain, e.g. example.com
 	 * @param sharedText the shared zone's text
+	 * @param zoneDir the zone folder, where the DNS server reads the shared zone under the domain's
+	 *  name ({@code $INCLUDE} files relative to it), or null for the working directory
 	 */
-	public static String inheritingZone(String domain, String sharedText) throws IOException {
+	public static String inheritingZone(String domain, String sharedText, File zoneDir) throws IOException {
 		String d = strip(domain.trim()).toLowerCase(Locale.ROOT);
 		Zone z;
 		try {
-			z = new Zone(new File(d+".txt"), sharedText);
+			z = new Zone(new File(zoneDir, d+".txt"), sharedText);
 		} catch(IOException e) {
 			throw new IOException("The shared zone: "+String.valueOf(e.getMessage()).replace(d+".txt", "its file"), e);
 		}
@@ -161,10 +181,10 @@ public final class SharedZoneText {
 		throw new IllegalArgumentException("Unknown record type "+type);
 	}
 
-	private static Zone parse(String text) throws IOException {
+	private static Zone parse(String text, File dir) throws IOException {
 		Zone z;
 		try {
-			z = new Zone(new File(CHECK+".txt"), text);
+			z = new Zone(new File(dir, CHECK+".txt"), text);
 		} catch(IOException e) {
 			throw new IOException("The shared zone: "+String.valueOf(e.getMessage()).replace(CHECK+".txt", "its file"), e);
 		}
