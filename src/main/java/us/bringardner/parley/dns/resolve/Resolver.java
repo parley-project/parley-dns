@@ -408,9 +408,19 @@ public class Resolver  extends DnsBaseClass
 		started++;
 	}
 
+	/** {@link #initResolver(Properties)} from the system properties, for a resolver alone in its JVM */
 	public static void initResolver() throws IOException	{
-		//  Assume that this has been populated by the Server
-		Properties prop = System.getProperties();
+		initResolver(System.getProperties());
+	}
+
+	/**
+	 * Start the resolver (one per JVM: its cache and threads are shared) with these settings: the
+	 * DNS server's own configuration, or the system properties.
+	 *
+	 * @param prop the settings (parley.dns.*)
+	 * @since 2.0.0
+	 */
+	public static void initResolver(Properties prop) throws IOException	{
 		String dnsDir = null;
 
 
@@ -574,6 +584,7 @@ public class Resolver  extends DnsBaseClass
 		if( (tmp=prop.getProperty(ResolverThread.PROP_RESOLVER_VIRTUAL_THREADS)) != null ) {
 			ResolverThread.setVirtualThreads(Boolean.parseBoolean(tmp.trim()));
 		}
+		ResolverThread.setMaxBacklog(prop.getProperty(ResolverThread.PROP_RESOLVER_BACKLOG));
 		resolvers = new ResolverThread[resolverCount];
 
 		for(int i=0; i<resolverCount; i++ ) {

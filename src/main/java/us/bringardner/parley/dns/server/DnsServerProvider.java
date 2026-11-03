@@ -1,6 +1,8 @@
 package us.bringardner.parley.dns.server;
 
-import us.bringardner.parley.dns.Message;
+import java.util.Properties;
+
+import us.bringardner.parley.core.BaseObject;
 import us.bringardner.parley.net.server.ServerContext;
 import us.bringardner.parley.net.server.ServerMain;
 import us.bringardner.parley.net.server.ServerProvider;
@@ -12,8 +14,9 @@ import us.bringardner.parley.net.server.ServerProvider;
  * Parley server; while it runs, {@code us.bringardner.parley:type=Dns,name=dns} ({@link DnsServerMXBean})
  * adds its zones and records.
  * <p>
- * It reads its settings from the system properties (the launcher sets them from its files for such
- * providers), so one DNS server runs per JVM.
+ * The server is made from its own configuration, like the other servers, and reads only that (its
+ * TCP and admin servers and the resolver too), never the JVM's system properties. The resolver and
+ * its cache are one per JVM, as is the {@code dns} id, so one DNS server runs per launcher.
  *
  * @since 2.0.0
  */
@@ -26,7 +29,7 @@ public class DnsServerProvider implements ServerProvider {
 
 	@Override
 	public String description() {
-		return "DNS (port "+Integer.getInteger(DnsServer.PROP_PORT, Message.DNSPORT)+")";
+		return "DNS";
 	}
 
 	@Override
@@ -35,8 +38,13 @@ public class DnsServerProvider implements ServerProvider {
 	}
 
 	@Override
-	public ServerMain.Service create(ServerContext context) throws Exception {
-		DnsServer svr = new DnsServer();
+	public boolean usesConfiguration() {
+		return true;
+	}
+
+	@Override
+	public ServerMain.Service create(ServerContext context, Properties configuration) throws Exception {
+		DnsServer svr = BaseObject.makeWith(configuration, DnsServer::new);
 		return DnsServer.service(svr, "DNS server", bean -> context.register("Dns", id(), bean), context::unregister);
 	}
 }

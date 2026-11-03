@@ -150,7 +150,10 @@ changed with dynamic updates signed with a key in `parley.dns.updateKeys`, sent 
 `DnsServer.main` runs parley-net's launcher with the DNS server (`DnsServerProvider`, `dns` in
 `parley.servers`), as the other Parley servers' main methods do: on the platform MBean server (reach it with
 the JVM's `com.sun.management.jmxremote.*` settings) the server is `us.bringardner.parley:type=Server,name=dns`,
-like every Parley server, and its `Dns` bean is registered while it runs. One DNS server runs in a JVM.
+like every Parley server, and its `Dns` bean is registered while it runs. The launcher reads `parley-dns.properties`
+(or the file `parley.dns.configFile` names) into the server's own configuration, and the server reads only that, its
+TCP and admin servers and the resolver too: the JVM's system properties are left alone, so other servers in the JVM
+don't see DNS's settings. One DNS server runs in a JVM (the resolver and its cache are shared).
 
 # Dynamic update (RFC 2136)
 

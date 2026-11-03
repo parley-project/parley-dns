@@ -612,21 +612,16 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 * @throws IOException 
 	 */
 
-	public void initServer() throws IOException 	{
-
-		if(UDPProcs != null ) {
-			logError("init called when UDPProcs is not null");
-			return;
-		}
-
-		//First find and load any external property file 
-		//  Look for a file that may change these values: the one named, else parley-dns.properties in
-		//  Parley's administrator folder (/etc/parley, %ProgramData%\Parley or $PARLEY_CONF's), like every server's
+	/**
+	 * For a server alone in its JVM: load the settings file (the one parley.dns.configFile names,
+	 * else parley-dns.properties in Parley's administrator folder: /etc/parley, %ProgramData%\Parley
+	 * or $PARLEY_CONF's) into the system properties; system properties already set win.
+	 */
+	private void loadSettingsFile() throws IOException {
 		String propertyFile = getProperty(PROP_DNS_PROPERTIES);
 		File f = (propertyFile == null || propertyFile.trim().isEmpty()
 				? new File(us.bringardner.parley.net.server.ServerMain.confDir(), DEFAULT_PROPERTIES_FILE_NAME)
 				: new File(propertyFile.trim())).getCanonicalFile();
-
 
 		Properties prop1 = System.getProperties();
 		//  First load the properties from the file
@@ -650,14 +645,30 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				// logging config may have changed
 				setLogger(null);
 			} finally {
-				in.close();	
+				in.close();
 			}
 		} else {
 			log("Properties do not exits file="+f);
 		}
+	}
 
+	public void initServer() throws IOException 	{
 
-		String tmp = null;	
+		if(UDPProcs != null ) {
+			logError("init called when UDPProcs is not null");
+			return;
+		}
+
+		//  A server made with a configuration of its own (a launcher's: parley-net's ServerLauncher has
+		//  already read parley-dns.properties into it) reads only that, and leaves the JVM's system
+		//  properties alone. A server alone in its JVM loads its settings file into the system properties.
+		if( getConfiguration() != null ) {
+			log("Using the server's own configuration");
+		} else {
+			loadSettingsFile();
+		}
+
+		String tmp = null;
 
 		initFromProperties();
 		if(!dnsDir.exists()) {
@@ -694,7 +705,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		UDPProcs = new UDPProsessor[UDPProcCount];
 		Thread t = null;
 		log("UDP bindAddress = "+udpAddress+":"+udpPort+" timeout="+udpTimeout+" maxResponse="+UDPProsessor.getMaxResponseSize());
-		UDPProsessor.initUDPProsessor(udpPort,udpAddress,udpTimeout);
+		UDPProsessor.initUDPProsessor(udpPort,udpAddress,udpTimeout,stringProperty(UDPProsessor.PROP_UDP_DUMP_FILE));
 
 		for(int i=0; i< UDPProcs.length; i++ ) {
 			UDPProcs[i] = new UDPProsessor(this,i);
@@ -724,7 +735,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				+" maxConnections="+tcpMaxConnections+" maxConnectionsPerClient="+tcpMaxPerClient
 				+" idleTimeout="+tcpIdleTimeout+" reactors="+TCPProcCount);
 		TCPProsessor.initTCPProsessor(tcpPort,backlog,tcpAddress,tcpTimeout,tcpMaxConnections,tcpIdleTimeout,
-				tcpMaxPerClient,TCPProcCount);
+				tcpMaxPerClient,TCPProcCount,this);
 
 		for(int i=0; i< TCPProcs.length; i++ ) {
 			TCPProcs[i] = new TCPProsessor(this,i);
@@ -734,7 +745,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			t.start();
 		}
 
-		us.bringardner.parley.dns.resolve.Resolver.initResolver();
+		//  the resolver (one per JVM) with this server's settings: its configuration, or the system properties
+		us.bringardner.parley.dns.resolve.Resolver.initResolver(getConfiguration() != null ? getConfiguration() : System.getProperties());
 
 
 		//  ---- Admin (the socket is opened in run())
@@ -1069,12 +1081,12 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 		dnsDir=new File(getProperty(PROP_DNS_DIR,DEFAULT_DNS_DIR));
 
-		if( (tmp=System.getProperty(PROP_UDP_PROC_COUNT)) != null)  {
+		if( (tmp=getProperty(PROP_UDP_PROC_COUNT)) != null)  {
 			try { UDPProcCount =Integer.parseInt(tmp.trim()); } catch(Exception ex) {
 				logError("Invalid number for "+PROP_UDP_PROC_COUNT+": '"+tmp+"', using "+UDPProcCount);
 			}
 		}
-		if( (tmp=System.getProperty(PROP_TCP_PROC_COUNT)) != null)  {
+		if( (tmp=getProperty(PROP_TCP_PROC_COUNT)) != null)  {
 			try { TCPProcCount =Integer.parseInt(tmp.trim()); } catch(Exception ex) {
 				logError("Invalid number for "+PROP_TCP_PROC_COUNT+": '"+tmp+"', using "+TCPProcCount);
 			}
@@ -1870,7 +1882,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			@Override
 			public int port() {
 				int p = svr.getTcpPort();
-				return p > 0 ? p : Integer.getInteger(PROP_PORT, Message.DNSPORT);
+				return p > 0 ? p : svr.getIntProperty(PROP_PORT, Message.DNSPORT);
 			}
 
 			@Override

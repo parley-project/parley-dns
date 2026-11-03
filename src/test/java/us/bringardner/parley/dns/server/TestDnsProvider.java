@@ -85,6 +85,26 @@ public class TestDnsProvider {
 		f.delete();
 	}
 
+	/**
+	 * Made from its own configuration (To-Do 11.13): it serves what parley-dns.properties says, and
+	 * the file's settings don't become the JVM's system properties, which other servers in the JVM read.
+	 */
+	@Test
+	public void readsItsConfigurationAndLeavesTheSystemPropertiesAlone() throws Exception {
+		assertTrue(new DnsServerProvider().usesConfiguration());
+		launcher.init();
+		launcher.startAll();
+		ObjectName dnsName = new ObjectName("us.bringardner.parley:type=Dns,name=dns");
+		DnsServerMXBean dns = JMX.newMXBeanProxy(mbs, dnsName, DnsServerMXBean.class);
+		assertEquals("RUNNING", dns.getState());
+		assertEquals(2, dns.getZones().length, "the zones of the zoneDir its configuration names");
+		assertFalse(dns.isRecursionAvailable());
+		for(String name : new String[] {"parley.dns.dnsDir", "parley.dns.zoneDir", "parley.dns.masterZone",
+				"parley.dns.port", "parley.dns.recursionAvailable"}) {
+			assertEquals(null, System.getProperty(name), name+" was copied into the system properties");
+		}
+	}
+
 	@Test
 	public void runsUnderTheLauncher() throws Exception {
 		launcher.init();

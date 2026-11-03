@@ -342,17 +342,30 @@ public class ResolverThread extends us.bringardner.parley.dns.DnsBaseClass imple
 	public static final int DEFAULT_MAX_BACKLOG = 200;
 
 	private static void initResolverThread() {
+		fifo = new java.util.concurrent.ArrayBlockingQueue<Queued>(DEFAULT_MAX_BACKLOG);
+	}
+
+	/**
+	 * Set the backlog's size from the resolverMaxBacklog setting, before the resolver threads start
+	 * (Resolver.initResolver): a new, empty backlog when the size changes.
+	 *
+	 * @param value the setting, or null for the default ({@value #DEFAULT_MAX_BACKLOG})
+	 * @since 2.0.0
+	 */
+	static synchronized void setMaxBacklog(String value) {
 		int maxBacklog = DEFAULT_MAX_BACKLOG;
-
-		String tmp = System.getProperty(PROP_RESOLVER_BACKLOG);
-
-		if( tmp != null ) {
+		if( value != null && !value.trim().isEmpty() ) {
 			try {
-				maxBacklog = Integer.parseInt(tmp);
-			} catch(Exception ex) {}
+				maxBacklog = Integer.parseInt(value.trim());
+			} catch(NumberFormatException ex) {
+				new ResolverThread0().logError("Invalid number for "+PROP_RESOLVER_BACKLOG+": '"+value+"', using "+DEFAULT_MAX_BACKLOG);
+			}
 		}
-
-		fifo = new java.util.concurrent.ArrayBlockingQueue<Queued>(Math.max(1, maxBacklog));
+		maxBacklog = Math.max(1, maxBacklog);
+		java.util.concurrent.ArrayBlockingQueue<Queued> q = fifo;
+		if( q == null || q.size() + q.remainingCapacity() != maxBacklog ) {
+			fifo = new java.util.concurrent.ArrayBlockingQueue<Queued>(maxBacklog);
+		}
 	}
 	
 	/**

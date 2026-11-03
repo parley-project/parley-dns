@@ -47,7 +47,8 @@ import us.bringardner.parley.dns.resolve.QueryData;
  */
 public class UDPProsessor extends DnsRequestProcessor implements Runnable
 {
-	private static final String PROP_UDP_DUMP_FILE = "parley.dns.udpDumpFile";
+	/** A file every UDP request is written to, for debugging (off by default) */
+	static final String PROP_UDP_DUMP_FILE = "parley.dns.udpDumpFile";
 
 	//  Used for syncronization of the UDP Socket
 	private static DatagramSocket sock;
@@ -104,17 +105,25 @@ public static java.net.DatagramSocket getSock() {
 	return sock;
 }
 
-public synchronized static void initUDPProsessor(int bindPort,InetAddress bindAddress,int timeout) throws IOException
+public static void initUDPProsessor(int bindPort,InetAddress bindAddress,int timeout) throws IOException
 {
-	
+	initUDPProsessor(bindPort, bindAddress, timeout, null);
+}
+
+/**
+ * @param dumpFile the file every request is written to (the udpDumpFile setting), or null for none
+ * @since 2.0.0
+ */
+public synchronized static void initUDPProsessor(int bindPort,InetAddress bindAddress,int timeout,String dumpFile) throws IOException
+{
+
 		sock = new DatagramSocket(bindPort,bindAddress);
 		sock.setSoTimeout(timeout);
 
-		String dumpFile = System.getProperty(PROP_UDP_DUMP_FILE);
-		if( dumpFile != null && !dumpFile.equals("null")) {
-			dumpBuf = new PrintStream(new FileOutputStream(dumpFile));
-		}		
-	
+		if( dumpFile != null && !dumpFile.trim().isEmpty() && !dumpFile.equals("null")) {
+			dumpBuf = new PrintStream(new FileOutputStream(dumpFile.trim()));
+		}
+
 }
 /**
  * The UDP Server will sync on the lock object then

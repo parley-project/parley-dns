@@ -17,8 +17,8 @@ import us.bringardner.parley.net.server.ServerMain;
 
 /**
  * To-Do 2.16: parley-dns's list of settings (META-INF/parley/settings.list) has every name its code
- * spells out, and every name the DNS server reads while it starts (from the system properties, as
- * its provider does), so a server's start-up check never warns about a real setting.
+ * spells out, and every name the DNS server reads while it starts (from its own configuration, as
+ * its provider gives it), so a server's start-up check never warns about a real setting.
  */
 public class TestKnownSettings {
 
@@ -33,8 +33,8 @@ public class TestKnownSettings {
 	@Test
 	public void everyNameTheServerReadsIsListed() throws Exception {
 		KnownSettings k = KnownSettings.load();
-		Properties before = System.getProperties();
-		KnownSettings.RecordingProperties system = new KnownSettings.RecordingProperties(before);
+		// the server's own configuration, as the launcher gives it (To-Do 11.13): every name it reads is recorded
+		KnownSettings.RecordingProperties system = new KnownSettings.RecordingProperties(new Properties());
 		File zones = new File(dir, "zones");
 		Files.createDirectories(zones.toPath());
 		Files.write(new File(zones, "known.test.txt").toPath(), ("@\tIN\tSOA\tns1.known.test. postmaster.known.test. (\n"
@@ -49,14 +49,9 @@ public class TestKnownSettings {
 		system.setProperty("parley.dns.udpPort", "" + freePort());
 		system.setProperty("parley.dns.tcpPort", "" + freePort());
 		system.setProperty("parley.dns.adminPort", "" + freePort());
-		System.setProperties(system);
-		try {
-			ServerMain.Service s = new DnsServerProvider().create(new ServerContext());
-			s.startAndWait(10000);
-			s.stop(10000);
-		} finally {
-			System.setProperties(before);
-		}
+		ServerMain.Service s = new DnsServerProvider().create(new ServerContext(), system);
+		s.startAndWait(10000);
+		s.stop(10000);
 		assertEquals(List.of(), k.undeclared(system.asked()));
 	}
 

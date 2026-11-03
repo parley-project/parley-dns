@@ -54,6 +54,8 @@ public class DnsAdminServer extends Server {
 	 */
 	public DnsAdminServer(DnsServer dns, int port, InetAddress bind) {
 		super(port, "DnsAdmin");
+		// the DNS server's settings (parley.dns.admin.*): its configuration, or the system properties
+		useConfigurationOf(dns);
 		setPropertyPrefix("parley.dns.admin");
 		this.dns = dns;
 		setBindAddr(bind);

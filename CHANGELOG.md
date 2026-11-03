@@ -2,6 +2,20 @@
 
 ## parley-dns 2.0.0 (unreleased)
 
+### Changed (2026-11-02: the server's own configuration, To-Do 11.13)
+
+- **Under parley-net's launcher the DNS server is made from its own configuration**, like the other Parley servers
+  (`DnsServerProvider.usesConfiguration()`): the launcher reads `parley-dns.properties` into it and the server, its
+  TCP and admin servers and the resolver read only that. Before, the launcher copied the settings files into the
+  system properties for it, and `initServer` replaced the system properties with `parley-dns.properties` and the
+  JVM's own, so every server in the JVM saw DNS's settings. A `DnsServer` made in code without a configuration still
+  loads its settings file into the system properties, as before.
+- `parley.dns.udpProcCount`, `parley.dns.tcpProcCount`, `parley.dns.udpDumpFile` and `parley.dns.resolverMaxBacklog`
+  are read from the server's settings (they were read from the system properties only). New:
+  `Resolver.initResolver(Properties)`, `UDPProsessor.initUDPProsessor(..., dumpFile)` and
+  `TCPProsessor.initTCPProsessor(..., settings)`. The provider's description is `DNS` (it named the port from the
+  system properties).
+
 ### Changed (2026-11-02: parley-net's IPrincipal split, To-Do 3.2)
 
 - **The admin port's permission is `ADMIN`** (was `admin`), as the other servers name it; permission names are

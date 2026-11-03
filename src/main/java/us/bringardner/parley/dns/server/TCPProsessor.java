@@ -128,9 +128,14 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 				DEFAULT_MAX_CONNECTIONS_PER_CLIENT, 1);
 	}
 
+	public static void initTCPProsessor(int bindPort,int backlog,InetAddress bindAddress, int timeout,
+			int maxConnections, int idleTimeoutMs, int maxPerClient, int reactors) throws IOException {
+		initTCPProsessor(bindPort, backlog, bindAddress, timeout, maxConnections, idleTimeoutMs, maxPerClient, reactors, null);
+	}
+
 	/**
 	 * Bind the TCP port. The server runs once a TCPProsessor is run.
-	 * 
+	 *
 	 * @param timeout not used any more (the accept timeout of the blocking acceptors);
 	 *  kept as the listen socket's SO_TIMEOUT so it can still be read back
 	 * @param maxConnections most connections served at once
@@ -138,9 +143,13 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 	 *  a message that has started must be complete within it
 	 * @param maxPerClient most connections from one client address, 0 for no limit
 	 * @param reactors threads reading and writing the connections
+	 * @param settings the object whose settings the TCP server reads (parley.dns.tcp.*): the DNS
+	 *  server, so its configuration; null for the system properties
+	 * @since 2.0.0
 	 */
 	public synchronized static void initTCPProsessor(int bindPort,int backlog,InetAddress bindAddress, int timeout,
-			int maxConnections, int idleTimeoutMs, int maxPerClient, int reactors) throws IOException {
+			int maxConnections, int idleTimeoutMs, int maxPerClient, int reactors,
+			us.bringardner.parley.core.BaseObject settings) throws IOException {
 		//  A previous server (re-initialization) is shut down first
 		shutdownConnections(1000);
 
@@ -164,6 +173,7 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 		pool.allowCoreThreadTimeOut(true);
 
 		TcpServer s = new TcpServer();
+		s.useConfigurationOf(settings);
 		s.setServerChannel(ch);
 		s.setHandlerExecutor(pool);
 		s.setReactorCount(Math.max(1, reactors));
