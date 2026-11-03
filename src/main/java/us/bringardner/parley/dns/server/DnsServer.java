@@ -661,7 +661,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 		initFromProperties();
 		if(!dnsDir.exists()) {
-			throw new IOException("dnsDir does not exist ="+dnsDir);
+			throw new IOException("The DNS folder "+dnsDir+" ("+PROP_DNS_DIR+") doesn't exist");
 		}
 
 		loadZones();
@@ -1457,16 +1457,16 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		readSharedZone();
 		try {
 			if( !zoneDir.exists() ) {
-				throw new IOException(PROP_ZONE_DIR+" ="+zoneDir+" does not exist!!! exiting from "+getClass().getName());
+				throw new IOException("The zone folder "+zoneDir+" ("+PROP_ZONE_DIR+") doesn't exist");
 			}
 			File [] list = getZoneFiles(); 
 			if( list == null || list.length == 0 ) {
-				throw new IOException("Can't find zone file! Must have at lease a default Zone.  seraching in ("+zoneDir+") exiting from "+getClass().getName());			
+				throw new IOException("No zone file in "+zoneDir+" ("+PROP_ZONE_DIR+"): at least the primary domain's zone, <domain>.txt, is needed (parley.dns.masterZone names the domain; parley-servers-setup --dns-domain makes one)");			
 			}
 			defaultZoneName = getProperty(PROP_DEFAULT_ZONE,null);
 			log(PROP_DEFAULT_ZONE+"= "+defaultZoneName);
 			if( defaultZoneName == null || (defaultZoneName=defaultZoneName.trim()).isEmpty()) {
-				throw new IOException("Manditory property, "+PROP_DEFAULT_ZONE+" is not defined");
+				throw new IOException(PROP_DEFAULT_ZONE+" isn't set: it names the primary domain, whose zone file is in "+zoneDir);
 			}
 
 			ZoneSet old = zoneSet;
@@ -1558,8 +1558,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 			Zone def = zones.get(defaultZoneName.toLowerCase());
 			if( def == null ) {
-				logError("Can't find default zone '"+defaultZoneName+"'! Must have at lease a default.  seraching in ("+zoneDir+")");
-				throw new IOException("use '"+PROP_ZONE_DIR+"' or '"+PROP_DEFAULT_ZONE+"' to set correctly");			
+				throw new IOException("The primary domain's zone, "+defaultZoneName+" ("+PROP_DEFAULT_ZONE+"), isn't in "+zoneDir+" ("+PROP_ZONE_DIR+"): it needs "+defaultZoneName+".txt there");			
 			}
 
 			//  Publish everything at once
