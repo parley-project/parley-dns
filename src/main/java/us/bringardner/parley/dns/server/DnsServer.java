@@ -659,7 +659,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			return;
 		}
 
-		//  A server made with a configuration of its own (a launcher's: parley-net's ServerLauncher has
+		//  A server made with a configuration of its own (a launcher's: parley-mail-admin's launcher has
 		//  already read parley-dns.properties into it) reads only that, and leaves the JVM's system
 		//  properties alone. A server alone in its JVM loads its settings file into the system properties.
 		if( getConfiguration() != null ) {
@@ -1818,10 +1818,24 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		us.bringardner.parley.net.FatalErrorHandler.install(!"false".equalsIgnoreCase(
 				System.getProperty(PROP_EXIT_ON_FATAL_ERROR,"true").trim()));
 
-		//  A launcher with the DNS server (DnsServerProvider), as the other Parley servers' main methods:
-		//  JMX shows it as type=Server,name=dns (start, stop, restart) with its Dns bean, so a management
-		//  tool such as parley-mail-admin finds it like any other Parley server
-		us.bringardner.parley.net.server.ServerMain.launch("DnsServer", args, "dns");
+		//  The DNS server alone in this process (parley-net's ServerMain.run): its settings are
+		//  parley-dns.properties in the settings folder, or the file parley.dns.configFile names, and the
+		//  command line. Its management bean is on the platform MBean server
+		//  (us.bringardner.parley:type=Dns,name=dns). (The mail suite runs DNS with its launcher:
+		//  parley-mail-admin's DnsMain.)
+		javax.management.MBeanServer mbeans = java.lang.management.ManagementFactory.getPlatformMBeanServer();
+		us.bringardner.parley.net.server.ServerMain.run("DnsServer", args, PROP_DNS_PROPERTIES, DEFAULT_PROPERTIES_FILE_NAME,
+				() -> java.util.Collections.singletonList(service(new DnsServer(), "DNS server", bean -> {
+					javax.management.ObjectName n = new javax.management.ObjectName("us.bringardner.parley:type=Dns,name=dns");
+					mbeans.registerMBean(bean, n);
+					return n;
+				}, n -> {
+					try {
+						mbeans.unregisterMBean(n);
+					} catch (javax.management.JMException e) {
+						// gone already
+					}
+				})));
 	}
 
 	/** Registers the management bean it is given; returns its name. */
@@ -1836,7 +1850,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	}
 
 	/**
-	 * The DNS server as a service of parley-net's launcher (see {@link DnsServerProvider}) or of main():
+	 * The DNS server as a service of a launcher (parley-mail-admin's) or of main():
 	 * started and stopped by it, with its management bean registered while it runs.
 	 * <p>
 	 * The DNS server keeps some state per JVM (the shutdown flag, the TCP listener), so one runs in a

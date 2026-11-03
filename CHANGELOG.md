@@ -2,6 +2,13 @@
 
 ## parley-dns 2.0.0 (unreleased)
 
+
+### Changed (2026-11-03: the launcher moved to parley-mail-admin)
+
+- **`DnsServerProvider` moved to parley-mail-admin** with the launcher; this module registers no server provider.
+  `DnsServer.main` runs DNS alone with parley-net's `ServerMain.run` (its `Dns` bean on the platform MBean server);
+  parley-mail-admin's `DnsMain` runs it with the suite's launcher, so the admin manages it like its other servers.
+
 ### Changed (2026-11-02: the server's own configuration, To-Do 11.13)
 
 - **Under parley-net's launcher the DNS server is made from its own configuration**, like the other Parley servers

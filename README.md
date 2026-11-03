@@ -147,13 +147,13 @@ marked own or inherited, the zone files that failed to load, `reload()`, and `cr
 which writes the domain's zone file (an `$INHERIT` line and an SOA like the shared zone's, serial 1) and loads it. Records are
 changed with dynamic updates signed with a key in `parley.dns.updateKeys`, sent to its TCP port.
 
-`DnsServer.main` runs parley-net's launcher with the DNS server (`DnsServerProvider`, `dns` in
-`parley.servers`), as the other Parley servers' main methods do: on the platform MBean server (reach it with
-the JVM's `com.sun.management.jmxremote.*` settings) the server is `us.bringardner.parley:type=Server,name=dns`,
-like every Parley server, and its `Dns` bean is registered while it runs. The launcher reads `parley-dns.properties`
-(or the file `parley.dns.configFile` names) into the server's own configuration, and the server reads only that, its
-TCP and admin servers and the resolver too: the JVM's system properties are left alone, so other servers in the JVM
-don't see DNS's settings. One DNS server runs in a JVM (the resolver and its cache are shared).
+`DnsServer.main` runs the DNS server alone in its process with parley-net's `ServerMain.run`: settings from
+`parley-dns.properties` in the settings folder (or the file `parley.dns.configFile` names), the JVM's `-D` options and
+the command line; its `Dns` bean (`us.bringardner.parley:type=Dns,name=dns`) is on the platform MBean server while it
+runs (reach it with the JVM's `com.sun.management.jmxremote.*` settings). The mail suite runs DNS with its own launcher
+(parley-mail-admin's `DnsMain`, id `dns`), which makes the server from its own configuration (the server then reads
+only that, its TCP and admin servers and the resolver too) and adds the `type=Server,name=dns` bean the admin
+manages. One DNS server runs in a JVM (the resolver and its cache are shared).
 
 # Dynamic update (RFC 2136)
 
