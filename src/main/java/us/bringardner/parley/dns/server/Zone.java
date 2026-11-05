@@ -33,9 +33,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.DNS;
-import us.bringardner.parley.dns.Hinfo;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.Name;
 import us.bringardner.parley.dns.Ns;

@@ -4,15 +4,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.File;
 import java.net.ServerSocket;
-import java.nio.file.Files;
 import java.util.List;
-import java.util.Properties;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.net.server.KnownSettings;
-import us.bringardner.parley.net.server.ServerMain;
 
 /**
  * To-Do 2.16: parley-dns's list of settings (META-INF/parley/settings.list) has every name its code
@@ -30,6 +27,7 @@ public class TestKnownSettings {
 	}
 
 
+	@SuppressWarnings("unused")
 	private static int freePort() throws Exception {
 		try (ServerSocket s = new ServerSocket(0)) {
 			return s.getLocalPort();

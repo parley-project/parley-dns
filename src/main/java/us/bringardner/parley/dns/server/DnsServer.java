@@ -25,8 +25,6 @@
  */
 package us.bringardner.parley.dns.server;
 
-import us.bringardner.parley.net.server.IDomainList;
-import us.bringardner.parley.net.server.PropertiesDomainList;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -57,6 +55,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import javax.net.ServerSocketFactory;
 
+import us.bringardner.parley.core.util.AddressMatcher;
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.Cname;
 import us.bringardner.parley.dns.DNS;
@@ -72,13 +71,13 @@ import us.bringardner.parley.dns.Section;
 import us.bringardner.parley.dns.Soa;
 import us.bringardner.parley.dns.Svcb;
 import us.bringardner.parley.dns.Tsig;
-import us.bringardner.parley.dns.Utility;
 import us.bringardner.parley.dns.dnssec.Canonical;
 import us.bringardner.parley.dns.dnssec.DnssecKey;
 import us.bringardner.parley.dns.resolve.QueryData;
-import us.bringardner.parley.core.util.AddressMatcher;
 import us.bringardner.parley.dns.resolve.Resolver;
 import us.bringardner.parley.io.IoUtils;
+import us.bringardner.parley.net.server.IDomainList;
+import us.bringardner.parley.net.server.PropertiesDomainList;
 
 /**
  * A DNS Server
