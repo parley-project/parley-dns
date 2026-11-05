@@ -71,7 +71,7 @@ public class TestPropertyNames {
 	@Test
 	public void constantsStartWithJDns() throws Exception {
 		List<String> names = propertyNames();
-		assertTrue(names.size() > 60, names.toString());
+		assertTrue(names.size() > 50, names.toString());
 		for(String n : names) {
 			assertTrue(n.substring(n.indexOf('=')+1).startsWith("parley.dns."), n);
 		}

@@ -263,7 +263,7 @@ public class TestPresignedZone {
 			w.write("$TTL 300\n@ IN SOA ns1 h ( 1 3600 900 1209600 60 )\n NS ns1\nns1 A 10.0.0.1\nwww A 10.0.0.2\n*.w TXT \"x\"\n");
 		}
 		DnssecKey k = DnssecKey.generate("own.test", Algorithm.of(13), true, 0);
-		ZoneSigner.Result signed = ZoneSigner.sign(new Zone(zf), new java.util.HashMap<String, List<? extends RR>>(), "",
+		ZoneSigner.Result signed = ZoneSigner.sign(new Zone(zf),
 				java.util.Collections.singletonList(k), System.currentTimeMillis()/1000, 86400);
 		StringBuilder text = new StringBuilder(";  written by the test\n");
 		Zone sz = signed.zone;

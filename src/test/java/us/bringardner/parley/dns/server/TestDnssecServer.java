@@ -535,29 +535,6 @@ public class TestDnssecServer {
 	}
 
 	@Test
-	public void dynamicEntriesAreSigned() {
-		assertNotNull(server.addDynamic("dyn.sec.test", "10.8.8.8"));
-		Message m = ask("dyn.sec.test", DNS.A);
-		assertEquals("[10.8.8.8]", addresses(m).toString());
-		verify(m, "dynamic");
-		assertNotNull(zone().getSigned().nsecAt("dyn.sec.test"));
-		//  Changing it signs again
-		assertNotNull(server.addDynamic("dyn.sec.test", "10.8.8.9"));
-		m = ask("dyn.sec.test", DNS.A);
-		assertEquals("[10.8.8.9]", addresses(m).toString());
-		verify(m, "dynamic changed");
-		//  An entry replacing zone records
-		server.addDynamic("www.sec.test", "10.8.8.10");
-		m = ask("www.sec.test", DNS.A);
-		assertEquals("[10.8.8.10]", addresses(m).toString());
-		verify(m, "dynamic www");
-		m = ask("www.sec.test", DNS.AAAA);
-		assertEquals(0, m.getAnswerCount());
-		assertFalse(nsecAt(m, "www.sec.test").hasType(DNS.AAAA));
-		verify(m, "dynamic www AAAA");
-	}
-
-	@Test
 	public void signaturesAreRenewedWithANewSerial() throws Exception {
 		SignedZone before = zone().getSigned();
 		long now = System.currentTimeMillis()/1000;

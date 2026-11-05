@@ -114,20 +114,6 @@
 		</dependency>
 
 
-		<!--
-			MySQL driver for the optional database (parley.dns.jdbc.url). It was test scope,
-			so it was missing at run time; mysql:mysql-connector-java is also the old
-			coordinate (relocated to com.mysql:mysql-connector-j). Optional: projects
-			that use this jar as a DNS library don't get MySQL transitively.
-		-->
-		<dependency>
-			<groupId>com.mysql</groupId>
-			<artifactId>mysql-connector-j</artifactId>
-			<version>8.4.0</version>
-			<scope>runtime</scope>
-			<optional>true</optional>
-		</dependency>
-
 	</dependencies>
 
 </project>

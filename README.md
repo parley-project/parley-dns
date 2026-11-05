@@ -24,8 +24,7 @@ The intent of this DNS code is to support a large number of domains with very li
  +  Supports unique configuration for any domain.
  +  Supports a common configuration, the shared zone, served under the name of any number of listed domains that need no zone of their own (see Listed domains and the shared zone)
  +  Wildcards follow RFC 4592 in every zone, signed or not (see Wildcards)
- +  Dynamic records may be in a database or a file
- +  Support Dynamic DNS (DDNS) with trivial configuration
+ +  Dynamic updates (RFC 2136), signed with TSIG keys, journaled next to the zone file
  +  Zone file record types: SOA, NS, A, AAAA, CNAME, PTR, MX, TXT, SPF, HINFO, RP, SRV, CAA, HTTPS, SVCB, DS (other types are passed through unchanged when resolving)
  +  DNSSEC: zones are signed by the server itself when it has keys for them, or served as signed by another tool (see below)
 
@@ -159,7 +158,7 @@ checks (as the server does) and writes their text, with no file access of its ow
 `parley-dns.properties` in the settings folder (or the file `parley.dns.configFile` names), the JVM's `-D` options and
 the command line; its `Dns` bean (`us.bringardner.parley:type=Dns,name=dns`) is on the platform MBean server while it
 runs (reach it with the JVM's `com.sun.management.jmxremote.*` settings). An application that runs servers can make
-the DNS server from a configuration of its own (the server then reads only that, its TCP and admin servers and the
+the DNS server from a configuration of its own (the server then reads only that, its TCP server and the
 resolver too); for an example, see parley-mail-admin's `DnsMain`. One DNS server runs in a JVM (the resolver and
 its cache are shared).
 
@@ -171,7 +170,7 @@ The zone file is never rewritten. Changes are appended to a journal next to it, 
 
 # DNSSEC
 
-A zone is signed when the key directory (`parley.dns.dnssecKeyDir`, by default the zone directory) has keys for it. The server signs it when it loads it, after every dynamic update or dynamic entry change, and again before the signatures expire; nothing needs to be run by hand after the keys exist.
+A zone is signed when the key directory (`parley.dns.dnssecKeyDir`, by default the zone directory) has keys for it. The server signs it when it loads it, after every dynamic update, and again before the signatures expire; nothing needs to be run by hand after the keys exist.
 
 1. Make a key: `java -cp parley-dns.jar:parley-core.jar:parley-io.jar:parley-net.jar us.bringardner.parley.dns.dnssec.DnssecKeyTool keygen -d zones example.com`. This writes `Kexample.com.+013+<tag>.key` and `.private` (keep that one secret) and prints the DS record. One key (ECDSA P-256, a combined signing key) is all a zone needs; `-ksk` / `-zsk` make separate key and zone signing keys, `-a` picks the algorithm: ECDSAP256SHA256 (default), ECDSAP384SHA384, ED25519 (Java 15 or later), RSASHA256, RSASHA512. Keys made with BIND's `dnssec-keygen` work too.
 2. Start (or wait for the next reload): the zone is served signed.
@@ -188,7 +187,7 @@ What the server does:
 
 Zones signed elsewhere (for example with BIND's `dnssec-signzone`, NSEC or NSEC3, so the private keys never touch the server): put the signed file in the zone directory as `<zone>.txt`. A zone file with RRSIG records is served with its own DNSKEY, RRSIG, NSEC / NSEC3 and NSEC3PARAM records, with the same answers and proofs as a zone signed here.
  +  Every signature is checked when the zone loads; ones that don't verify or have expired are logged (the zone is still served as the signer made it). Keys in the key directory are not used for it.
- +  The server can't sign changes: dynamic UPDATE is REFUSED, and admin-port dynamic entries in such a zone are served without signatures (logged).
+ +  The server can't sign changes: dynamic UPDATE is REFUSED.
  +  Nothing re-signs it here: a warning is logged every 6 hours from 3 days before the first signature expires. Sign it again and replace the file (a changed file is reloaded).
  +  A zone file with DNSKEY, NSEC or NSEC3 records but no RRSIG is refused.
 
@@ -215,7 +214,7 @@ With `parley.dns.dnssecValidation=true` the resolver validates the answers it fe
 Dependencies:  
 + [parley-core](https://github.com/parley-project/parley-core)  
 + [parley-io](https://github.com/parley-project/parley-io)  
-+ [parley-net](https://github.com/parley-project/parley-net) (TCP and admin servers, upstream health tracking)
++ [parley-net](https://github.com/parley-project/parley-net) (TCP server, upstream health tracking)
  			
 
 # SSH host keys in DNS (SSHFP)
@@ -307,7 +306,7 @@ java -Xmx256m -XX:+ExitOnOutOfMemoryError \
 
 `DnsServer.main` also installs `FatalErrorHandler`: any thread that dies from an uncaught error is logged, and on a JVM error (e.g. `OutOfMemoryError`) the process halts with exit code 1 so the supervisor starts a clean one. Set `-Dparley.dns.exitOnFatalError=false` to only log. Applications that embed the server can call `FatalErrorHandler.install(true)` (`us.bringardner.parley.net.FatalErrorHandler`, from parley-net).
 
-If the server can't start (bad configuration, missing zone directory, a port in use), `DnsServer.main` logs why and exits with -1 (configuration, zones, UDP/TCP sockets) or -2 (admin socket). Applications that embed the server call `start()` and then `awaitStarted(timeoutMs)`, which throws `DnsServer.StartupException` with the cause and stops anything that had started; the server itself never calls `System.exit`.
+If the server can't start (bad configuration, missing zone directory, a port in use), `DnsServer.main` logs why and exits with -1 (configuration, zones, UDP/TCP sockets) or -2 (stopped while starting). Applications that embed the server call `start()` and then `awaitStarted(timeoutMs)`, which throws `DnsServer.StartupException` with the cause and stops anything that had started; the server itself never calls `System.exit`.
 
 Malformed requests are answered cheaply and never logged as errors: a request without exactly one question (QDCOUNT 0 or more than 1, RFC 9619; for UPDATE, ZOCOUNT ≠ 1) gets one FORMERR with no question section, and a packet with QR=1 (a response) gets no reply at all. `DnsServer.getQuestionCountErrors()` counts the FORMERRs.
 
@@ -338,7 +337,7 @@ A bind address of `localhost` means this host's own name (its network address), 
 | Property | Default | Meaning |
 |---|---|---|
 | `parley.dns.configFile` | `parley-dns.properties` in Parley's administrator folder (`/etc/parley`, Windows `%ProgramData%\Parley`, or the folder of `$PARLEY_CONF`) | The properties file to load at startup |
-| `parley.dns.dnsDir` | `/data/services/dns/config` | Directory for the dynamic entries file, the TSIG key file and the root hints (`root.hints`, `name=address` lines; without it the built-in root servers are used) |
+| `parley.dns.dnsDir` | `/data/services/dns/config` | Directory for the TSIG key file, the trust anchors and the root hints (`root.hints`, `name=address` lines; without it the built-in root servers are used) |
 | `parley.dns.zoneDir` | `zones` | Directory of the zone files (`<zone>.txt`); a changed file is reloaded |
 | `parley.dns.masterZone` | required | The primary domain's zone; it serves the listed domains' DMARC report authorizations |
 | `parley.dns.reportAuthorizations` | true | Answer the listed domains' DMARC report authorizations in the master zone (see Listed domains and the shared zone) |
@@ -346,7 +345,6 @@ A bind address of `localhost` means this host's own name (its network address), 
 | `parley.dns.domainList` | `PropertiesDomainList` when `parley.dns.domainList.file` is set | The class of the domain list (parley-net's `IDomainList`); its settings are `parley.dns.domainList.<name>` |
 | `parley.dns.domainList.file` | none | `PropertiesDomainList`: the properties file holding the list (the mail queue's `queue.properties`) |
 | `parley.dns.domainList.key` | `domains` | `PropertiesDomainList`: the setting in that file that lists the domains, separated by commas or spaces |
-| `parley.dns.dynamicFileName` | `dynamic.txt` | Dynamic entries file, relative to `parley.dns.dnsDir` (used without a database) |
 | `parley.dns.debug` | true | Debug logging checks; false skips the work of building debug messages |
 | `parley.dns.recursionAvailable` | true | Recursion available: resolve names that are not in our zones for clients that ask for it |
 | `parley.dns.exitOnFatalError` | true (standalone) | Halt the process on a JVM error (see above) |
@@ -394,29 +392,9 @@ TCP is served by parley-net's `NioServer` (a few reactor threads read and write 
 | `parley.dns.dnssecValidation` | false | Validate the answers of recursive queries with DNSSEC (see "Validating") |
 | `parley.dns.dnssecTrustAnchors` | the root zone's keys (built in) | File of trust anchors (DS or DNSKEY records), relative to `parley.dns.dnsDir` |
 
-### Admin port
+### Maintenance
 
-The admin port runs on parley-net's `Server` (one thread per session, virtual threads on Java 24+), and `DnsAdminClient` on its `Client`. The protocol is unchanged. Zone reloads, dynamic records and re-signing run on a thread of their own (`DnsMaintenance`), so an error in one of them is logged and the next round goes ahead.
-
-| Property | Default | Meaning |
-|---|---|---|
-| `parley.dns.adminPort` | 9999 | Admin port; `DnsAdminClient` connects to it too |
-| `parley.dns.adminHost` | the DNS server NsLookup finds, else localhost | Host `DnsAdminClient` connects to (a command line argument wins) |
-| `parley.dns.adminBindAddress` | loopback | Admin port listen address (`0.0.0.0` for all interfaces) |
-| `parley.dns.adminSecret` | none | Shared secret for the admin port (challenge-response). Without it only local clients are accepted. `DnsAdminClient` reads the same property |
-| `parley.dns.adminTls` | false | TLS on the admin port, using the standard `javax.net.ssl.keyStore` / `keyStorePassword` properties (client: `javax.net.ssl.trustStore`). `DnsAdminClient` reads the same property. Recommended when `parley.dns.adminBindAddress` is not loopback: the challenge-response protects the secret, not the session |
-| `parley.dns.adminMaxConnections` | 8 | Admin sessions at once |
-| `parley.dns.adminIdleTimeout` | `10m` | Idle admin sessions are closed after this long |
-| `parley.dns.adminMaxLine` | 8192 | Longest admin command line in bytes; a longer line ends the session |
-| `parley.dns.adminAuthTimeout` | `30s` | With `parley.dns.adminSecret` set, a session that hasn't authenticated after this long is closed |
-
-### Database
-
-| Property | Default | Meaning |
-|---|---|---|
-| `parley.dns.useDatabase` | only if `parley.dns.jdbc.url` is set | Use the database for dynamic records |
-| `parley.dns.jdbc.url` | none | JDBC URL of the database (its driver must be on the class path) |
-| `parley.dns.jdbc.user` / `parley.dns.jdbc.password` | none | Database login |
+Zone reloads and re-signing run on a thread of their own (`DnsMaintenance`), so an error in one of them is logged and the next round goes ahead.
 
 ### Zone transfer, TSIG, dynamic update
 
@@ -424,7 +402,7 @@ The admin port runs on parley-net's `Server` (one thread per session, virtual th
 |---|---|---|
 | `parley.dns.axfrAllow` | none | Addresses / networks allowed to transfer zones over TCP (AXFR, RFC 5936), e.g. `192.0.2.2, 10.0.0.0/8, 2001:db8::/32`. Everyone else gets REFUSED, unless the request is signed with a key in `parley.dns.axfrKeys` |
 | `parley.dns.axfrKeys` | none | TSIG key names whose signed requests may transfer zones, from any address |
-| `parley.dns.notify` | none | Secondaries to send NOTIFY (RFC 1996) to when a zone is loaded or its SOA serial changes, e.g. `192.0.2.2, [2001:db8::2]:53`. Bump the serial when you edit a zone. Dynamic entries don't change the serial, so secondaries only see them at their next transfer |
+| `parley.dns.notify` | none | Secondaries to send NOTIFY (RFC 1996) to when a zone is loaded or its SOA serial changes, e.g. `192.0.2.2, [2001:db8::2]:53`. Bump the serial when you edit a zone |
 | `parley.dns.notifyKey` | none | TSIG key to sign NOTIFY messages with; the secondary's answer must then be signed too |
 | `parley.dns.notifyRetries` | 5 | Attempts per NOTIFY |
 | `parley.dns.notifyTimeout` | `2s` | First wait for a NOTIFY answer, doubled after each attempt |
@@ -451,7 +429,7 @@ Logging comes from the parley-core library, whose property names are its own: `l
 ### Renamed properties
 
 In 2.0.0 every `JDns.*` property was renamed to `parley.dns.*`, and the old names are no longer read.
-Most keep the rest of their name (`JDns.adminPort` is `parley.dns.adminPort`); these changed more:
+Most keep the rest of their name (`JDns.tcpPort` is `parley.dns.tcpPort`); these changed more:
 
 | 1.x name | 2.0.0 name |
 |---|---|
@@ -461,11 +439,10 @@ Most keep the rest of their name (`JDns.adminPort` is `parley.dns.adminPort`); t
 | `JDns.udp.bindAddress` | `parley.dns.udpBindAddress` |
 | `JDns.dump.file` | `parley.dns.udpDumpFile` |
 | `JDns.ra` | `parley.dns.recursionAvailable` |
-| `JDns.jdbcURL` | `parley.dns.jdbc.url` (`JDns.jdbcClass` is gone: JDBC finds the driver) |
-| `JDns.useDataBase` | `parley.dns.useDatabase` |
 | `JDns.properties` | `parley.dns.configFile`; the default file is now `parley-dns.properties` (was `JDns.properties`) |
 | `echoCommand` (NsLookup) | `parley.dns.nslookup.echoCommand` |
 
-The older names 1.0.0 still read with a warning (`UDPProcCount`, `TCPProcCount`, `Resolver.maxBacklog`, and
-`name` and `port` for DnsAdminClient) are no longer read either: use `parley.dns.udpProcCount`,
-`parley.dns.tcpProcCount`, `parley.dns.resolverMaxBacklog`, `parley.dns.adminHost` and `parley.dns.adminPort`.
+The older names 1.0.0 still read with a warning (`UDPProcCount`, `TCPProcCount` and `Resolver.maxBacklog`) are no
+longer read either: use `parley.dns.udpProcCount`, `parley.dns.tcpProcCount` and `parley.dns.resolverMaxBacklog`.
+The admin port, its dynamic entries and the database (`JDns.adminPort`, `JDns.jdbc*`, `JDns.useDataBase`) are gone
+in 2.0.0: records change with dynamic updates (RFC 2136).

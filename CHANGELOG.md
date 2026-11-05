@@ -3,6 +3,26 @@
 ## parley-dns 2.0.0 (unreleased)
 
 
+### Removed (2026-11-05: the admin port, dynamic entries and the database)
+
+Records now change only with dynamic updates (RFC 2136). The admin port's protocol had no client but
+`DnsAdminClient`, and nothing uses it; dynamic names will come back as a store of their own, managed through the
+server's API and JMX.
+
+- **The admin port is gone**: `DnsAdminServer`, `DnsAdminClient`, `DnsAdminProcessor`, `DnsAdminConstants` and
+  `AdminAuth`, and the settings `parley.dns.adminPort`, `adminHost`, `adminBindAddress`, `adminSecret`, `adminTls`,
+  `adminMaxConnections`, `adminIdleTimeout`, `adminMaxLine` and `adminAuthTimeout`. Its `status`, `list` and `mem`
+  are on the `Dns` bean (`getState`, `getZones`, `getRecords`, `getStarted`); its `debug` and `reset` (the resolver's
+  cache) have no replacement yet.
+- **Dynamic entries are gone**: `addDynamic`, `addOrUpdateDynamic`, `removeDynamic`, `getDynamic`,
+  `saveDynamicToFile`, the file `dynamic.txt` and `parley.dns.dynamicFileName`. `ZoneSigner.sign` and `SignedZone`
+  no longer take them.
+- **The database is gone**: `parley.dns.useDatabase` and `parley.dns.jdbc.url`, `.user` and `.password`
+  (and the `dynamic_dns` table), with the optional MySQL driver dependency.
+- **`DnsServer.setServerSocketFactory` and `getServerSocketFactory` are gone** (only the admin port used them). A
+  start that is stopped before it serves still ends with exit code -2.
+- Settings that are still set warn at start-up that the name isn't known: take them out.
+
 ### Removed (2026-11-05: the driver class setting)
 
 - **`parley.dns.jdbc.driver` and `DnsServer.PROP_JDBC_CLASS` are gone**: JDBC 4 drivers register themselves and JDBC

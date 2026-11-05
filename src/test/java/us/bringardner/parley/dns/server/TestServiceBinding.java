@@ -87,7 +87,6 @@ public class TestServiceBinding {
 		server = new DnsServer();
 		server.addZone(new Zone(zone));
 		server.setRecursionAvailable(false);
-		server.addDynamic("dyn.svc.test", "10.9.9.9");
 	}
 
 	@AfterAll
@@ -330,7 +329,7 @@ public class TestServiceBinding {
 	}
 
 	@Test
-	public void dynamicAddressWins() {
-		assertEquals(Arrays.asList("dyn.svc.test A 10.9.9.9"), additional(ask("dynsvc.svc.test", DNS.HTTPS)));
+	public void targetAddressesAreAdded() {
+		assertEquals(Arrays.asList("dyn.svc.test A 10.0.0.99"), additional(ask("dynsvc.svc.test", DNS.HTTPS)));
 	}
 }

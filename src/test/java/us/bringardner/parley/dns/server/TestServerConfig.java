@@ -52,7 +52,6 @@ public class TestServerConfig {
 		p.put(DnsServer.PROP_ZONE_DIR, new File(dir,"zones").getAbsolutePath());
 		p.put(DnsServer.PROP_DEFAULT_ZONE, "cfg.test");
 		p.put(DnsServer.PROP_PORT, "0");
-		p.put(DnsServer.PROP_ADMIN_PORT, "0");
 		p.put(DnsServer.PROP_UDP_PROC_COUNT, "1");
 		p.put(DnsServer.PROP_TCP_PROC_COUNT, "1");
 		p.put("parley.dns.resolvers", "1");
@@ -78,9 +77,9 @@ public class TestServerConfig {
 		Map<String,String> props = base(dir);
 		props.putAll(extra);
 		Map<String,String> saved = new HashMap<String,String>();
-		String [] alsoClear = {DnsServer.PROP_USE_DATABASE, DnsServer.PROP_JDBC_URL, DnsServer.PROP_UDP_TIMEOUT,
+		String [] alsoClear = {DnsServer.PROP_UDP_TIMEOUT,
 				DnsServer.PROP_TCP_TIMEOUT, DnsServer.PROP_TIMEOUT, DnsServer.PROP_BIND_ADDRESS,
-				DnsServer.PROP_TCP_BIND_ADDRESS, DnsServer.PROP_ADMIN_BIND_ADDRESS};
+				DnsServer.PROP_TCP_BIND_ADDRESS};
 		for(String k : alsoClear) {
 			saved.put(k, System.getProperty(k));
 			System.clearProperty(k);
@@ -153,21 +152,6 @@ public class TestServerConfig {
 	}
 
 	@Test
-	public void adminListensOnLoopbackByDefault() throws Exception {
-		withServer(props(), s -> {
-			InetAddress bind = s.createAdminServer(0).getBindAddr();
-			assertTrue(bind.isLoopbackAddress(), "admin bound to "+bind);
-		});
-	}
-
-	@Test
-	public void adminBindAddressConfigurable() throws Exception {
-		withServer(props(DnsServer.PROP_ADMIN_BIND_ADDRESS,"0.0.0.0"), s -> {
-			assertTrue(s.createAdminServer(0).getBindAddr().isAnyLocalAddress());
-		});
-	}
-
-	@Test
 	public void badNumberNamesTheProperty() throws Exception {
 		IOException ex = assertThrows(IOException.class, () ->
 			withServer(props(DnsServer.PROP_TCP_BACKLOG,"ten"), s -> {}));
@@ -200,30 +184,5 @@ public class TestServerConfig {
 			assertTrue(!serverThreads().isEmpty(), "server started its threads");
 		});
 		assertEquals("[]", serverThreads().toString(), "threads still running after stopAndWait");
-	}
-
-	@Test
-	public void databaseOnlyWhenConfigured() throws Exception {
-		withServer(props(), s -> {
-			assertTrue(!s.useDatabase(), "no flag, no JDBC URL: no database");
-			System.setProperty(DnsServer.PROP_JDBC_URL, "jdbc:none://nowhere");
-			assertTrue(s.useDatabase(), "no flag, JDBC URL set: database");
-			System.setProperty(DnsServer.PROP_USE_DATABASE, "false");
-			assertTrue(!s.useDatabase(), "explicit false wins");
-			System.setProperty(DnsServer.PROP_USE_DATABASE, "true");
-			assertTrue(s.useDatabase());
-		});
-	}
-
-	@Test
-	public void missingDatabaseIsSqlExceptionNotNpe() throws Exception {
-		withServer(props(), s -> {
-			System.setProperty(DnsServer.PROP_USE_DATABASE, "true");
-			// No JDBC URL: used to be a NullPointerException from a null Connection
-			SQLException ex = assertThrows(SQLException.class, () -> s.addOrUpdateDynamic("host.cfg.test","10.0.0.9"));
-			assertTrue(ex.getMessage().contains(DnsServer.PROP_JDBC_URL), ex.getMessage());
-			// nothing is served that the store didn't accept (rec #19)
-			assertTrue(s.getDynamic("host.cfg.test") == null);
-		});
 	}
 }

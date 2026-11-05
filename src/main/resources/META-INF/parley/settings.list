@@ -1,22 +1,12 @@
 # The settings parley-dns reads, for the servers' start-up check
 # (format: parley-net's KnownSettings). Add a name here when code here starts reading it.
 
-# the TCP listener and the admin port are framework servers with these prefixes
+# the TCP listener is a framework server with this prefix
 prefix parley.dns.tcp
-prefix parley.dns.admin
 
 # the domain list is pluggable (IDomainList): its own settings are under its setting
 parley.dns.domainList.*
 
-parley.dns.adminAuthTimeout
-parley.dns.adminBindAddress
-parley.dns.adminHost
-parley.dns.adminIdleTimeout
-parley.dns.adminMaxConnections
-parley.dns.adminMaxLine
-parley.dns.adminPort
-parley.dns.adminSecret
-parley.dns.adminTls
 parley.dns.axfrAllow
 parley.dns.axfrKeys
 parley.dns.bindAddress
@@ -33,12 +23,8 @@ parley.dns.dnssecTrustAnchors
 parley.dns.dnssecValidation
 parley.dns.dnssecValidity
 parley.dns.domainList
-parley.dns.dynamicFileName
 parley.dns.ednsUdpSize
 parley.dns.exitOnFatalError
-parley.dns.jdbc.password
-parley.dns.jdbc.url
-parley.dns.jdbc.user
 parley.dns.masterZone
 parley.dns.maxCacheAge
 parley.dns.maxCacheEntries
@@ -80,11 +66,5 @@ parley.dns.updateAllow
 parley.dns.updateKeys
 parley.dns.upstreamHoldOffMax
 parley.dns.upstreamHoldOffMin
-parley.dns.useDatabase
 parley.dns.zoneCutReferrals
 parley.dns.zoneDir
-
-# 2.0.0 (To-Do 2.19): the database settings are a component
-renamed parley.dns.jdbcUrl parley.dns.jdbc.url
-renamed parley.dns.jdbcUser parley.dns.jdbc.user
-renamed parley.dns.jdbcPassword parley.dns.jdbc.password

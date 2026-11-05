@@ -223,17 +223,6 @@ public class TestZoneTransfer {
 	}
 
 	@Test
-	public void dynamicEntriesAreIncluded() {
-		server.setAxfrAllow("127.0.0.1");
-		server.addDynamic("www.xfr.test", "10.9.9.9");
-		server.addDynamic("new.xfr.test", "10.9.9.10");
-		Set<String> k = keys(answers(ask("xfr.test", DNS.AXFR, TCP)));
-		assertTrue(k.contains("www.xfr.test A 10.9.9.9"), k.toString());
-		assertFalse(k.contains("www.xfr.test A 10.0.0.80"), "the dynamic entry replaces the zone's records at its name, as in answers");
-		assertTrue(k.contains("new.xfr.test A 10.9.9.10"), k.toString());
-	}
-
-	@Test
 	public void ixfr() {
 		server.setAxfrAllow("127.0.0.1");
 		List<Message> udp = ask("xfr.test", DNS.IXFR, 5353);

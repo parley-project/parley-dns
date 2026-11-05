@@ -77,12 +77,11 @@ public class TestStartupFailure {
 		set(DnsServer.PROP_ZONE_DIR, zones.getAbsolutePath());
 		set(DnsServer.PROP_DEFAULT_ZONE, "sf.test");
 		set(DnsServer.PROP_PORT, "0");
-		set(DnsServer.PROP_ADMIN_PORT, "0");
 		set(DnsServer.PROP_UDP_PROC_COUNT, "1");
 		set(DnsServer.PROP_TCP_PROC_COUNT, "1");
 		set("parley.dns.resolvers", "1");
-		for(String k : new String[] {DnsServer.PROP_USE_DATABASE, DnsServer.PROP_JDBC_URL, DnsServer.PROP_BIND_ADDRESS,
-				DnsServer.PROP_UDP_BIND_ADDRESS, DnsServer.PROP_TCP_BIND_ADDRESS, DnsServer.PROP_ADMIN_BIND_ADDRESS,
+		for(String k : new String[] {DnsServer.PROP_BIND_ADDRESS,
+				DnsServer.PROP_UDP_BIND_ADDRESS, DnsServer.PROP_TCP_BIND_ADDRESS,
 				DnsServer.PROP_UDP_PORT, DnsServer.PROP_TCP_PORT}) {
 			set(k, null);
 		}
@@ -130,22 +129,6 @@ public class TestStartupFailure {
 	}
 
 	@Test
-	public void adminPortInUseStopsWhatWasStarted() throws Exception {
-		try(ServerSocket taken = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
-			set(DnsServer.PROP_ADMIN_PORT, String.valueOf(taken.getLocalPort()));
-			DnsServer server = new DnsServer();
-			server.start(true);		//  stand-alone used to call System.exit(-2)
-			DnsServer.StartupException ex = assertThrows(DnsServer.StartupException.class, () -> server.awaitStarted(30_000));
-			assertEquals(-2, ex.getExitCode());
-			assertFalse(server.isRunning());
-			assertFalse(workerThreadsAlive(), "UDP/TCP threads started by initServer were stopped");
-			assertFalse(DnsServer.isShutdown(), "the JVM wide shutdown flag is not set by a failed start");
-		} finally {
-			DnsServer.setAdminPort(9999);
-		}
-	}
-
-	@Test
 	public void successfulStartReturns() throws Exception {
 		DnsServer server = new DnsServer();
 		server.start();
@@ -155,7 +138,6 @@ public class TestStartupFailure {
 		} finally {
 			assertTrue(server.stopAndWait(10_000));
 			DnsServer.setShutdown(false);
-			DnsServer.setAdminPort(9999);
 		}
 	}
 }

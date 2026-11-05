@@ -25,24 +25,13 @@
  */
 package us.bringardner.parley.dns.server;
 
-import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.FileReader;
 import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.PrintStream;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -53,7 +42,6 @@ import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 
-import javax.net.ServerSocketFactory;
 
 import us.bringardner.parley.core.util.AddressMatcher;
 import us.bringardner.parley.dns.A;
@@ -75,7 +63,6 @@ import us.bringardner.parley.dns.dnssec.Canonical;
 import us.bringardner.parley.dns.dnssec.DnssecKey;
 import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.dns.resolve.Resolver;
-import us.bringardner.parley.io.IoUtils;
 import us.bringardner.parley.net.server.IDomainList;
 import us.bringardner.parley.net.server.PropertiesDomainList;
 
@@ -89,7 +76,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public static final String PROP_DEFAULT_ZONE = "parley.dns.masterZone";
 	public static final String PROP_DNS_PROPERTIES = "parley.dns.configFile";
 	private static final String DEFAULT_PROPERTIES_FILE_NAME = "parley-dns.properties";
-	public static final String PROP_ADMIN_PORT = "parley.dns.adminPort";
 	public static final String PROP_DEBUG = "parley.dns.debug";
 	public static final String PROP_JDNS_RA = "parley.dns.recursionAvailable";
 
@@ -115,37 +101,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public static final String PROP_TCP_IDLE_TIMEOUT = "parley.dns.tcpIdleTimeout";
 	/** Most TCP connections from one client address (default 8, 0 for no limit). */
 	public static final String PROP_TCP_MAX_CONNECTIONS_PER_CLIENT = "parley.dns.tcpMaxConnectionsPerClient";
-	/** Address the admin port listens on. Default: loopback only. Use 0.0.0.0 for all interfaces. */
-	public static final String PROP_ADMIN_BIND_ADDRESS = "parley.dns.adminBindAddress";
-	public static final String PROP_JDBC_URL = "parley.dns.jdbc.url";
-	public static final String PROP_JDBC_USER = "parley.dns.jdbc.user";
-	public static final String PROP_JDBC_PASSWORD = "parley.dns.jdbc.password";
-	/**
-	 * Shared secret for the admin port (challenge-response, see AdminAuth).
-	 * Without it only clients on this machine may use the admin port.
-	 */
-	public static final String PROP_ADMIN_SECRET = "parley.dns.adminSecret";
-	/**
-	 * true: the admin port uses TLS (SSLServerSocketFactory.getDefault(),
-	 * configured with the standard javax.net.ssl.keyStore / keyStorePassword
-	 * properties). DnsAdminClient reads the same property and then uses
-	 * SSLSocketFactory.getDefault() (javax.net.ssl.trustStore).
-	 */
-	public static final String PROP_ADMIN_TLS = "parley.dns.adminTls";
-	/** Most admin sessions at once (default 8). */
-	public static final String PROP_ADMIN_MAX_CONNECTIONS = "parley.dns.adminMaxConnections";
-	/** An idle admin session is closed after this many ms (default 600000). */
-	public static final String PROP_ADMIN_IDLE_TIMEOUT = "parley.dns.adminIdleTimeout";
-	/** Longest admin command line in bytes (default 8192); a longer one ends the session. */
-	public static final String PROP_ADMIN_MAX_LINE = "parley.dns.adminMaxLine";
-	/** With parley.dns.adminSecret set, a session that has not authenticated after this many ms is closed (default 30000). */
-	public static final String PROP_ADMIN_AUTH_TIMEOUT = "parley.dns.adminAuthTimeout";
-
-
-
-
 	public static final String PROP_DNS_DIR = "parley.dns.dnsDir";
-	public static final String PROP_DYNAMIC = "parley.dns.dynamicFileName";
 	public static final String PROP_ZONE_DIR = "parley.dns.zoneDir";
 	/** Addresses / networks allowed to transfer zones (AXFR), e.g. "192.0.2.2, 10.0.0.0/8". Default: none. */
 	public static final String PROP_AXFR_ALLOW = "parley.dns.axfrAllow";
@@ -169,7 +125,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public static final String PROP_NOTIFY_RETRIES = "parley.dns.notifyRetries";
 	/** First wait for a NOTIFY answer, a duration, doubled after each attempt (default 2s). */
 	public static final String PROP_NOTIFY_TIMEOUT = "parley.dns.notifyTimeout";
-	public static final String PROP_USE_DATABASE = "parley.dns.useDatabase";
 	/**
 	 * The listed domains: the class of the {@link us.bringardner.parley.net.server.IDomainList} that
 	 * lists them (default {@link PropertiesDomainList}); its own settings are read with this prefix
@@ -203,22 +158,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	/** NSEC3 salt in hex, or - for none (the default, as RFC 9276 recommends). */
 	public static final String PROP_DNSSEC_NSEC3_SALT = "parley.dns.dnssecNsec3Salt";
 
-	public static final String STATUS_ACTIVE = "active";
-	public static final String STATUS_DELETED = "deleted";
-
-	private static final String SQL_SELECT_ALL = "select name,ip,lastUpdate from dynamic_dns   where status = '"+STATUS_ACTIVE+"'";
-	private static final String SQL_CREATE_DYN_DNS = "insert into dynamic_dns (ip,lastUpdate,status,name ) values(?,?,?,?)";
-	private static final String SQL_UPDATE_DYN_DNS = "update dynamic_dns set ip=? ,lastUpdate=?,status=? where name=?";
-	private static final int POS_IP = 1;
-	private static final int POS_LAST_UPDATE = 2;
-	private static final int POS_STATUS = 3;
-	private static final int POS_NAME = 4;
 	/** UDP listener threads (was UDPProcCount, still read). */
 	public static final String PROP_UDP_PROC_COUNT = "parley.dns.udpProcCount";
 	/** TCP reactor threads, which read and write the connections (was TCPProcCount, still read). */
 	public static final String PROP_TCP_PROC_COUNT = "parley.dns.tcpProcCount";
-	/** Host DnsAdminClient connects to (was the system property "name", still read). */
-	public static final String PROP_ADMIN_HOST = "parley.dns.adminHost";
 	/**
 	 * "false": a JVM error (OutOfMemoryError...) in any thread is logged but doesn't stop the
 	 * process. By default main() halts it so a supervisor can start a clean one (parley-net's
@@ -228,20 +171,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public static final String DEFAULT_DNS_DIR = "/data/services/dns/config";
 
 
-	private static ServerSocketFactory serverSocketFactory=ServerSocketFactory.getDefault();
-	private static volatile int adminPort = 9999;
-	//  Where the admin port listens (set in initServer, default loopback)
-	private volatile InetAddress adminBindAddress = InetAddress.getLoopbackAddress();
-	//  The most admin sessions at once (parley.dns.adminMaxConnections)
-	private volatile int adminMaxConnections = 8;
-	//  The admin port (parley-net Server), while the server runs
-	private volatile DnsAdminServer adminServer;
-	//  Zone reloads, dynamic records and re-signing (they used to run in the admin accept loop)
+	//  Zone reloads and re-signing, on a thread of their own
 	private volatile java.util.concurrent.ScheduledExecutorService maintenance;
-	private long lastDynamicRefresh;
-	private volatile int adminIdleTimeout = 10*60*1000;
-	private volatile int adminMaxLine = DnsAdminProcessor.DEFAULT_MAX_LINE;
-	private volatile int adminAuthTimeout = DnsAdminProcessor.DEFAULT_AUTH_TIMEOUT;
 	//  UDP/TCP processor threads started by initServer (for stopAndWait)
 	private final List<Thread> workers = new java.util.concurrent.CopyOnWriteArrayList<Thread>();
 	private static volatile boolean shutdown = false;
@@ -298,13 +229,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	//  parley.dns.reportAuthorizations, read with the listed domains
 	private volatile boolean reportAuthorizations = true;
 
-	/**
-	 * Dynamic A records: lower case name -> unmodifiable list holding one A.
-	 * Read by query threads, written by admin threads and the DB/file reload.
-	 * The A objects are never modified after they are published; an address
-	 * change replaces the entry (see putDynamic).
-	 */
-	private final Map<String, List<A>> dynamic = new ConcurrentHashMap<String, List<A>>();
 	//  Zone transfer allow-list (parley.dns.axfrAllow) and NOTIFY sender (parley.dns.notify)
 	private volatile AddressMatcher axfrAllow = AddressMatcher.NONE;
 	private volatile Tsig.KeyRing tsigKeys = Tsig.KeyRing.EMPTY;
@@ -315,12 +239,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	private volatile ZoneNotifier notifier;
 	/** Largest message of a zone transfer (a transfer is several messages). */
 	static final int AXFR_MESSAGE_SIZE = 16*1024;
-	//  Serializes check-then-act updates of dynamic entries
-	private final Object dynamicLock = new Object();
-
-	//  Timeout for admin cycles
+	//  How often maintenance runs by default (ms)
 	private long acceptTimeout = 60000; //  one minute
-	private long dynamicConfigRefreash = acceptTimeout * 5;
 
 
 	//  Number of UDP Processor to create
@@ -360,8 +280,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	}	
 	private TCPProsessor [] TCPProcs;
 	private String defaultZoneName;
-	private File dynamicFile;
-	private long dynamicLoaded;
 	private File zoneDir;
 
 
@@ -405,7 +323,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	/**
 	 * Why the server could not start (see {@link DnsServer#awaitStarted(long)}).
 	 * The exit code is what main() exits with: -1 when the configuration, zones or
-	 * UDP/TCP sockets could not be set up, -2 when the admin socket could not be opened.
+	 * UDP/TCP sockets could not be set up, -2 when it was stopped while starting.
 	 */
 	public static class StartupException extends IOException {
 		private static final long serialVersionUID = 1L;
@@ -440,118 +358,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		if( ex != null ) {
 			throw ex;
 		}
-	}
-
-	/**
-	 * 
-	 * Creation date: (6/16/2003 9:29:24 AM)
-	 * @return int
-	 */
-	public static int getAdminPort() {
-		return adminPort;
-	}
-
-	/*
-	 * This dose not use the Jmail.Database
-	 * Factory because the connection will not remain open
-	 */
-	/**
-	 * Open a JDBC connection from parley.dns.jdbc.url / .user / .password (JDBC finds
-	 * the driver for the URL on the class path).
-	 * @throws SQLException if it can't be opened. (It used to log and return
-	 * null, and every caller then failed with a NullPointerException.)
-	 */
-	//  One JDBC connection, kept open and reused (it used to be opened and
-	//  closed for every load, update and delete). Guarded by dbLock; database
-	//  work is rare (reloads, dynamic updates) so it is simply serialized.
-	private final Object dbLock = new Object();
-	private Connection dbConnection;
-	private long dbConnectionsOpened;
-	static final int DB_VALID_TIMEOUT_SECONDS = 2;
-
-	/** Work done with the shared connection. */
-	interface SqlWork<T> {
-		T run(Connection con) throws SQLException;
-	}
-
-	/**
-	 * Run work with the shared connection: opened on first use, checked with
-	 * isValid() before reuse (the database may have closed an idle one) and
-	 * reopened if needed. After an SQLException the connection is closed, so
-	 * the next call starts with a fresh one.
-	 * Lock order is dynamicLock, then dbLock (the dynamic update methods
-	 * call this while holding dynamicLock), so work must not take dynamicLock.
-	 */
-	<T> T withConnection(SqlWork<T> work) throws SQLException {
-		synchronized (dbLock) {
-			Connection con = dbConnection;
-			if( con != null && !isUsable(con) ) {
-				IoUtils.closeQuietly(con);
-				con = dbConnection = null;
-			}
-			if( con == null ) {
-				con = getConnection();
-				dbConnection = con;
-				dbConnectionsOpened++;
-			}
-			try {
-				return work.run(con);
-			} catch(SQLException | RuntimeException ex) {
-				IoUtils.closeQuietly(con);
-				dbConnection = null;
-				throw ex;
-			}
-		}
-	}
-
-	/** How many JDBC connections have been opened (for tests and status). */
-	long getDbConnectionsOpened() {
-		synchronized (dbLock) {
-			return dbConnectionsOpened;
-		}
-	}
-
-	/** Close the shared JDBC connection (on shutdown). */
-	void closeDbConnection() {
-		synchronized (dbLock) {
-			IoUtils.closeQuietly(dbConnection);
-			dbConnection = null;
-		}
-	}
-
-	private static boolean isUsable(Connection con) {
-		try {
-			return con.isValid(DB_VALID_TIMEOUT_SECONDS);
-		} catch(SQLException ex) {
-			return false;
-		} catch(AbstractMethodError ex) {
-			//  Very old (pre JDBC 4) driver without isValid
-			try {
-				return !con.isClosed();
-			} catch(SQLException e) {
-				return false;
-			}
-		}
-	}
-
-
-	private Connection getConnection() throws SQLException {
-		String url = stringProperty(PROP_JDBC_URL);
-		String user = getProperty(PROP_JDBC_USER);
-		String password = getProperty(PROP_JDBC_PASSWORD);
-		if( url == null ) {
-			throw new SQLException(PROP_JDBC_URL+" is not set");
-		}
-		return DriverManager.getConnection(url,user,password);
-	}
-
-	/**
-	 * 
-	 * Creation date: (6/16/2003 9:29:24 AM)
-	 * @return javax.net.ServerSocketFactory
-	 */
-	public static javax.net.ServerSocketFactory getServerSocketFactory() {
-		return serverSocketFactory;
 	}
 
 	public java.util.Date getStartTime() {
@@ -675,7 +481,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 
 		loadZones();
-		loadDynamic();
 
 		int alltimeout = durationProperty(PROP_TIMEOUT, 5000);
 		int dnsPort = intProperty(PROP_PORT, Message.DNSPORT);
@@ -748,26 +553,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		us.bringardner.parley.dns.resolve.Resolver.initResolver(getConfiguration() != null ? getConfiguration() : System.getProperties());
 
 
-		//  ---- Admin (the socket is opened in run())
-		setAdminPort(intProperty(PROP_ADMIN_PORT, getAdminPort()));
-		serverSocketFactory = adminSocketFactory(stringProperty(PROP_ADMIN_TLS), serverSocketFactory);
-		if( serverSocketFactory instanceof javax.net.ssl.SSLServerSocketFactory ) {
-			log("Admin port uses TLS");
-		}
-		adminBindAddress = InetAddress.getLoopbackAddress();
-		if( (tmp=stringProperty(PROP_ADMIN_BIND_ADDRESS)) != null) {
-			adminBindAddress = createBindAddress(tmp);
-		}
-		adminMaxConnections = Math.max(1, intProperty(PROP_ADMIN_MAX_CONNECTIONS, 8));
-		adminIdleTimeout = durationProperty(PROP_ADMIN_IDLE_TIMEOUT, adminIdleTimeout);
-		adminMaxLine = intProperty(PROP_ADMIN_MAX_LINE, adminMaxLine);
-		//  0 or less would turn the time limit off (8 slow clients could lock out the admin port)
-		adminAuthTimeout = Math.max(1, durationProperty(PROP_ADMIN_AUTH_TIMEOUT, adminAuthTimeout));
-		if( stringProperty(PROP_ADMIN_SECRET) == null && !adminBindAddress.isLoopbackAddress() ) {
-			logError("Admin port listens on "+adminBindAddress+" but "+PROP_ADMIN_SECRET
-					+" is not set: only clients on this machine will be accepted");
-		}
-
 		log("JDns Server init Complete");
 	}  
 
@@ -815,92 +600,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			return Integer.parseInt(tmp);
 		} catch(NumberFormatException ex) {
 			throw new IOException("Invalid number for "+name+": '"+tmp+"'");
-		}
-	}
-
-	public InetAddress getAdminBindAddress() {
-		return adminBindAddress;
-	}
-
-	/** Where the next admin server listens (initServer reads parley.dns.adminBindAddress). */
-	void setAdminBindAddress(InetAddress bind) {
-		adminBindAddress = bind;
-	}
-
-	/**
-	 * The admin server for this DNS server, set up from the parley.dns.admin* settings
-	 * (port, bind address, TLS, session limit, idle time, line length, time to log in).
-	 * Not started.
-	 * @param port the port, 0 for any free port
-	 */
-	public DnsAdminServer createAdminServer(int port) throws IOException {
-		DnsAdminServer a = new DnsAdminServer(this, port, adminBindAddress);
-		a.setServerSocketFactory(getServerSocketFactory());
-		a.setMaxClients(adminMaxConnections);
-		a.setMaxLine(adminMaxLine);
-		a.setLoginTimeLimit(Math.max(1, adminAuthTimeout));
-		a.setMaxIdleConnection(adminIdleTimeout);
-		//  The idle check runs every few minutes by default: often enough to close
-		//  idle sessions about on time (they used to time out on the socket)
-		a.setAdminFrequency(Math.max(1000, Math.min(adminIdleTimeout/2, 60000)));
-		return a;
-	}
-
-	/**
-	 * Start the admin server (see {@link #createAdminServer(int)}); run() does this on
-	 * parley.dns.adminPort.
-	 * @throws IOException if it can't listen (port in use, a TLS key store problem...)
-	 */
-	public DnsAdminServer startAdminServer(int port) throws IOException {
-		DnsAdminServer a = createAdminServer(port);
-		try {
-			a.startAndWait(10000);
-		} catch(IOException | RuntimeException ex) {
-			//  e.g. timed out: it must not bind later with nothing referring to it
-			a.stop();
-			throw ex;
-		}
-		DnsAdminServer old = adminServer;
-		adminServer = a;
-		if( old != null ) {
-			old.stop();
-		}
-		return a;
-	}
-
-	/** @return the running admin server, or null */
-	public DnsAdminServer getAdminServer() {
-		return adminServer;
-	}
-
-	private void stopAdminServer() {
-		DnsAdminServer a = adminServer;
-		adminServer = null;
-		if( a != null ) {
-			a.stop();
-		}
-	}
-
-	/** Longest admin line in bytes (initServer reads parley.dns.adminMaxLine). */
-	void setAdminMaxLine(int maxLine) {
-		adminMaxLine = maxLine;
-		DnsAdminServer a = adminServer;
-		if( a != null ) {
-			a.setMaxLine(maxLine);
-		}
-	}
-
-	/** ms an idle admin session stays open (initServer reads parley.dns.adminIdleTimeout); for the next admin server. */
-	void setAdminIdleTimeout(int ms) {
-		adminIdleTimeout = ms;
-	}
-
-	/** ms an admin client has to authenticate (initServer reads parley.dns.adminAuthTimeout). */
-	void setAdminAuthTimeout(int ms) {
-		adminAuthTimeout = Math.max(1, ms);
-		DnsAdminServer a = adminServer;
-		if( a != null ) {
-			a.setLoginTimeLimit(adminAuthTimeout);
 		}
 	}
 
@@ -1001,21 +700,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	/** The NOTIFY sender, or null if parley.dns.notify is not set. */
 	public ZoneNotifier getNotifier() {
 		return notifier;
-	}
-
-	/** Set the most admin sessions at once (initServer reads parley.dns.adminMaxConnections). */
-	void setAdminMaxConnections(int max) {
-		adminMaxConnections = Math.max(1, max);
-		DnsAdminServer a = adminServer;
-		if( a != null ) {
-			a.setMaxClients(adminMaxConnections);
-		}
-	}
-
-	/** Admin sessions that can still be opened. */
-	public int getAvailableAdminSlots() {
-		DnsAdminServer a = adminServer;
-		return a == null ? adminMaxConnections : a.getAvailableSlots();
 	}
 
 	private InetAddress createBindAddress(String tmp) throws UnknownHostException {
@@ -1120,279 +804,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		return shutdown;
 	}
 
-	void loadDynamic() {
-		try {
-			if( !loadDynamicFromDb()) {
-				dynamicFile = loadDynamicFromFile(false);
-			}
-		} catch(Throwable ex) {
-			logError("Could not load dynamic from db. Calling loadFromFile", ex);
-			try {
-				dynamicFile = loadDynamicFromFile(false);
-			} catch (IOException e) {
-				logError("Could not load dynamic from file.", e);
-			}
-		}
-		dynamicLoaded = System.currentTimeMillis();
-		flushDynamicSigning();
-	}
-
-	
-	/**
-	 * Add or change a dynamic entry. The store (database, or the dynamic file
-	 * when there is no database) is written FIRST; memory changes only if that
-	 * succeeds, so a failed write leaves the old state everywhere. (Memory used
-	 * to change first: a failed write left the server answering with an
-	 * address the store didn't have.)
-	 * 
-	 * @throws SQLException if the database write fails (nothing is changed)
-	 */
-	public void addOrUpdateDynamic(String name, String ip) throws ClassNotFoundException, SQLException {
-		synchronized (dynamicLock) {
-			List<A> dyn = getDynamic(name);
-			if(dyn == null ) {
-				//  Validates the domain and the address; nothing is published yet
-				A a = buildDynamic(name, ip);
-				if( a == null ) {
-					logError("-Undefined domain for "+name);
-					return;
-				}
-				createDynamic(name,ip);
-				storeDynamicFileOrThrow(withEntry(a));
-				putDynamic(a);
-			} else {
-				A old = dyn.get(0);
-				A a = old;
-				if( !ip.equals(old.getAddressString())) {
-					a = copyWithAddress(old, ip);
-				}
-				//  Keep track of the last time we were contacted. If there is no
-				//  row (the entry came from the dynamic file), insert one.
-				if( saveDynamic(name,ip,STATUS_ACTIVE) == 0 ) {
-					createDynamic(name,ip);
-				}
-				if( a != old ) {
-					storeDynamicFileOrThrow(withEntry(a));
-					putDynamic(a);
-				}
-			}
-		}
-		flushDynamicSigning();
-	}
-
-	/** storeDynamicFile, with an I/O failure reported like a database failure. */
-	private void storeDynamicFileOrThrow(Map<String, List<A>> after) throws SQLException {
-		try {
-			storeDynamicFile(after);
-		} catch(IOException ex) {
-			throw new SQLException("Could not write the dynamic file: "+ex.getMessage(), ex);
-		}
-	}
-
-	/** The dynamic entries as they would be with a added or replaced. */
-	private Map<String, List<A>> withEntry(A a) {
-		Map<String, List<A>> ret = new HashMap<String, List<A>>(dynamic);
-		ret.put(dynamicKey(a.getName()), Collections.singletonList(a));
-		return ret;
-	}
-
-	/** @return rows updated, or -1 if no database is used */
-	private int saveDynamic(String name, String ip, String status) throws ClassNotFoundException, SQLException {
-		int ret = -1;
-		if( useDatabase()) {
-			ret = withConnection(con -> {
-				try(PreparedStatement stmt = con.prepareStatement(SQL_UPDATE_DYN_DNS)) {
-					stmt.setString(POS_NAME, name);
-					stmt.setString(POS_IP, ip);
-					stmt.setString(POS_STATUS, status);
-					stmt.setTimestamp(POS_LAST_UPDATE, new Timestamp(System.currentTimeMillis()));
-					return stmt.executeUpdate();
-				}
-			});
-		}
-		return ret;
-	}
-	private void createDynamic(String name, String ip) throws ClassNotFoundException, SQLException {
-		if( useDatabase()) {
-			withConnection(con -> {
-				try(PreparedStatement stmt = con.prepareStatement(SQL_CREATE_DYN_DNS)) {
-					stmt.setString(POS_NAME, name);
-					stmt.setString(POS_IP, ip);
-					stmt.setString(POS_STATUS, STATUS_ACTIVE);
-					stmt.setTimestamp(POS_LAST_UPDATE, new Timestamp(System.currentTimeMillis()));
-					return stmt.executeUpdate();
-				}
-			});
-		}
-	}
-
-	/**
-	 * parley.dns.useDatabase=true/false decides. If it is not set, the database is
-	 * used only when parley.dns.jdbc.url is configured. (The old default was 'true',
-	 * so a server without a database tried to connect on every dynamic update
-	 * and reload, logged errors and hit NullPointerExceptions.)
-	 */
-	boolean useDatabase() {
-		String flag = stringProperty(PROP_USE_DATABASE);
-		if( flag != null ) {
-			return flag.toLowerCase().startsWith("t");
-		}
-		return stringProperty(PROP_JDBC_URL) != null;
-	}
-
-	private boolean loadDynamicFromDb() throws ClassNotFoundException, SQLException {
-		boolean ret = false;
-		if( useDatabase()) {
-			log("Loading dynamic from database");
-			//  Read the rows first, then update memory: dynamicLock is never
-			//  taken while the database connection is held (see withConnection)
-			List<String[]> dbRows = withConnection(con -> {
-				List<String[]> list = new ArrayList<String[]>();
-				try(Statement stmt = con.createStatement();
-						ResultSet rs = stmt.executeQuery(SQL_SELECT_ALL)) {
-					while(rs.next()) {
-						list.add(new String[] {rs.getString(1), rs.getString(2)});
-					}
-				}
-				return list;
-			});
-			{
-				for(String [] row : dbRows) {
-					String name = row[0];
-					String ip = row[1];
-					synchronized (dynamicLock) {
-						List<A> dyn = getDynamic(name);
-						if( dyn != null ) {
-							A a = dyn.get(0);
-							String old = a.getAddressString();
-							if( !ip.equals(old)) {
-								replaceDynamicAddress(a, ip);
-								ret = true;
-							}
-						} else {
-							addDynamic(name,ip);
-							ret = true;
-						}
-					}
-					log("Dynamic "+name+" "+ip+" ret="+ret);
-				}
-				if( ret ) {
-					try {
-						dynamicFile = saveDynamicToFile();
-					} catch (IOException e) {
-						logError("Could not save dynamic to file",e);
-					}
-				}
-			}
-		}
-		return ret;
-	}
-
-	/** The dynamic entries file (parley.dns.dynamicFileName, relative to the DNS directory). */
-	private File dynamicFilePath() {
-		String fileName = getProperty(PROP_DYNAMIC,"dynamic.txt");
-		File ret = new File(fileName);
-		if( !ret.isAbsolute() ) {
-			ret = new File(dnsDir,fileName);
-		}
-		return ret;
-	}
-
-	private File loadDynamicFromFile(boolean saveNew) throws IOException {
-		File ret = dynamicFilePath();
-		log("Loading dynamic "+PROP_DYNAMIC+"= "+ret);
-
-		if( ret.exists() ) {
-			BufferedReader in = new BufferedReader(new FileReader(ret));
-			try {
-				Properties p = new Properties();				
-				p.load(in);
-				for(Object key : p.keySet()) {
-					String name = key.toString();
-					//  The address comes from the file (it used to be read with
-					//  getProperty(name), i.e. from the system properties, so every
-					//  entry got a null address and loading failed).
-					String ip = p.getProperty(name);
-					if( getDynamic(name) == null) {
-						try {
-							if( saveNew) {
-								addOrUpdateDynamic(name, ip);
-							} else {
-								addDynamic(name, ip);
-								log("Loading dynamic from file "+name+" "+ip);
-							}
-						} catch (ClassNotFoundException | SQLException e) {
-							throw new IOException(e);
-						} catch (RuntimeException e) {
-							//  One bad line (e.g. an invalid address) doesn't stop the rest
-							logError("Skipping dynamic entry "+name+"="+ip+" in "+ret+": "+e.getMessage());
-						}
-					}
-				}				
-			} finally {
-				IoUtils.closeQuietly(in);
-			}
-		}
-
-		return ret;
-	}
-
-	public File saveDynamicToFile() throws IOException {
-		return saveDynamicToFile(dynamic);
-	}
-
-	/**
-	 * Write entries (name -> [A]) to the dynamic file. The file is written to
-	 * a temporary file and renamed, so a crash or a concurrent reader never
-	 * sees a half-written file.
-	 */
-	private File saveDynamicToFile(Map<String, List<A>> entries) throws IOException {
-		File ret = dynamicFilePath();
-		log(PROP_DYNAMIC+"= "+ret);
-		File dir = ret.getAbsoluteFile().getParentFile();
-		if( dir != null && !dir.isDirectory() ) {
-			//  (createTempFile only said "No such file or directory")
-			throw new IOException("Can't save dynamic entries: the directory of "+ret+" does not exist. "
-					+"A relative "+PROP_DYNAMIC+" is relative to "+PROP_DNS_DIR+" ("+dnsDir+")");
-		}
-		File tmp = File.createTempFile(ret.getName(), ".tmp", dir);
-		try {
-			PrintStream out = new PrintStream(new FileOutputStream(tmp));
-			try {
-				out.println("# Dynamic entries saved at "+(new Date()));
-				for(Map.Entry<String, List<A>> e : new java.util.TreeMap<String, List<A>>(entries).entrySet()) {
-					out.println(e.getKey()+"="+e.getValue().get(0).getAddressString());
-				}
-			} finally {
-				out.close();
-			}
-			if( out.checkError() ) {
-				throw new IOException("Error writing "+tmp);
-			}
-			try {
-				java.nio.file.Files.move(tmp.toPath(), ret.toPath(),
-						java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-			} catch(java.nio.file.AtomicMoveNotSupportedException ex) {
-				java.nio.file.Files.move(tmp.toPath(), ret.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-			}
-		} finally {
-			tmp.delete();
-		}
-		return ret;
-	}
-
-	/**
-	 * Without a database the dynamic file is the store: write the entries as
-	 * they will be after a change, before the change is made in memory.
-	 * (Admin changes used to exist only in memory and were lost on restart.)
-	 */
-	private void storeDynamicFile(Map<String, List<A>> after) throws IOException {
-		if( !useDatabase() ) {
-			dynamicFile = saveDynamicToFile(after);
-			//  Our own write is not a change to reload
-			dynamicLoaded = dynamicFile.lastModified();
-		}
-	}
 
 
 	private File [] getZoneFiles() {
@@ -1437,7 +848,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	/**
 	 * @return true if a zone file was added, removed or modified since the last
 	 * load attempt. A file that failed to load does not cause another reload
-	 * until it changes (it used to trigger a full reload every admin cycle).
+	 * until it changes (it used to trigger a full reload every maintenance round).
 	 */
 	boolean shouldReloadZones() {
 		Map<String, Long> seen = lastSeenZoneFiles;
@@ -1527,8 +938,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			//  The listed domains with no zone of their own: zones inheriting the shared zone, with no file
 			List<Zone> virtual = listedDomainZones(ld, zones);
 
-			//  DNSSEC: sign the zones that have keys (a zone whose data, keys and
-			//  dynamic entries did not change keeps its signatures)
+			//  DNSSEC: sign the zones that have keys (a zone whose data and keys
+			//  did not change keeps its signatures)
 			Map<String, Zone> unsignedByName = new HashMap<String, Zone>();
 			for(Map.Entry<String, Zone> e : zones.entrySet()) {
 				unsignedByName.put(e.getKey(), e.getValue().getUnsigned());
@@ -2078,14 +1489,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			failedToStart(new StartupException("Stopped while starting", null, -2));
 			return;
 		}
-		try {
-			DnsAdminServer a = startAdminServer(getAdminPort());
-			log("Started dnsAdmin on "+adminBindAddress+":"+a.getLocalPort());
-			setState("Running got socket");
-		} catch(IOException | RuntimeException ex) {
-			failedToStart(new StartupException("Can't create admin socket on "+adminBindAddress+":"+getAdminPort()+": "+ex, ex, -2));
-			return;
-		}
 		startedAt = System.currentTimeMillis();
 		startLatch.countDown();
 		if( running && !isShutdown() ) {
@@ -2102,13 +1505,12 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			}
 		} finally {
 			stopMaintenance();
-			stopAdminServer();
 			running = false;
 			setState("Running Exit");
 		}
 	}
 
-	/** How often (ms) zone files, dynamic records and signatures are looked after */
+	/** How often (ms) zone files and signatures are looked after */
 	private volatile long maintenancePeriod = acceptTimeout;
 
 	/** @param ms how often maintenance runs (applies when the server starts) */
@@ -2117,14 +1519,13 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	}
 
 	/**
-	 * Zone file reloads, dynamic records and re-signing run on their own thread
-	 * now. They used to run in the admin accept loop, which caught only
+	 * Zone file reloads and re-signing run on their own thread. They used to
+	 * run in the admin port's accept loop, which caught only
 	 * IOException from a reload: one RuntimeException ended the loop, and with
 	 * it all reloading and re-signing, so signed zones went bogus when their
 	 * signatures expired (round 4 #60, round 5 #87). Each step is now guarded.
 	 */
 	private void startMaintenance() {
-		lastDynamicRefresh = System.currentTimeMillis();
 		java.util.concurrent.ScheduledExecutorService m = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(
 				new us.bringardner.parley.core.NamedThreadFactory("DnsMaintenance"));
 		maintenance = m;
@@ -2157,27 +1558,12 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 	/** One round of maintenance (run on the maintenance thread). */
 	void maintain() {
-		guarded("refreshing dynamic records", () -> {
-			if( (System.currentTimeMillis()-lastDynamicRefresh) >= dynamicConfigRefreash) {
-				lastDynamicRefresh = System.currentTimeMillis();
-				loadDynamicFromDb();
-				if( dynamicFile != null && dynamicFile.exists()) {
-					dynamicLoaded = dynamicFile.lastModified();
-				}
-			} else if( dynamicFile != null && dynamicFile.lastModified() > dynamicLoaded) {
-				dynamicFile = loadDynamicFromFile(true);
-				if( dynamicFile != null && dynamicFile.exists()) {
-					dynamicLoaded = dynamicFile.lastModified();
-				}
-			}
-		});
 		guarded("reloading zones", () -> {
 			if( shouldReloadZones() ) {
 				loadZones();
 			}
 		});
 		guarded("signing zones", () -> {
-			flushDynamicSigning();
 			resignDue(System.currentTimeMillis()/1000);
 		});
 	}
@@ -2198,7 +1584,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			}
 			workers.clear();
 			Resolver.shutDown();
-			closeDbConnection();
 		} catch(InterruptedException ie) {
 			Thread.currentThread().interrupt();
 		} catch(RuntimeException re) {
@@ -2223,14 +1608,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 	/**
 	 * 
-	 * Creation date: (6/16/2003 9:29:24 AM)
-	 * @param newAdminPort int
-	 */
-	public static void setAdminPort(int newAdminPort) {
-		adminPort = newAdminPort;
-	}
-	/**
-	 * 
 	 * Creation date: (6/27/2003 6:40:02 AM)
 	 * @param newDebug boolean
 	 */
@@ -2244,27 +1621,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 */
 	public void setRecursionAvailable(boolean newRa) {
 		recursionAvailable = newRa;
-	}
-	/**
-	 * 
-	 * Creation date: (6/16/2003 9:29:24 AM)
-	 * @param newServerSocketFactory javax.net.ServerSocketFactory
-	 */
-	/**
-	 * The admin listener's factory: parley.dns.adminTls=true replaces the default
-	 * (plain) factory with SSLServerSocketFactory.getDefault(); a factory set
-	 * with setServerSocketFactory is kept.
-	 */
-	static ServerSocketFactory adminSocketFactory(String tlsProperty, ServerSocketFactory current) {
-		if( tlsProperty != null && tlsProperty.trim().toLowerCase().startsWith("t")
-				&& current == ServerSocketFactory.getDefault() ) {
-			return javax.net.ssl.SSLServerSocketFactory.getDefault();
-		}
-		return current;
-	}
-
-	public static void setServerSocketFactory(javax.net.ServerSocketFactory newServerSocketFactory) {
-		serverSocketFactory = newServerSocketFactory;
 	}
 	/**
 	 * 
@@ -2435,8 +1791,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		//  below the apex) our data is not authoritative; answer with a
 		//  referral. It used to answer NXDOMAIN for names below the cut, and
 		//  an authoritative empty answer (A queries) at the cut itself.
-		//  A dynamic entry for the name still wins.
-		if( zoneCutReferrals && !dynamic.containsKey(target) ) {
+		if( zoneCutReferrals ) {
 			List<RR> cut = zone.findDelegation(target);
 			if( cut != null && type == DNS.DS && cut.get(0).getName().equalsIgnoreCase(stripDot(target)) ) {
 				//  DS records live in the parent, at the delegation (RFC 4035
@@ -2478,19 +1833,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			return ret;
 		}
 
-		//  Check for a dynamic entry.
-
-		List<A> list1 = dynamic.get(target);
-		//System.out.println(target+" list="+list1);
-		List<RR> list = null;
-		if( list1 != null ) {
-			list = new ArrayList<RR>(list1);			
-		}
-
-		if( list == null ) {
-			//  No dynamic entry then do a normal search.
-			list = zone.getMatchingRRs(targetName);
-		}
+		List<RR> list = zone.getMatchingRRs(targetName);
 		if( list == null ) {
 			//  A DMARC report authorization of a listed domain (parley.dns.domainList)
 			list = listedRecords(target, zone);
@@ -2498,7 +1841,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		//  ANY at the apex includes the SOA (the zone keeps it apart from the
 		//  other records, so it was left out); the apex exists even when the
 		//  SOA is its only record
-		boolean apexAny = type == DNS.QTYPE_ALL && isZoneApex(target, zone) && !dynamic.containsKey(target);
+		boolean apexAny = type == DNS.QTYPE_ALL && isZoneApex(target, zone);
 		if( apexAny ) {
 			ret.addAnswer(soaFor(zone, targetName));
 			if( list == null ) {
@@ -2820,9 +2163,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 * signed with a TSIG key in parley.dns.axfrKeys, only over TCP,
 	 * and only for the name of a zone we serve; otherwise REFUSED.
 	 * <p>
-	 * The answer is the SOA, every record of the zone (dynamic entries
-	 * replace the zone's records at their name, as in normal answers), and the
-	 * SOA again, split over as many messages as needed.
+	 * The answer is the SOA, every record of the zone, and the SOA again,
+	 * split over as many messages as needed.
 	 * An IXFR over UDP gets only the SOA, which tells the client to use TCP
 	 * (or that it is up to date).
 	 * 
@@ -2853,20 +2195,11 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 		List<RR> records = new ArrayList<RR>();
 		records.add(soa.copy());
-		java.util.Set<String> dynNames = new java.util.HashSet<String>();
-		for(Map.Entry<String, List<A>> e : dynamic.entrySet()) {
-			if( getZoneFor(new Name(e.getKey())) == zone ) {
-				dynNames.add(e.getKey());
-				records.addAll(e.getValue());
-			}
-		}
 		List<Name> names = zone.getNames();
 		List<List<RR>> rrs = zone.getRrs();
 		for(int i=0; i < names.size() && i < rrs.size(); i++ ) {
-			boolean dyn = dynNames.contains(names.get(i).toString().toLowerCase());
 			for(RR rr : rrs.get(i)) {
-				//  (a dynamic entry replaces the records at its name, but not the NSEC of a signed zone)
-				if( rr.getType() != DNS.SOA && (!dyn || rr.getType() == DNS.NSEC) ) {
+				if( rr.getType() != DNS.SOA ) {
 					records.add(rr);
 				}
 			}
@@ -3303,12 +2636,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			}
 		}
 		List<RR> addresses = new ArrayList<RR>();
-		List<A> dyn = dynamic.get(dynamicKey(target));
-		if( dyn != null ) {
-			addresses.addAll(dyn);
-		} else {
-			addresses.addAll(localRRs(zone, targetName, DNS.A));
-		}
+		addresses.addAll(localRRs(zone, targetName, DNS.A));
 		addresses.addAll(localRRs(zone, targetName, DNS.AAAA));
 		for(RR rr : addresses) {
 			addOnce(ret, rr, have);
@@ -3353,77 +2681,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		return new Name(rr.getName()).toString().toLowerCase()+"/"+rr.getType()+"/"+data;
 	}
 
-	/** @return a snapshot copy of the dynamic entries (lower case name -> [A]) */
-	public Map<String, List<A>> getDynamic() {
-		return new HashMap<String, List<A>>(dynamic);
-	}
-
-	/** Dynamic names are case-insensitive (the query path looks them up in lower case). */
-	private static String dynamicKey(String name) {
-		return name.toLowerCase();
-	}
-
-	public List<A> getDynamic(String name) {
-		return dynamic.get(dynamicKey(name));
-	}
-
-	/** Publish a fully built A as the dynamic entry for its name. */
-	private void putDynamic(A a) {
-		dynamic.put(dynamicKey(a.getName()), Collections.singletonList(a));
-		dynamicDirty = true;
-	}
-
-	/**
-	 * Change a dynamic address by publishing a new A (the old object may be
-	 * in use by a query thread and is never modified).
-	 */
-	private A replaceDynamicAddress(A old, String ip) {
-		A a = copyWithAddress(old, ip);
-		putDynamic(a);
-		return a;
-	}
-
-	/** A new A like old but with another address (old is not modified). */
-	private static A copyWithAddress(A old, String ip) {
-		A a = new A(old.getName());
-		a.setAddress(ip);
-		a.setTTL(old.getTTL());
-		return a;
-	}
-
-	/**
-	 * Add a dynamic entry and set teh TTY from the correct zone
-	 * 
-	 * @param name, fully qualified dns name
-	 * @param addr, ip address 
-	 * @return the A entry created or null if the domain is not valid
-	 */
-	public A addDynamic(String name, String addr) {
-		A ret = buildDynamic(name, addr);
-		if( ret != null ) {
-			putDynamic(ret);
-			flushDynamicSigning();
-		}
-		return ret;
-	}
-
-	/**
-	 * Build (but don't publish) a dynamic A with the TTL of its zone.
-	 * @return null if the name is not in one of our domains
-	 * @throws IllegalArgumentException if the address is invalid
-	 */
-	private A buildDynamic(String name, String addr) {
-		A ret = null;
-		Name nn = new Name(name);
-		Zone zone = getZoneFor(nn);
-		if( zone != null ) {
-			ret = new A(name);
-			ret.setAddress(addr);
-			ret.setTTL(zone.getSoa().getTTL());
-		}
-		return ret;
-	}
-
 	/**
 	 * Get the zone for the fully qualified dns name by traversing
 	 * the name dot by dot to find the domain.
@@ -3437,8 +2694,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	private volatile int dnssecValidity = ZoneSigner.DEFAULT_VALIDITY;
 	private volatile Map<String, List<DnssecKey>> dnssecKeys = Collections.emptyMap();
 	private volatile long dnssecKeyStamp = Long.MIN_VALUE;
-	//  A dynamic entry changed: signed zones may need signing again
-	private volatile boolean dynamicDirty;
 
 	/** The directory of the DNSSEC keys; null for the default (the zone directory). */
 	public void setDnssecKeyDir(File dir) {
@@ -3527,52 +2782,11 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	}
 
 	/**
-	 * The dynamic entries in a zone (not in a zone below it that we also
-	 * serve): name -> records.
-	 */
-	private Map<String, List<? extends RR>> dynamicIn(Zone z, Map<String, Zone> zones) {
-		Map<String, List<? extends RR>> ret = new java.util.TreeMap<String, List<? extends RR>>();
-		String apex = Canonical.key(z.getName());
-		for(Map.Entry<String, List<A>> e : dynamic.entrySet()) {
-			String n = Canonical.key(e.getKey());
-			if( !Canonical.isBelow(n, apex, true) ) {
-				continue;
-			}
-			//  The closest zone we serve for the name must be this one
-			String p = n;
-			boolean mine = true;
-			while( !p.equals(apex) ) {
-				if( zones.containsKey(p) ) {
-					mine = false;
-					break;
-				}
-				p = p.substring(p.indexOf('.')+1);
-			}
-			if( mine ) {
-				ret.put(n, e.getValue());
-			}
-		}
-		return ret;
-	}
-
-	private static String fingerprint(Map<String, List<? extends RR>> dyn) {
-		StringBuilder b = new StringBuilder();
-		for(Map.Entry<String, List<? extends RR>> e : dyn.entrySet()) {
-			b.append(e.getKey());
-			for(RR rr : e.getValue()) {
-				b.append(' ').append(rr.getTTL()).append(' ').append(Zone.rdataText(rr));
-			}
-			b.append('\n');
-		}
-		return b.toString();
-	}
-
-	/**
 	 * The zone to serve for a loaded (or updated) zone: signed if the key
 	 * directory has keys for it, as it is otherwise.
 	 * 
 	 * @param current the zone served now under that name, or null. It is
-	 *        kept if its data, keys and dynamic entries are unchanged (unless
+	 *        kept if its data and keys are unchanged (unless
 	 *        force), and if signing fails while its signatures are still valid.
 	 * @param zones the zones (by lower case name) that will be served
 	 */
@@ -3621,17 +2835,15 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			return unsigned;
 		}
 		long now = System.currentTimeMillis()/1000;
-		Map<String, List<? extends RR>> dyn = dynamicIn(unsigned, zones);
-		String fp = fingerprint(dyn);
 		us.bringardner.parley.dns.dnssec.Nsec3Params nsec3 = nsec3For(name);
 		String mode = nsec3 == null ? "NSEC" : "NSEC3 "+nsec3;
 		if( !force && cs != null && cs.unsigned == unsigned && cs.keyId.equals(ZoneSigner.keyId(keys, now))
-				&& cs.dynamicFingerprint.equals(fp) && cs.mode.equals(mode) ) {
+				&& cs.mode.equals(mode) ) {
 			return current;
 		}
 		try {
 			long start = System.currentTimeMillis();
-			ZoneSigner.Result r = ZoneSigner.sign(unsigned, dyn, fp, keys, now, dnssecValidity, nsec3);
+			ZoneSigner.Result r = ZoneSigner.sign(unsigned, keys, now, dnssecValidity, nsec3);
 			staleSigned.remove(name);
 			signFailedAt.remove(name);
 			for(String w : r.warnings) {
@@ -3664,30 +2876,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			}
 			logError("DNSSEC: can't sign "+name+" ("+ex.getMessage()+"), serving it UNSIGNED: validators reject it while the parent has a DS", ex);
 			return unsigned;
-		}
-	}
-
-	/** Sign again the signed zones whose dynamic entries changed. */
-	void flushDynamicSigning() {
-		if( !dynamicDirty ) {
-			return;
-		}
-		synchronized(this) {
-			dynamicDirty = false;
-			ZoneSet cur = zoneSet;
-			for(Zone z : cur.zones.values()) {
-				SignedZone sz = z.getSigned();
-				if( sz != null && sz.isPresigned() ) {
-					if( !dynamicIn(sz.unsigned, cur.zones).isEmpty() ) {
-						logError("DNSSEC: "+sz.apex+" is signed elsewhere, so its dynamic entries are served without signatures"
-								+" (validators will reject them)");
-					}
-					continue;
-				}
-				if( sz != null && !fingerprint(dynamicIn(sz.unsigned, cur.zones)).equals(sz.dynamicFingerprint) ) {
-					publishUpdatedZone(z, prepareZone(sz.unsigned, z, true, cur.zones));
-				}
-			}
 		}
 	}
 
@@ -3822,12 +3010,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		stop();
 		java.util.concurrent.ScheduledExecutorService m = maintenance;
 		stopMaintenance();
-		stopAdminServer();
 		if( m != null ) {
-			//  a reload or re-sign in progress finishes before the database closes
+			//  a reload or re-sign in progress finishes first
 			m.awaitTermination(Math.max(1, deadline-System.currentTimeMillis()), java.util.concurrent.TimeUnit.MILLISECONDS);
 		}
-		closeDbConnection();
 		closeListeners();
 		ZoneNotifier n = notifier;
 		if( n != null ) {
@@ -3856,30 +3042,5 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		ret &= m == null || m.isTerminated();
 		ret &= still == null;
 		return ret;
-	}
-
-	/**
-	 * Remove a dynamic entry: the store first, then memory. (Memory used to
-	 * go first; if the database write failed the entry was gone until the
-	 * next database reload brought it back.)
-	 */
-	public void removeDynamic(String name) throws IOException  {
-		synchronized (dynamicLock) {
-			List<A> list = getDynamic(name);
-			if( list == null) {
-				return;
-			}
-			try {
-				saveDynamic(name,list.get(0).getAddressString(),STATUS_DELETED);
-			} catch (ClassNotFoundException | SQLException e) {
-				throw new IOException(e);
-			}
-			Map<String, List<A>> after = new HashMap<String, List<A>>(dynamic);
-			after.remove(dynamicKey(name));
-			storeDynamicFile(after);
-			dynamic.remove(dynamicKey(name));
-			dynamicDirty = true;
-		}
-		flushDynamicSigning();
 	}
 }

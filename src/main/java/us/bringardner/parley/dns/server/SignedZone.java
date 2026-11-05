@@ -67,8 +67,6 @@ public final class SignedZone {
 	final long refreshAt;
 	/** Identifies the keys used; a different value means the keys changed. */
 	final String keyId;
-	/** The dynamic (admin port) entries that were signed with the zone. */
-	final String dynamicFingerprint;
 	final int rrsigCount;
 
 	/**
@@ -78,7 +76,7 @@ public final class SignedZone {
 	 */
 	SignedZone(Zone unsigned, String apex, Map<String, List<Rrsig>> sigs, java.util.Collection<String> names,
 			Map<String, Nsec> chain, NavigableMap<String, Nsec3> hashed, Nsec3Params nsec3,
-			long signedAt, long expires, long refreshAt, String keyId, String dynamicFingerprint, int rrsigCount,
+			long signedAt, long expires, long refreshAt, String keyId, int rrsigCount,
 			boolean presigned) {
 		this.unsigned = unsigned;
 		this.apex = apex;
@@ -101,7 +99,6 @@ public final class SignedZone {
 		this.expires = expires;
 		this.refreshAt = refreshAt;
 		this.keyId = keyId;
-		this.dynamicFingerprint = dynamicFingerprint;
 		this.rrsigCount = rrsigCount;
 	}
 

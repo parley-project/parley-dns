@@ -98,24 +98,19 @@ public final class ZoneSigner {
 	 * Sign a zone.
 	 *
 	 * @param unsigned the zone as loaded (and updated)
-	 * @param dynamic the dynamic (admin port) entries in this zone: lower case
-	 *        name -> records, which replace the zone's records at that name
-	 * @param dynamicFingerprint identifies dynamic, kept with the signatures
 	 * @param now seconds since 1970
 	 * @param validity seconds the signatures are valid
 	 * @throws IllegalArgumentException if no key can sign now
 	 */
-	static Result sign(Zone unsigned, Map<String, List<? extends RR>> dynamic, String dynamicFingerprint,
-			List<DnssecKey> keys, long now, int validity) {
-		return sign(unsigned, dynamic, dynamicFingerprint, keys, now, validity, null);
+	static Result sign(Zone unsigned, List<DnssecKey> keys, long now, int validity) {
+		return sign(unsigned, keys, now, validity, null);
 	}
 
 	/**
 	 * Sign a zone, proving what does not exist with NSEC3 (RFC 5155) when
 	 * nsec3 is not null, with NSEC otherwise.
 	 */
-	static Result sign(Zone unsigned, Map<String, List<? extends RR>> dynamic, String dynamicFingerprint,
-			List<DnssecKey> keys, long now, int validity, Nsec3Params nsec3) {
+	static Result sign(Zone unsigned, List<DnssecKey> keys, long now, int validity, Nsec3Params nsec3) {
 		List<String> warnings = new ArrayList<String>();
 		String apex = Canonical.key(unsigned.getName());
 		Soa soa = unsigned.getSoa();
@@ -153,7 +148,7 @@ public final class ZoneSigner {
 		List<List<RR>> rrs = unsigned.getRrs();
 		for(int i=0; i < names.size() && i < rrs.size(); i++ ) {
 			String n = Canonical.key(names.get(i).toString());
-			if( !Canonical.isBelow(n, apex, true) || dynamic.containsKey(n) ) {
+			if( !Canonical.isBelow(n, apex, true) ) {
 				continue;
 			}
 			for(RR rr : rrs.get(i)) {
@@ -162,14 +157,6 @@ public final class ZoneSigner {
 					continue;
 				}
 				add(sets, n, rr);
-			}
-		}
-		for(Map.Entry<String, List<? extends RR>> e : dynamic.entrySet()) {
-			if( Canonical.isBelow(e.getKey(), apex, true) ) {
-				sets.remove(e.getKey());
-				for(RR rr : e.getValue()) {
-					add(sets, e.getKey(), rr);
-				}
 			}
 		}
 
@@ -279,7 +266,7 @@ public final class ZoneSigner {
 		}
 		long refresh = Math.min(expiration - validity/4, next);
 		ret.setSigned(new SignedZone(unsigned, apex, sigs, auth, chain, hashed, nsec3, now, expiration, refresh,
-				keyId(keys, now), dynamicFingerprint, count, false));
+				keyId(keys, now), count, false));
 		return new Result(ret, warnings);
 	}
 
@@ -412,7 +399,7 @@ public final class ZoneSigner {
 		Zone ret = loaded.copyForUpdate();
 		ret.setSigned(new SignedZone(loaded, apex, sigs, auth, chain, hashed, params,
 				signedAt == Long.MAX_VALUE ? now : signedAt, expires == Long.MAX_VALUE ? now : expires,
-				Long.MAX_VALUE, "presigned", "", loaded.getPresignedSigs().size(), true));
+				Long.MAX_VALUE, "presigned", loaded.getPresignedSigs().size(), true));
 		return new Result(ret, warnings);
 	}
 

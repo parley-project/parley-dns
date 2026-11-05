@@ -29,9 +29,6 @@ package us.bringardner.parley.dns;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
@@ -42,7 +39,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
-import us.bringardner.parley.dns.server.DnsAdminClient;
 import us.bringardner.parley.dns.server.DnsServer;
 import us.bringardner.parley.dns.util.NsLookup;
 
@@ -83,21 +79,10 @@ public class TestDns implements DNS {
 		}		
 	}
 
-	enum Action  {Add,Delete};
-
-	private interface Manager {
-
-		void doit(Action action,String name, String address) throws IOException;
-
-
-	}
-
 	private int testQCodes[] = {A,NS,MX,CNAME,SOA,MB,MG,MR,WKS,PTR,HINFO,MINFO,TXT};
 
 	Map<String,String> expected = new HashMap<String, String>();
 	private static DnsServer server;
-	private static File dynamicDir;
-	private static String savedDynamicFile;
 
 	private static String localServerAddress;
 
@@ -113,20 +98,6 @@ public class TestDns implements DNS {
 		System.setProperty(DnsServer.PROP_DNS_DIR, Fixtures.file("TestFiles").getPath());
 		System.setProperty(DnsServer.PROP_ZONE_DIR, Fixtures.file("TestFiles/zones").getPath());
 		System.setProperty("parley.log.level","ERROR");
-		System.setProperty("parley.dns.useDatabase","false");
-		//  The server rewrites the dynamic file on every admin change, so work on a
-		//  copy instead of the checked-in TestFiles/dynamic.txt. (The properties
-		//  file's path was also resolved twice against parley.dns.dnsDir, so
-		//  testDynamic failed with "No such file or directory".)
-		dynamicDir = Files.createTempDirectory("testdns").toFile();
-		File dynamicCopy = new File(dynamicDir,"dynamic.txt");
-		Files.copy(Fixtures.file("TestFiles/dynamic.txt").toPath(), dynamicCopy.toPath(), StandardCopyOption.REPLACE_EXISTING);
-		savedDynamicFile = System.getProperty(DnsServer.PROP_DYNAMIC);
-		System.setProperty(DnsServer.PROP_DYNAMIC, dynamicCopy.getAbsolutePath());
-
-
-
-
 		server = new DnsServer();
 		server.setRecursionAvailable(false);
 		server.start();
@@ -157,17 +128,6 @@ public class TestDns implements DNS {
 			//  UDP/TCP processors of tests that ran after this one.
 			server.stopAndWait(10_000);
 			DnsServer.setShutdown(false);
-		}
-		if( savedDynamicFile == null ) {
-			System.clearProperty(DnsServer.PROP_DYNAMIC);
-		} else {
-			System.setProperty(DnsServer.PROP_DYNAMIC, savedDynamicFile);
-		}
-		if( dynamicDir != null ) {
-			for(File f : dynamicDir.listFiles()) {
-				f.delete();
-			}
-			dynamicDir.delete();
 		}
 	}
 
@@ -210,164 +170,6 @@ public class TestDns implements DNS {
 
 	private void assertEquals(String string, int expect, int actual) {
 		Assertions.assertEquals(expect,actual,string);		
-	}
-
-	@Test
-	public void testAdmin() throws  Exception {
-		if( server.isRunning()) {
-
-			String expected01="Server state=Waiting for admin connection Wed Nov 13 16:43:10 EST 2024\n"
-					+ "Resolver Cache size=0 RemoteServer size=0\n"
-					+ " Resolver capacity=20  current=0\n"
-					+ "Resolver Stats: inflight=0 completed=0 min=9999999 max=0 ave=0\n"
-					+ "\n"
-					+ "State of 10 resolver processors follows\n"
-					+ "	0 Waiting on fifo Wed Nov 13 16:43:30 EST 2024\n"
-					+ "	1 Waiting on fifo Wed Nov 13 16:43:30 EST 2024\n"
-					+ "	2 Waiting on fifo Wed Nov 13 16:43:30 EST 2024\n"
-					+ "	3 Waiting on fifo Wed Nov 13 16:43:30 EST 2024\n"
-					+ "	4 Waiting on fifo Wed Nov 13 16:43:30 EST 2024\n"
-					+ "	5 Waiting on fifo Wed Nov 13 16:43:30 EST 2024\n"
-					+ "	6 Waiting on fifo Wed Nov 13 16:43:30 EST 2024\n"
-					+ "	7 Waiting on fifo Wed Nov 13 16:43:30 EST 2024\n"
-					+ "	8 Waiting on fifo Wed Nov 13 16:43:30 EST 2024\n"
-					+ "	9 Waiting on fifo Wed Nov 13 16:43:30 EST 2024\n"
-					+ "+Status done\n"
-					+ "\n";
-			String expected02= "Server state=Waiting for admin connection Wed Nov 13 16:43:10 EST 2024\n"
-					+ "Resolver Cache size=0 RemoteServer size=0\n"
-					+ " Resolver capacity=20  current=0\n"
-					+ "Resolver Stats: inflight=0 completed=0 min=9999999 max=0 ave=0\n"
-					+ "\n"
-					+ "State of 4 tcp processors follows\n"
-					+ "	0 Running before sync Wed Nov 13 16:43:41 EST 2024\n"
-					+ "	1 Running after sync Wed Nov 13 16:43:51 EST 2024\n"
-					+ "	2 Running before sync Wed Nov 13 16:43:51 EST 2024\n"
-					+ "	3 Running before sync Wed Nov 13 16:43:46 EST 2024\n"
-					+ "+Status done\n"
-					+ "\n";
-			String expected03=
-					"Server state=Waiting for admin connection Wed Nov 13 16:43:10 EST 2024\n"
-							+ "Resolver Cache size=0 RemoteServer size=0\n"
-							+ " Resolver capacity=20  current=0\n"
-							+ "Resolver Stats: inflight=0 completed=0 min=9999999 max=0 ave=0\n"
-							+ "\n"
-							+ "State of 10 udp processors follows\n"
-							+ "	0 Running before sync Wed Nov 13 16:43:50 EST 2024\n"
-							+ "	1 Running before sync Wed Nov 13 16:43:26 EST 2024\n"
-							+ "	2 Running after sync Wed Nov 13 16:43:55 EST 2024\n"
-							+ "	3 Running before sync Wed Nov 13 16:43:30 EST 2024\n"
-							+ "	4 Running before sync Wed Nov 13 16:43:30 EST 2024\n"
-							+ "	5 Running before sync Wed Nov 13 16:43:21 EST 2024\n"
-							+ "	6 Running before sync Wed Nov 13 16:43:16 EST 2024\n"
-							+ "	7 Running before sync Wed Nov 13 16:43:16 EST 2024\n"
-							+ "	8 Running before sync Wed Nov 13 16:43:35 EST 2024\n"
-							+ "	9 Running before sync Wed Nov 13 16:43:55 EST 2024\n"
-							+ "+Status done\n"
-							+ "\n";
-
-			String expected04= "Server state=Waiting for admin connection Wed Nov 13 16:43:10 EST 2024\n"
-					+ "Resolver Cache size=0 RemoteServer size=0\n"
-					+ " Resolver capacity=20  current=0\n"
-					+ "Resolver Stats: inflight=0 completed=0 min=9999999 max=0 ave=0\n"
-					+ "\n"
-					+ "State of 10 resolver processors follows\n"
-					+ "	0 Waiting on fifo Wed Nov 13 16:44:00 EST 2024\n"
-					+ "	1 Waiting on fifo Wed Nov 13 16:44:00 EST 2024\n"
-					+ "	2 Waiting on fifo Wed Nov 13 16:44:00 EST 2024\n"
-					+ "	3 Waiting on fifo Wed Nov 13 16:44:00 EST 2024\n"
-					+ "	4 Waiting on fifo Wed Nov 13 16:44:00 EST 2024\n"
-					+ "	5 Waiting on fifo Wed Nov 13 16:44:00 EST 2024\n"
-					+ "	6 Waiting on fifo Wed Nov 13 16:44:00 EST 2024\n"
-					+ "	7 Waiting on fifo Wed Nov 13 16:44:00 EST 2024\n"
-					+ "	8 Waiting on fifo Wed Nov 13 16:44:00 EST 2024\n"
-					+ "	9 Waiting on fifo Wed Nov 13 16:44:00 EST 2024\n"
-					+ "\n"
-					+ "State of 4 tcp processors follows\n"
-					+ "	0 Running before sync Wed Nov 13 16:43:41 EST 2024\n"
-					+ "	1 Running before sync Wed Nov 13 16:43:56 EST 2024\n"
-					+ "	2 Running after sync Wed Nov 13 16:43:56 EST 2024\n"
-					+ "	3 Running before sync Wed Nov 13 16:43:46 EST 2024\n"
-					+ "\n"
-					+ "State of 10 udp processors follows\n"
-					+ "	0 Running before sync Wed Nov 13 16:43:50 EST 2024\n"
-					+ "	1 Running before sync Wed Nov 13 16:43:26 EST 2024\n"
-					+ "	2 Running before sync Wed Nov 13 16:44:00 EST 2024\n"
-					+ "	3 Running before sync Wed Nov 13 16:43:30 EST 2024\n"
-					+ "	4 Running before sync Wed Nov 13 16:43:30 EST 2024\n"
-					+ "	5 Running before sync Wed Nov 13 16:43:21 EST 2024\n"
-					+ "	6 Running before sync Wed Nov 13 16:43:16 EST 2024\n"
-					+ "	7 Running before sync Wed Nov 13 16:43:16 EST 2024\n"
-					+ "	8 Running after sync Wed Nov 13 16:44:00 EST 2024\n"
-					+ "	9 Running before sync Wed Nov 13 16:43:55 EST 2024\n"
-					+ "+Status done\n"
-					+ "";
-
-			int adminPort = DnsServer.getAdminPort();
-
-			DnsAdminClient client = new DnsAdminClient(localServerAddress, adminPort);
-			client.setTimeout(100000);
-
-			assertTrue("Could not connect client to "+localServerAddress+":"+adminPort,client.connect());
-
-			try {
-				testDynamic((a,n,d)->{
-					switch (a) {
-					case Add:client.addDynamic(n, d);break;
-					case Delete:client.removeDynamic(n);break;
-					default:
-						throw new IOException("unexpected action = "+a);
-					}
-				});
-
-				String tmp = client.statusResolver();				
-				compareStatus(expected01,tmp);
-
-				tmp = client.statusTCP();
-				compareStatus(expected02,tmp);
-
-				tmp = client.statusUDP();
-				compareStatus(expected03,tmp);
-
-				tmp = client.statusALL();
-				compareStatus(expected04,tmp);
-
-				tmp = client.memory();
-				compareStatus("+Start up=Wed Nov 13 16:55:29 EST 2024 free mem=393961088",tmp);
-
-			} finally {
-				try {client.close();} catch (Exception e) {}
-			}					
-		}
-	}
-
-	private void assertTrue(String string, boolean connect) {
-		Assertions.assertTrue(connect, string);
-		
-	}
-
-	private void compareStatus(String expected, String actual) {
-		String [] ep = expected.split("\n");
-		String [] ap = expected.split("\n");
-		assertEquals("Status does not have the same numbrew of lines",ep.length, ap.length);
-	}
-
-	@Test
-	public void testDynamic () throws IOException {
-
-		testDynamic((a,n,d)->{
-			switch (a) {
-			case Add:
-				server.addDynamic(n, d);
-				break;
-			case Delete:
-				server.removeDynamic(n);
-				break;
-			default:
-				throw new IOException("unexpected action = "+a);
-			}
-		});
-
 	}
 
 	@Test
@@ -469,55 +271,5 @@ public class TestDns implements DNS {
 		Message res = msg.query(addresses[0]+"x", A, IN);
 		assertEquals(addresses[0]+"x type=A rcode="+res.getResponseCode(),missingRcode, res.getResponseCode());
 	}
-
-	public void testDynamic(Manager runner) throws IOException {
-
-
-
-		if(server.isRunning()) {
-			String name = "boogy.bar.com";
-			String address = "1.2.3.4";
-
-			// Add the address
-			runner.doit(Action.Add,name, address);
-
-			// validate the name now has the dynamic address
-			Message msg = new Message();
-			msg.setServer(localServerAddress);
-			msg.setPort(localServrPort);
-			Message res = msg.query(name, A, IN);
-			assertEquals(name+" type=A should be ok rcode="+res.getResponseCode(),0, res.getResponseCode());	
-			assertEquals(name+" type=A should be have one answer="+res.getAdditionalCount(),0, res.getAdditionalCount());
-			A a = res.getAddress(name);
-			assertNotNull(a,"Result did not have an answer ");
-			byte [] data = a.getAddress();
-			assertNotNull(data,"address data is null ");
-			assertEquals(name+" data is not the correct length="+data.length,4, data.length);
-			for (int idx = 0; idx < data.length; idx++) {
-				assertEquals(name+" address at ="+idx+" is not correct",idx+1, data[idx]);
-			}
-
-			// now remove the dynamic address
-			runner.doit(Action.Delete,name, address);
-
-			// validate the name results in the global (common) address
-			res = msg.query(name, A, IN);
-			assertEquals(name+" type=A should be ok rcode="+res.getResponseCode(),0, res.getResponseCode());	
-			assertEquals(name+" type=A should be have one answer="+res.getAdditionalCount(),0, res.getAdditionalCount());
-
-			a = res.getAddress(name);
-			assertNotNull(a,"Result did not have an answer ");
-			data = a.getAddress();
-			assertNotNull(data,"address data is null ");
-			assertEquals(name+" data is not the correct length="+data.length,4, data.length);
-			//zone file for bar.com has 111.69.95.39
-			byte expect [] = {111,69,95,39};
-			for (int idx = 0; idx < data.length; idx++) {
-				assertEquals(name+" address at ="+idx+" is not correct",expect[idx], data[idx]);
-			}
-		}
-	}
-	
-	
 
 }
