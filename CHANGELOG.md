@@ -3,6 +3,13 @@
 ## parley-dns 2.0.0 (unreleased)
 
 
+### Removed (2026-11-05: the driver class setting)
+
+- **`parley.dns.jdbc.driver` and `DnsServer.PROP_JDBC_CLASS` are gone**: JDBC 4 drivers register themselves and JDBC
+  finds the one for `parley.dns.jdbc.url`, so the driver only has to be on the class path. A server whose settings
+  still have it warns at start-up that it doesn't know the name; take it out. (`parley.dns.jdbcDriver` is no longer
+  listed as renamed to it.)
+
 ### Changed (2026-11-03: the DNS server reads zone files, it doesn't write them, To-Do 15.5)
 
 - **`DnsServerMXBean` no longer writes files**: `createInheritingZone`, `addSharedRecords`, `changeSharedRecord` and
