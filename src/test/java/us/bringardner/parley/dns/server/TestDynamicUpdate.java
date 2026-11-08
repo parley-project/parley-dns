@@ -67,12 +67,21 @@ public class TestDynamicUpdate {
 	@TempDir
 	static Path tmp;
 
+	/**
+	 * A new folder for a test's files: in the @TempDir on the local file system here, on a memory
+	 * file system in {@link TestDynamicUpdateOnMemory}. The server is given its settings with
+	 * TestFiles.setting (a filesource: URL for a memory file).
+	 */
+	protected FileSource folder(String prefix) throws IOException {
+		return TestFiles.newFolder(tmp, prefix);
+	}
+
 	private static final InetAddress LOOPBACK = InetAddress.getLoopbackAddress();
 	private static final int ANY = ZoneUpdater.CLASS_ANY;
 	private static final int NONE = ZoneUpdater.CLASS_NONE;
-	private FileSource dir;
+	FileSource dir;
 	private FileSource zoneFile;
-	private DnsServer server;
+	DnsServer server;
 	private String savedDir;
 	private String savedDefault;
 
@@ -91,12 +100,12 @@ public class TestDynamicUpdate {
 
 	@BeforeEach
 	public void setup() throws Exception {
-		dir = TestFiles.newFolder(tmp, "update");
+		dir = folder("update");
 		zoneFile = dir.getChild("up.test.txt");
 		write(zoneFile, zoneText(100));
 		savedDir = System.getProperty(DnsServer.PROP_ZONE_DIR);
 		savedDefault = System.getProperty(DnsServer.PROP_DEFAULT_ZONE);
-		System.setProperty(DnsServer.PROP_ZONE_DIR, dir.getAbsolutePath());
+		System.setProperty(DnsServer.PROP_ZONE_DIR, TestFiles.setting(dir));
 		System.setProperty(DnsServer.PROP_DEFAULT_ZONE, "up.test");
 		server = new DnsServer();
 		server.loadZones();

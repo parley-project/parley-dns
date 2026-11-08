@@ -40,13 +40,22 @@ public class TestListedDomains {
 	@TempDir
 	static Path tmp;
 
+	/**
+	 * A new folder for a test's files: in the @TempDir on the local file system here, on a memory
+	 * file system in {@link TestListedDomainsOnMemory}. The server is given its settings with
+	 * TestFiles.setting (a filesource: URL for a memory file).
+	 */
+	protected FileSource folder(String prefix) throws IOException {
+		return TestFiles.newFolder(tmp, prefix);
+	}
+
 	private static final InetAddress LOOPBACK = InetAddress.getLoopbackAddress();
 	private static final int REFUSED = 5;
 	private static final int NXDOMAIN = 3;
-	private FileSource dir;
+	FileSource dir;
 	private FileSource keys;
 	private FileSource settings;
-	private DnsServer server;
+	DnsServer server;
 	private String savedDir;
 	private String savedDefault;
 	private String savedList;
@@ -56,8 +65,8 @@ public class TestListedDomains {
 
 	@BeforeEach
 	public void setup() throws Exception {
-		dir = TestFiles.newFolder(tmp, "listed");
-		keys = TestFiles.newFolder(tmp, "listedsettings");
+		dir = folder("listed");
+		keys = folder("listedsettings");
 		write(dir.getChild("primary.test.txt"), reportsToPrimary(TestInheritedZones.primary(10, DKIM)));
 		write(dir.getChild("child.test.txt"), TestInheritedZones.child(5, ""));
 		write(dir.getChild("shared.zone"), reportsToPrimary(TestInheritedZones.primary(10, DKIM)));
@@ -67,10 +76,10 @@ public class TestListedDomains {
 		savedDefault = System.getProperty(DnsServer.PROP_DEFAULT_ZONE);
 		savedList = System.getProperty(DnsServer.PROP_DOMAIN_LIST+".file");
 		savedShared = System.getProperty(DnsServer.PROP_SHARED_ZONE);
-		System.setProperty(DnsServer.PROP_ZONE_DIR, dir.getAbsolutePath());
+		System.setProperty(DnsServer.PROP_ZONE_DIR, TestFiles.setting(dir));
 		System.setProperty(DnsServer.PROP_DEFAULT_ZONE, "primary.test");
-		System.setProperty(DnsServer.PROP_DOMAIN_LIST+".file", settings.getAbsolutePath());
-		System.setProperty(DnsServer.PROP_SHARED_ZONE, dir.getChild("shared.zone").getAbsolutePath());
+		System.setProperty(DnsServer.PROP_DOMAIN_LIST+".file", TestFiles.setting(settings));
+		System.setProperty(DnsServer.PROP_SHARED_ZONE, TestFiles.setting(dir.getChild("shared.zone")));
 		server = new DnsServer();
 		server.loadZones();
 		server.setRecursionAvailable(false);

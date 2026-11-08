@@ -56,7 +56,16 @@ public class TestZoneDirectives {
 	@TempDir
 	static Path tmp;
 
-	private FileSource dir;
+	/**
+	 * A new folder for a test's files: in the @TempDir on the local file system here, on a memory
+	 * file system in {@link TestZoneDirectivesOnMemory}. The server is given its settings with
+	 * TestFiles.setting (a filesource: URL for a memory file).
+	 */
+	protected FileSource folder(String prefix) throws IOException {
+		return TestFiles.newFolder(tmp, prefix);
+	}
+
+	FileSource dir;
 
 	private static final String SOA =
 			"@\tIN\tSOA\tns1 postmaster (\n"
@@ -67,7 +76,7 @@ public class TestZoneDirectives {
 
 	@BeforeEach
 	public void setup() throws IOException {
-		dir = TestFiles.newFolder(tmp, "directives");
+		dir = folder("directives");
 	}
 
 	@AfterEach
@@ -287,7 +296,7 @@ public class TestZoneDirectives {
 		write("zones/d.test.txt", SOA+"$INCLUDE hosts.inc\n");
 		String savedDir = System.getProperty(DnsServer.PROP_ZONE_DIR);
 		String savedDefault = System.getProperty(DnsServer.PROP_DEFAULT_ZONE);
-		System.setProperty(DnsServer.PROP_ZONE_DIR, zones.getAbsolutePath());
+		System.setProperty(DnsServer.PROP_ZONE_DIR, TestFiles.setting(zones));
 		System.setProperty(DnsServer.PROP_DEFAULT_ZONE, "d.test");
 		try {
 			DnsServer server = new DnsServer();
