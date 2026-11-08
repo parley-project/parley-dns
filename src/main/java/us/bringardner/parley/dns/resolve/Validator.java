@@ -23,10 +23,9 @@
  */
 package us.bringardner.parley.dns.resolve;
 
-import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -332,9 +331,13 @@ public final class Validator extends DnsBaseClass {
 		return ret;
 	}
 
-	public static List<Ds> loadAnchors(File f) throws IOException {
-		return parseAnchors(new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8));
+	/** The trust anchors in a file (DS or DNSKEY records, UTF-8), on any file system. */
+	public static List<Ds> loadAnchors(us.bringardner.parley.files.FileSource f) throws IOException {
+		try(InputStream in = f.getInputStream()) {
+			return parseAnchors(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+		}
 	}
+
 
 	// ------------------------------------------------------------ validating an answer
 

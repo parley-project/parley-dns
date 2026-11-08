@@ -29,17 +29,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.InetAddress;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
@@ -48,21 +48,26 @@ import us.bringardner.parley.dns.Https;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Svcb;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.resolve.QueryData;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * HTTPS and SVCB records (RFC 9460) in zone files and on the wire (rec #39).
  */
 public class TestServiceBinding {
 
-	private static File dir;
+	@TempDir
+	static Path tmp;
+
+	private static FileSource dir;
 	private static DnsServer server;
 
 	@BeforeAll
 	public static void setup() throws IOException {
-		dir = Files.createTempDirectory("svcb").toFile();
-		File zone = new File(dir,"svc.test.txt");
-		try(FileWriter w = new FileWriter(zone)) {
+		dir = TestFiles.newFolder(tmp, "svcb");
+		FileSource zone = dir.getChild("svc.test.txt");
+		try(Writer w = TestFiles.writer(zone)) {
 			w.write("$TTL 300\n"
 					+"@\tIN\tSOA\tns1 postmaster ( 1 3600 1800 1209600 300 )\n"
 					+"\t\tNS\tns1\n"
@@ -91,10 +96,6 @@ public class TestServiceBinding {
 
 	@AfterAll
 	public static void cleanup() {
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	private static Message ask(String name, int type) {
@@ -247,8 +248,8 @@ public class TestServiceBinding {
 
 	@Test
 	public void badZoneLineNamesTheLine() throws Exception {
-		File f = new File(dir,"bad.test.txt");
-		try(FileWriter w = new FileWriter(f)) {
+		FileSource f = dir.getChild("bad.test.txt");
+		try(Writer w = TestFiles.writer(f)) {
 			w.write("@\tIN\tSOA\tns1 postmaster ( 1 3600 1800 1209600 300 )\n\t\tNS\tns1\n@\tIN\tHTTPS\t0 . alpn=h2\n");
 		}
 		IOException ex = assertThrows(IOException.class, () -> new Zone(f));

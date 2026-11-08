@@ -6,11 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.InetAddress;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -18,14 +17,17 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.Txt;
 import us.bringardner.parley.dns.resolve.QueryData;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * parley.dns.domainList: the listed domains (here the mail queue's queue.properties domains=) are
@@ -35,12 +37,15 @@ import us.bringardner.parley.dns.resolve.QueryData;
  */
 public class TestListedDomains {
 
+	@TempDir
+	static Path tmp;
+
 	private static final InetAddress LOOPBACK = InetAddress.getLoopbackAddress();
 	private static final int REFUSED = 5;
 	private static final int NXDOMAIN = 3;
-	private File dir;
-	private File keys;
-	private File settings;
+	private FileSource dir;
+	private FileSource keys;
+	private FileSource settings;
 	private DnsServer server;
 	private String savedDir;
 	private String savedDefault;
@@ -51,12 +56,12 @@ public class TestListedDomains {
 
 	@BeforeEach
 	public void setup() throws Exception {
-		dir = Files.createTempDirectory("listed").toFile();
-		keys = Files.createTempDirectory("listedsettings").toFile();
-		write(new File(dir, "primary.test.txt"), reportsToPrimary(TestInheritedZones.primary(10, DKIM)));
-		write(new File(dir, "child.test.txt"), TestInheritedZones.child(5, ""));
-		write(new File(dir, "shared.zone"), reportsToPrimary(TestInheritedZones.primary(10, DKIM)));
-		settings = new File(keys, "queue.properties");
+		dir = TestFiles.newFolder(tmp, "listed");
+		keys = TestFiles.newFolder(tmp, "listedsettings");
+		write(dir.getChild("primary.test.txt"), reportsToPrimary(TestInheritedZones.primary(10, DKIM)));
+		write(dir.getChild("child.test.txt"), TestInheritedZones.child(5, ""));
+		write(dir.getChild("shared.zone"), reportsToPrimary(TestInheritedZones.primary(10, DKIM)));
+		settings = keys.getChild("queue.properties");
 		settings("primary.test,child.test,Mail.Example.");
 		savedDir = System.getProperty(DnsServer.PROP_ZONE_DIR);
 		savedDefault = System.getProperty(DnsServer.PROP_DEFAULT_ZONE);
@@ -65,7 +70,7 @@ public class TestListedDomains {
 		System.setProperty(DnsServer.PROP_ZONE_DIR, dir.getAbsolutePath());
 		System.setProperty(DnsServer.PROP_DEFAULT_ZONE, "primary.test");
 		System.setProperty(DnsServer.PROP_DOMAIN_LIST+".file", settings.getAbsolutePath());
-		System.setProperty(DnsServer.PROP_SHARED_ZONE, new File(dir, "shared.zone").getAbsolutePath());
+		System.setProperty(DnsServer.PROP_SHARED_ZONE, dir.getChild("shared.zone").getAbsolutePath());
 		server = new DnsServer();
 		server.loadZones();
 		server.setRecursionAvailable(false);
@@ -93,12 +98,7 @@ public class TestListedDomains {
 		if( n != null ) {
 			n.shutdown();
 		}
-		for(File d : new File[] {dir, keys}) {
-			for(File f : d.listFiles()) {
-				f.delete();
-			}
-			d.delete();
-		}
+
 	}
 
 	private static void restore(String key, String value) {
@@ -109,9 +109,9 @@ public class TestListedDomains {
 		}
 	}
 
-	private static void write(File f, String text) throws IOException {
+	private static void write(FileSource f, String text) throws IOException {
 		long before = f.exists() ? f.lastModified() : 0;
-		try(FileWriter w = new FileWriter(f)) {
+		try(Writer w = TestFiles.writer(f)) {
 			w.write(text);
 		}
 		//  a reload notices the change by its time stamp
@@ -158,12 +158,12 @@ public class TestListedDomains {
 	}
 
 	@Test
-	public void aListedDomainIsServedFromTheSharedZoneWithNoFile() {
+	public void aListedDomainIsServedFromTheSharedZoneWithNoFile() throws Exception {
 		Zone z = server.getZone("mail.example");
 		assertNotNull(z, "served");
 		assertTrue(z.getOwn().isVirtual());
 		assertEquals(Zone.SHARED, z.getOwn().getInheritFrom());
-		assertFalse(new File(dir, "mail.example.txt").exists(), "no zone file");
+		assertFalse(dir.getChild("mail.example.txt").exists(), "no zone file");
 
 		Message m = ask("mail.example", DNS.MX);
 		assertEquals(DNS.NOERROR, m.getResponseCode());
@@ -227,18 +227,18 @@ public class TestListedDomains {
 	@Test
 	public void onlyWhenTheDomainsDmarcRecordSendsReportsThere() throws Exception {
 		// child.test has a zone file: its own DMARC record, reports to another address
-		write(new File(dir, "child.test.txt"), TestInheritedZones.child(6, "_dmarc\tIN\tTXT\t\"v=DMARC1; p=none; rua=mailto:reports@elsewhere.example!10m\"\n"));
+		write(dir.getChild("child.test.txt"), TestInheritedZones.child(6, "_dmarc\tIN\tTXT\t\"v=DMARC1; p=none; rua=mailto:reports@elsewhere.example!10m\"\n"));
 		server.loadZones();
 		assertEquals(NXDOMAIN, ask("child.test._report._dmarc.primary.test", DNS.TXT).getResponseCode(), "its reports go elsewhere");
 		assertEquals("v=DMARC1", txt(ask("mail.example._report._dmarc.primary.test", DNS.TXT)), "the shared zone's still come here");
 
 		// ruf= counts too, with a size limit and in capitals
-		write(new File(dir, "child.test.txt"), TestInheritedZones.child(7, "_dmarc\tIN\tTXT\t\"v=DMARC1; p=none; ruf=MAILTO:Fail@Primary.Test!5m\"\n"));
+		write(dir.getChild("child.test.txt"), TestInheritedZones.child(7, "_dmarc\tIN\tTXT\t\"v=DMARC1; p=none; ruf=MAILTO:Fail@Primary.Test!5m\"\n"));
 		server.loadZones();
 		assertEquals("v=DMARC1", txt(ask("child.test._report._dmarc.primary.test", DNS.TXT)));
 
 		// a shared zone with no rua or ruf authorizes nothing
-		write(new File(dir, "shared.zone"), TestInheritedZones.primary(11, DKIM));
+		write(dir.getChild("shared.zone"), TestInheritedZones.primary(11, DKIM));
 		server.loadZones();
 		assertEquals(NXDOMAIN, ask("mail.example._report._dmarc.primary.test", DNS.TXT).getResponseCode());
 	}
@@ -275,12 +275,12 @@ public class TestListedDomains {
 		a.setAddress("10.2.0.1");
 		a.setTTL(300);
 		assertEquals(DNS.NOERROR, update("mail.example", a));
-		File file = new File(dir, "mail.example.txt");
+		FileSource file = dir.getChild("mail.example.txt");
 		assertTrue(file.exists(), "the zone file is written");
-		assertTrue(new File(dir, "mail.example.txt.jnl").exists(), "and the change journaled beside it");
+		assertTrue(dir.getChild("mail.example.txt.jnl").exists(), "and the change journaled beside it");
 		assertEquals("[special.mail.example A 10.2.0.1]", answers(ask("special.mail.example", DNS.A)).toString());
 		assertEquals("[mail.example MX 10 mx1.mail.example.]", answers(ask("mail.example", DNS.MX)).toString());
-		assertTrue(new String(Files.readAllBytes(file.toPath()), java.nio.charset.StandardCharsets.UTF_8).contains("$INHERIT\n"));
+		assertTrue(new String(TestFiles.bytes(file), java.nio.charset.StandardCharsets.UTF_8).contains("$INHERIT\n"));
 
 		// read back from the file: the same zone, now with a file
 		assertTrue(server.shouldReloadZones());

@@ -25,26 +25,28 @@ package us.bringardner.parley.dns.server;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.Writer;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.Utility;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Offline tests for the TCP connection handling: idle clients must not
@@ -53,16 +55,19 @@ import us.bringardner.parley.dns.Utility;
  */
 public class TestTcpConnections {
 
-	private static File dir;
+	@TempDir
+	static Path tmp;
+
+	private static FileSource dir;
 	private static DnsServer server;
 	//  ms each request is held up for (a slow recursion, UPDATE...)
 	private static volatile long slowRequest = 0;
 
 	@BeforeAll
 	public static void setup() throws IOException {
-		dir = Files.createTempDirectory("tcpconn").toFile();
-		File zone = new File(dir,"tcp.test.txt");
-		try(FileWriter w = new FileWriter(zone)) {
+		dir = TestFiles.newFolder(tmp, "tcpconn");
+		FileSource zone = dir.getChild("tcp.test.txt");
+		try(Writer w = TestFiles.writer(zone)) {
 			w.write("@\tIN\tSOA\tns1.tcp.test. postmaster.tcp.test. (\n"
 					+"\t\t\t1 ; serial\n\t\t\t3600 ; refresh\n\t\t\t1800 ; retry\n"
 					+"\t\t\t1209600 ; expire\n\t\t\t300 ) ; minimum\n\n"
@@ -91,10 +96,6 @@ public class TestTcpConnections {
 
 	@AfterAll
 	public static void cleanup() {
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	/** A running TCP listener with the given limits; close() stops it. */

@@ -3,9 +3,15 @@ package us.bringardner.parley.dns.server;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.Writer;
+import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import us.bringardner.parley.dns.TestFiles;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Round 5 #87 (and round 4 #60): zone reloads, dynamic records and re-signing
@@ -15,6 +21,9 @@ import org.junit.jupiter.api.Test;
  * They now run on their own thread, each step guarded.
  */
 public class TestMaintenance {
+
+	@TempDir
+	static Path tmp;
 
 	@Test
 	public void aFailingStepDoesntStopTheOthers() {
@@ -43,8 +52,8 @@ public class TestMaintenance {
 	@Test
 	public void maintenanceRunsWhileTheServerRuns() throws Exception {
 		AtomicInteger rounds = new AtomicInteger();
-		java.io.File dir = java.nio.file.Files.createTempDirectory("maint").toFile();
-		try(java.io.FileWriter w = new java.io.FileWriter(new java.io.File(dir, "m.test.txt"))) {
+		FileSource dir = TestFiles.newFolder(tmp, "maint");
+		try(Writer w = TestFiles.writer(dir.getChild("m.test.txt"))) {
 			w.write("@ IN SOA ns1.m.test. postmaster.m.test. ( 1 3600 1800 1209600 300 )\n\tNS ns1\nns1 IN A 10.0.0.53\n");
 		}
 		java.util.Properties saved = (java.util.Properties) System.getProperties().clone();
@@ -81,10 +90,6 @@ public class TestMaintenance {
 			s.stopAndWait(5000);
 			DnsServer.setShutdown(false);
 			System.setProperties(saved);
-			for(java.io.File f : dir.listFiles()) {
-				f.delete();
-			}
-			dir.delete();
 		}
 	}
 }

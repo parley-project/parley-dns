@@ -28,16 +28,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -45,12 +44,15 @@ import java.util.List;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.Tsig;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * TSIG in the server: signed queries over UDP and TCP, TSIG errors,
@@ -58,10 +60,13 @@ import us.bringardner.parley.dns.Tsig;
  */
 public class TestTsigServer {
 
+	@TempDir
+	static Path tmp;
+
 	private static final InetAddress LOOPBACK = InetAddress.getLoopbackAddress();
 	private static final String SECRET = Base64.getEncoder().encodeToString("0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.US_ASCII));
 	private static final Tsig.KeyRing KEYS = Tsig.KeyRing.parse("xfr:hmac-sha256:"+SECRET+" other:hmac-sha256:"+SECRET);
-	private static File dir;
+	private static FileSource dir;
 	private static DnsServer server;
 	private static int port;
 	private static Thread udp;
@@ -69,9 +74,9 @@ public class TestTsigServer {
 
 	@BeforeAll
 	public static void start() throws Exception {
-		dir = Files.createTempDirectory("tsig").toFile();
-		File zone = new File(dir,"tsig.test.txt");
-		try(FileWriter w = new FileWriter(zone)) {
+		dir = TestFiles.newFolder(tmp, "tsig");
+		FileSource zone = dir.getChild("tsig.test.txt");
+		try(Writer w = TestFiles.writer(zone)) {
 			w.write("$TTL 300\n@\tIN\tSOA\tns1 postmaster ( 3 3600 1800 1209600 300 )\n\t\tNS\tns1\n"
 					+"ns1\tIN\tA\t10.0.0.53\nwww\tIN\tA\t10.0.0.80\n");
 			for(int i=0; i < 2000; i++ ) {
@@ -112,10 +117,6 @@ public class TestTsigServer {
 		TCPProsessor.getServerSocket().close();
 		udp.join(3000);
 		tcp.join(3000);
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	private static byte [] query(String name, int type, int id) {

@@ -26,16 +26,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
-import java.net.InetAddress;
-import java.nio.file.Files;
-import java.sql.SQLException;
+import java.io.Writer;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import us.bringardner.parley.dns.TestFiles;
+import us.bringardner.parley.files.FileSource;
 
 
 /**
@@ -45,11 +46,14 @@ import org.junit.jupiter.api.Test;
  */
 public class TestServerConfig {
 
+	@TempDir
+	static Path tmp;
+
 	/** Properties every test needs; tests add their own on top. */
-	private static Map<String,String> base(File dir) {
+	private static Map<String,String> base(FileSource dir) throws Exception {
 		Map<String,String> p = new HashMap<String,String>();
 		p.put(DnsServer.PROP_DNS_DIR, dir.getAbsolutePath());
-		p.put(DnsServer.PROP_ZONE_DIR, new File(dir,"zones").getAbsolutePath());
+		p.put(DnsServer.PROP_ZONE_DIR, dir.getChild("zones").getAbsolutePath());
 		p.put(DnsServer.PROP_DEFAULT_ZONE, "cfg.test");
 		p.put(DnsServer.PROP_PORT, "0");
 		p.put(DnsServer.PROP_UDP_PROC_COUNT, "1");
@@ -64,10 +68,10 @@ public class TestServerConfig {
 	}
 
 	private static void withServer(Map<String,String> extra, Body body) throws Exception {
-		File dir = Files.createTempDirectory("cfg").toFile();
-		File zones = new File(dir,"zones");
+		FileSource dir = TestFiles.newFolder(tmp, "cfg");
+		FileSource zones = dir.getChild("zones");
 		zones.mkdirs();
-		try(FileWriter w = new FileWriter(new File(zones,"cfg.test.txt"))) {
+		try(Writer w = TestFiles.writer(zones.getChild("cfg.test.txt"))) {
 			w.write("@\tIN\tSOA\tns1.cfg.test. postmaster.cfg.test. (\n"
 					+"\t\t\t1 ; serial\n\t\t\t3600 ; refresh\n\t\t\t1800 ; retry\n"
 					+"\t\t\t1209600 ; expire\n\t\t\t300 ) ; minimum\n\n"
@@ -104,11 +108,7 @@ public class TestServerConfig {
 					System.setProperty(e.getKey(), e.getValue());
 				}
 			}
-			for(File f : zones.listFiles()) {
-				f.delete();
-			}
-			zones.delete();
-			for(File f : dir.listFiles()) {
+			for(FileSource f : dir.listFiles()) {
 				f.delete();
 			}
 			dir.delete();

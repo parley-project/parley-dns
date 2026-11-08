@@ -6,12 +6,11 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -19,13 +18,16 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.resolve.QueryData;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * $INHERIT: a domain's zone serves the shared zone's records too (parley.dns.sharedZone, read under
@@ -33,8 +35,11 @@ import us.bringardner.parley.dns.resolve.QueryData;
  */
 public class TestInheritedZones {
 
+	@TempDir
+	static Path tmp;
+
 	private static final InetAddress LOOPBACK = InetAddress.getLoopbackAddress();
-	private File dir;
+	private FileSource dir;
 	private DnsServer server;
 	private String savedDir;
 	private String savedDefault;
@@ -67,7 +72,7 @@ public class TestInheritedZones {
 
 	@BeforeEach
 	public void setup() throws Exception {
-		dir = Files.createTempDirectory("inherit").toFile();
+		dir = TestFiles.newFolder(tmp, "inherit");
 		write("primary.test.txt", primary(10, ""));
 		write("child.test.txt", child(5, ""));
 		//  (not *.txt: that would be a zone of its own)
@@ -77,7 +82,7 @@ public class TestInheritedZones {
 		savedShared = System.getProperty(DnsServer.PROP_SHARED_ZONE);
 		System.setProperty(DnsServer.PROP_ZONE_DIR, dir.getAbsolutePath());
 		System.setProperty(DnsServer.PROP_DEFAULT_ZONE, "primary.test");
-		System.setProperty(DnsServer.PROP_SHARED_ZONE, new File(dir, "shared.zone").getAbsolutePath());
+		System.setProperty(DnsServer.PROP_SHARED_ZONE, dir.getChild("shared.zone").getAbsolutePath());
 		server = new DnsServer();
 		server.loadZones();
 		server.setRecursionAvailable(false);
@@ -93,10 +98,6 @@ public class TestInheritedZones {
 		if( n != null ) {
 			n.shutdown();
 		}
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	private static void restore(String key, String value) {
@@ -108,9 +109,9 @@ public class TestInheritedZones {
 	}
 
 	private void write(String name, String text) throws IOException {
-		File f = new File(dir, name);
+		FileSource f = dir.getChild(name);
 		long before = f.exists() ? f.lastModified() : 0;
-		try(FileWriter w = new FileWriter(f)) {
+		try(Writer w = TestFiles.writer(f)) {
 			w.write(text);
 		}
 		//  a reload notices the change by its time stamp
@@ -229,7 +230,7 @@ public class TestInheritedZones {
 		assertTrue(z.isInherited());
 		assertEquals(6, z.getOwn().getSoa().getSerial());
 		assertEquals(16, z.getSoa().getSerial());
-		String jnl = new String(Files.readAllBytes(new File(dir, "child.test.txt.jnl").toPath()), StandardCharsets.UTF_8);
+		String jnl = new String(TestFiles.bytes(dir.getChild("child.test.txt.jnl")), StandardCharsets.UTF_8);
 		assertTrue(jnl.contains("base 5\n"), jnl);
 		assertFalse(jnl.contains("10.0.0."), "only the own change is journaled: "+jnl);
 
@@ -316,7 +317,7 @@ public class TestInheritedZones {
 	@Test
 	public void withoutItsSharedZoneTheLastVersionIsKept() throws Exception {
 		assertEquals(15, server.getZone("child.test").getSoa().getSerial());
-		new File(dir, "shared.zone").delete();
+		dir.getChild("shared.zone").delete();
 		server.loadZones();
 		assertTrue(String.join("\n", server.getZoneErrors()).contains("shared.zone"), server.getZoneErrors().toString());
 		Zone z = server.getZone("child.test");
@@ -340,8 +341,8 @@ public class TestInheritedZones {
 		Zone named = zone("named.test", "$INHERIT primary.test.\n"+soa);
 		assertEquals(Zone.SHARED, named.getInheritFrom(), "the name is ignored");
 		assertTrue(named.getLoadWarnings().get(0).contains("line 1"), named.getLoadWarnings().toString());
-		File inc = new File(dir, "inherit.inc");
-		try(FileWriter w = new FileWriter(inc)) {
+		FileSource inc = dir.getChild("inherit.inc");
+		try(Writer w = TestFiles.writer(inc)) {
 			w.write("$INHERIT\n");
 		}
 		assertThrows(IOException.class, () -> zone("inc.test", soa+"$INCLUDE inherit.inc\n"));
@@ -349,8 +350,8 @@ public class TestInheritedZones {
 	}
 
 	private Zone zone(String name, String text) throws IOException {
-		File f = new File(dir, name+".zone");
-		try(FileWriter w = new FileWriter(f)) {
+		FileSource f = dir.getChild(name+".zone");
+		try(Writer w = TestFiles.writer(f)) {
 			w.write(text);
 		}
 		try {

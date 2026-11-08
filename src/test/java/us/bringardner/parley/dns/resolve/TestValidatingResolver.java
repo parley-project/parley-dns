@@ -29,11 +29,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.ServerSocket;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Collections;
 import java.util.Iterator;
 
@@ -41,6 +40,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
@@ -49,10 +49,12 @@ import us.bringardner.parley.dns.Edns;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Section;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.dnssec.DnssecKey;
 import us.bringardner.parley.dns.server.DnsServer;
 import us.bringardner.parley.dns.server.TCPProsessor;
 import us.bringardner.parley.dns.server.UDPProsessor;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * The resolver with validation on, over the network: it asks an
@@ -61,13 +63,16 @@ import us.bringardner.parley.dns.server.UDPProsessor;
  */
 public class TestValidatingResolver {
 
-	private static File dir;
+	@TempDir
+	static Path tmp;
+
+	private static FileSource dir;
 	private static int port;
 	private static DnssecKey anchor;
 
 	@BeforeAll
 	public static void start() throws Exception {
-		dir = Files.createTempDirectory("vresolver").toFile();
+		dir = TestFiles.newFolder(tmp, "vresolver");
 		DnsServer auth = new DnsServer();
 		anchor = TestValidator.hierarchy(dir, auth);
 		for(int i=0; ; i++ ) {
@@ -103,10 +108,6 @@ public class TestValidatingResolver {
 		Resolver.getCache().clear();
 		UDPProsessor.getSock().close();
 		TCPProsessor.getServerSocket().close();
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	@BeforeEach

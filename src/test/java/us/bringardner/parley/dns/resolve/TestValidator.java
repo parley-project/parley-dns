@@ -26,11 +26,10 @@ package us.bringardner.parley.dns.resolve;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.InetAddress;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -40,6 +39,7 @@ import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.ByteBuffer;
@@ -48,11 +48,13 @@ import us.bringardner.parley.dns.Ds;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Section;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.dnssec.Algorithm;
 import us.bringardner.parley.dns.dnssec.DnssecKey;
 import us.bringardner.parley.dns.dnssec.Nsec3Params;
 import us.bringardner.parley.dns.server.DnsServer;
 import us.bringardner.parley.dns.server.Zone;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * The validator against a small signed hierarchy served in process: test.
@@ -61,9 +63,12 @@ import us.bringardner.parley.dns.server.Zone;
  */
 public class TestValidator {
 
+	@TempDir
+	static Path tmp;
+
 	private static final InetAddress LOOPBACK = InetAddress.getLoopbackAddress();
 
-	private File dir;
+	private FileSource dir;
 	private DnsServer server;
 	private DnssecKey anchorKey;
 	private final AtomicLong now = new AtomicLong(System.currentTimeMillis()/1000);
@@ -71,20 +76,20 @@ public class TestValidator {
 	//  Changes answers on their way to the validator (an attacker)
 	private volatile UnaryOperator<Message> tamper = UnaryOperator.identity();
 
-	private static void zone(File dir, String name, String text) throws IOException {
-		try(FileWriter w = new FileWriter(new File(dir, name+".txt"))) {
+	private static void zone(FileSource dir, String name, String text) throws IOException {
+		try(Writer w = TestFiles.writer(dir.getChild(name+".txt"))) {
 			w.write("$TTL 3600\n@ IN SOA ns1."+name+". h ( 1 3600 900 1209600 300 )\n NS ns1."+name+".\n"+text);
 		}
 	}
 
-	private static DnssecKey key(File dir, String zone) throws Exception {
+	private static DnssecKey key(FileSource dir, String zone) throws Exception {
 		DnssecKey k = DnssecKey.generate(zone, Algorithm.of(Algorithm.ECDSAP256SHA256), true, 0);
-		k.save(us.bringardner.parley.files.FileSource.of(dir));
+		k.save(dir);
 		return k;
 	}
 
 	/** A server for the hierarchy (keys and zone files in dir). @return the trust anchor key of test. */
-	static DnssecKey hierarchy(File dir, DnsServer server) throws Exception {
+	static DnssecKey hierarchy(FileSource dir, DnsServer server) throws Exception {
 		DnssecKey anchor = key(dir, "test");
 		DnssecKey sec = key(dir, "sec.test");
 		DnssecKey n3 = key(dir, "n3.test");
@@ -102,27 +107,23 @@ public class TestValidator {
 		zone(dir, "insecure.test", "ns1 A 10.0.0.4\nwww A 10.0.2.80\nssh SSHFP 4 2 "+TestSshfp.ED25519_SHA256+"\n");
 		zone(dir, "bogus.test", "ns1 A 10.0.0.5\nwww A 10.0.3.80\n");
 		server.setRecursionAvailable(false);
-		server.setDnssecKeyDir(us.bringardner.parley.files.FileSource.of(dir));
+		server.setDnssecKeyDir(dir);
 		server.setDnssecNsec3("n3.test", Nsec3Params.DEFAULT);
 		for(String z : new String[] {"test", "sec.test", "n3.test", "insecure.test", "bogus.test"}) {
-			server.addZone(new Zone(new File(dir, z+".txt")));
+			server.addZone(new Zone(dir.getChild(z+".txt")));
 		}
 		return anchor;
 	}
 
 	@BeforeEach
 	public void setup() throws Exception {
-		dir = Files.createTempDirectory("validator").toFile();
+		dir = TestFiles.newFolder(tmp, "validator");
 		server = new DnsServer();
 		anchorKey = hierarchy(dir, server);
 	}
 
 	@AfterEach
 	public void cleanup() {
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	/** Ask the server with DO, as the resolver does. */
@@ -303,10 +304,10 @@ public class TestValidator {
 	@Test
 	public void unsupportedAlgorithmIsInsecure() throws Exception {
 		//  A DS with an algorithm we don't know (RFC 4035 5.2)
-		File f = new File(dir, "test.txt");
-		String text = new String(Files.readAllBytes(f.toPath()), "UTF-8")
+		FileSource f = dir.getChild("test.txt");
+		String text = new String(TestFiles.bytes(f), "UTF-8")
 				.replaceAll("sec DS (\\d+) 13 ", "sec DS $1 253 ");
-		Files.write(f.toPath(), text.getBytes("UTF-8"));
+		TestFiles.writeBytes(f, text.getBytes("UTF-8"));
 		server.addZone(new Zone(f));
 		expect(validator(), Validator.Status.INSECURE, "www.sec.test", DNS.A);
 	}

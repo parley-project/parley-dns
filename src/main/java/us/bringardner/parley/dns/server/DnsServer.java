@@ -25,10 +25,9 @@
  */
 package us.bringardner.parley.dns.server;
 
-import java.io.File;
-import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
@@ -40,7 +39,6 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
-
 
 import us.bringardner.parley.core.util.AddressMatcher;
 import us.bringardner.parley.dns.A;
@@ -63,6 +61,8 @@ import us.bringardner.parley.dns.dnssec.DnssecKey;
 import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.dns.resolve.Resolver;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.files.FileSourceFactory;
+import us.bringardner.parley.files.IRandomAccessStream;
 import us.bringardner.parley.net.server.IDomainList;
 import us.bringardner.parley.net.server.PropertiesDomainList;
 
@@ -101,7 +101,30 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public static final String PROP_TCP_IDLE_TIMEOUT = "parley.dns.tcpIdleTimeout";
 	/** Most TCP connections from one client address (default 8, 0 for no limit). */
 	public static final String PROP_TCP_MAX_CONNECTIONS_PER_CLIENT = "parley.dns.tcpMaxConnectionsPerClient";
+	/**
+	 * The file system of the server's files: a FileSourceFactory type id ({@code sftp},
+	 * {@code jdbc}, {@code memory}...), with its connection settings as
+	 * {@code parley.dns.fileSource.KEY} ({@code parley.dns.fileSource.host}...; a secret as a
+	 * reference, {@code @file:...}, {@code @keychain:...}). Every file setting
+	 * ({@link #PROP_DNS_DIR}, {@link #PROP_ZONE_DIR}, {@link #PROP_SHARED_ZONE},
+	 * {@code parley.dns.domainList.file}, {@link #PROP_TSIG_KEY_FILE}, {@link #PROP_DNSSEC_KEY_DIR},
+	 * {@code parley.dns.dnssecTrustAnchors}, {@code parley.dns.udpDumpFile}) is a path on it, or a
+	 * {@code filesource:} URL (a file system of its own); zone files' {@code $INCLUDE}s, journals
+	 * and the root hints are beside the files that name them. Default: the default file system
+	 * (the local disk). The server makes its own factory from these settings, once.
+	 */
+	public static final String PROP_FILE_SOURCE = "parley.dns.fileSource";
+	/**
+	 * The DNS folder (default {@value #DEFAULT_DNS_DIR}), on the server's file system
+	 * ({@link #PROP_FILE_SOURCE}) or a {@code filesource:} URL: the root hints are in it, and the
+	 * relative paths of {@link #PROP_TSIG_KEY_FILE} and {@code parley.dns.dnssecTrustAnchors} are
+	 * under it.
+	 */
 	public static final String PROP_DNS_DIR = "parley.dns.dnsDir";
+	/**
+	 * The folder of the zone files, &lt;domain&gt;.txt (default {@code zones}, in the working
+	 * directory), on the server's file system ({@link #PROP_FILE_SOURCE}) or a {@code filesource:} URL.
+	 */
 	public static final String PROP_ZONE_DIR = "parley.dns.zoneDir";
 	/** Addresses / networks allowed to transfer zones (AXFR), e.g. "192.0.2.2, 10.0.0.0/8". Default: none. */
 	public static final String PROP_AXFR_ALLOW = "parley.dns.axfrAllow";
@@ -109,7 +132,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public static final String PROP_NOTIFY = "parley.dns.notify";
 	/** TSIG keys (RFC 8945): "name:algorithm:base64secret" entries, e.g. "xfr.example:hmac-sha256:c2VjcmV0..." */
 	public static final String PROP_TSIG_KEYS = "parley.dns.tsigKeys";
-	/** A file of TSIG keys, one "name algorithm base64secret" per line (keeps secrets out of the properties). */
+	/**
+	 * A file of TSIG keys, one "name algorithm base64secret" per line (keeps secrets out of the
+	 * properties); a relative path is under {@link #PROP_DNS_DIR}.
+	 */
 	public static final String PROP_TSIG_KEY_FILE = "parley.dns.tsigKeyFile";
 	/** TSIG keys (names) whose signed requests may transfer zones, from any address. */
 	public static final String PROP_AXFR_KEYS = "parley.dns.axfrKeys";
@@ -147,7 +173,11 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 * ruf=) to an address in the master zone's domain. Default true. See {@link ListedDomains}.
 	 */
 	public static final String PROP_REPORT_AUTHORIZATIONS = "parley.dns.reportAuthorizations";
-	/** Directory of the zones' DNSSEC keys (K&lt;zone&gt;.+alg+tag.key and .private). Default: the zone directory. A zone with keys is signed. */
+	/**
+	 * Directory of the zones' DNSSEC keys (K&lt;zone&gt;.+alg+tag.key and .private), on the
+	 * server's file system ({@link #PROP_FILE_SOURCE}) or a {@code filesource:} URL. Default: the
+	 * zone directory. A zone with keys is signed.
+	 */
 	public static final String PROP_DNSSEC_KEY_DIR = "parley.dns.dnssecKeyDir";
 	/** How long DNSSEC signatures are valid, e.g. 14d (the default); zones are signed again when a quarter of it is left. */
 	public static final String PROP_DNSSEC_VALIDITY = "parley.dns.dnssecValidity";
@@ -191,7 +221,11 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	private Thread thread;	
 
 	//  Directory where all DNS info is stored
-	private File dnsDir;
+	private FileSource dnsDir;
+
+	//  The file system of the server's files (parley.dns.fileSource): made once, see getFileSourceFactory
+	private volatile FileSourceFactory fileSourceFactory;
+	private final Object fileSourceLock = new Object();
 
 	/**
 	 * Immutable snapshot of the zones being served. Queries read one snapshot;
@@ -280,7 +314,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	}	
 	private TCPProsessor [] TCPProcs;
 	private String defaultZoneName;
-	private File zoneDir;
+	private FileSource zoneDir;
 
 
 	/**
@@ -510,7 +544,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		UDPProcs = new UDPProsessor[UDPProcCount];
 		Thread t = null;
 		log("UDP bindAddress = "+udpAddress+":"+udpPort+" timeout="+udpTimeout+" maxResponse="+UDPProsessor.getMaxResponseSize());
-		UDPProsessor.initUDPProsessor(udpPort,udpAddress,udpTimeout,stringProperty(UDPProsessor.PROP_UDP_DUMP_FILE));
+		String dump = stringProperty(UDPProsessor.PROP_UDP_DUMP_FILE);
+		UDPProsessor.initUDPProsessor(udpPort,udpAddress,udpTimeout,dump == null || dump.equals("null") ? null : file(dump));
 
 		for(int i=0; i< UDPProcs.length; i++ ) {
 			UDPProcs[i] = new UDPProsessor(this,i);
@@ -551,7 +586,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 
 		//  the resolver (one per JVM) with this server's settings: its configuration, or the system properties
-		us.bringardner.parley.dns.resolve.Resolver.initResolver(getConfiguration() != null ? getConfiguration() : System.getProperties());
+		us.bringardner.parley.dns.resolve.Resolver.initResolver(settings(), getFileSourceFactory());
 
 
 		log("JDns Server init Complete");
@@ -726,15 +761,12 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	private void initFromProperties() {
 		String tmp = null;
 		try {
+			dnsDir = file(getProperty(PROP_DNS_DIR,DEFAULT_DNS_DIR));
 			Tsig.KeyRing keys = Tsig.KeyRing.parse(stringProperty(PROP_TSIG_KEYS));
 			String keyFile = stringProperty(PROP_TSIG_KEY_FILE);
 			if( keyFile != null ) {
-				File f = new File(keyFile);
-				if( !f.isAbsolute() ) {
-					//  Relative to parley.dns.dnsDir, like the other files
-					f = new File(getProperty(PROP_DNS_DIR,DEFAULT_DNS_DIR), keyFile);
-				}
-				keys = keys.with(Tsig.KeyRing.load(f));
+				//  Relative to parley.dns.dnsDir, like the other files
+				keys = keys.with(Tsig.KeyRing.load(DnsFiles.resolve(getFileSourceFactory(), dnsDir, keyFile)));
 			}
 			setTsigKeys(keys);
 			setTsigFudge(durationSecondsProperty(PROP_TSIG_FUDGE, Tsig.DEFAULT_FUDGE));
@@ -744,7 +776,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			setAxfrAllow(stringProperty(PROP_AXFR_ALLOW));
 			notifyKeyName = stringProperty(PROP_NOTIFY_KEY);
 			String kd = stringProperty(PROP_DNSSEC_KEY_DIR);
-			setDnssecKeyDir(kd == null ? null : FileSource.of(kd));
+			setDnssecKeyDir(kd == null ? null : file(kd));
 			setDnssecValidity(durationSecondsProperty(PROP_DNSSEC_VALIDITY, dnssecValidity));
 			setDnssecNsec3(stringProperty(PROP_DNSSEC_NSEC3),
 					us.bringardner.parley.dns.dnssec.Nsec3Params.parse(intProperty(PROP_DNSSEC_NSEC3_ITERATIONS, 0),
@@ -763,7 +795,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			recursionAvailable = tmp.toLowerCase().equals("true");
 		}
 
-		dnsDir=new File(getProperty(PROP_DNS_DIR,DEFAULT_DNS_DIR));
 
 		if( (tmp=getProperty(PROP_UDP_PROC_COUNT)) != null)  {
 			try { UDPProcCount =Integer.parseInt(tmp.trim()); } catch(Exception ex) {
@@ -807,26 +838,59 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 
 
-	private File [] getZoneFiles() {
-		File [] ret = 	zoneDir.listFiles(new FilenameFilter() {
-			@Override
-			public boolean accept(File dir, String name) {
-				return name.endsWith(".txt") && !name.startsWith(".");
+	/** The settings: the server's own configuration, or the system properties. */
+	private Properties settings() {
+		return getConfiguration() != null ? getConfiguration() : System.getProperties();
+	}
+
+	/**
+	 * The file system of the server's files ({@link #PROP_FILE_SOURCE}): made, and connected, the
+	 * first time it is needed, from the settings then; the default file system when the setting
+	 * isn't set.
+	 *
+	 * @throws IOException if there is no such file system or it can't connect (tried again next time)
+	 */
+	public FileSourceFactory getFileSourceFactory() throws IOException {
+		FileSourceFactory ret = fileSourceFactory;
+		if( ret == null ) {
+			synchronized(fileSourceLock) {
+				ret = fileSourceFactory;
+				if( ret == null ) {
+					ret = DnsFiles.factory(getProperty(PROP_FILE_SOURCE), settings());
+					fileSourceFactory = ret;
+				}
 			}
-		});
-
-
+		}
 		return ret;
+	}
+
+	/** The file a setting names: a filesource: URL (its own file system) or a path on the server's. */
+	private FileSource file(String value) throws IOException {
+		return getFileSourceFactory().resolve(value);
+	}
+
+	/** The zone files in zoneDir (*.txt, not hidden); null if there is no such folder. */
+	private FileSource [] getZoneFiles() throws IOException {
+		if( !zoneDir.isDirectory() ) {
+			return null;
+		}
+		return zoneDir.listFiles(f -> f.getName().endsWith(".txt") && !f.getName().startsWith("."));
 	}
 
 	/** Zone file name -> stamp (see zoneStamp) for the zone files in zoneDir now. */
 	private Map<String, Long> currentZoneFiles() {
 		Map<String, Long> ret = new HashMap<String, Long>();
-		File [] list = zoneDir == null ? null : getZoneFiles();
+		FileSource [] list;
+		try {
+			list = zoneDir == null ? null : getZoneFiles();
+		} catch(IOException e) {
+			//  (as no files: the reload this makes says why)
+			list = null;
+		}
 		if( list != null ) {
 			ZoneSet cur = zoneSet;
-			for(File f : list) {
-				ret.put(f.getName(), zoneStamp(f.lastModified(), cur.byFile.get(f.getName())));
+			for(FileSource f : list) {
+				ret.put(f.getName(), zoneStamp(DnsFiles.lastModified(f), cur.byFile.get(f.getName())));
 			}
 		}
 		return ret;
@@ -839,8 +903,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	static long zoneStamp(long modified, Zone z) {
 		long ret = modified;
 		if( z != null ) {
-			for(File inc : z.getIncludedFiles()) {
-				ret = ret*31 + inc.lastModified();
+			for(FileSource inc : z.getIncludedFiles()) {
+				ret = ret*31 + DnsFiles.lastModified(inc);
 			}
 		}
 		return ret;
@@ -872,7 +936,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	synchronized void loadZones() throws IOException {
 		String dirName = getProperty(PROP_ZONE_DIR,"zones");
 		log("Loading zonez "+PROP_ZONE_DIR+"= "+dirName);
-		zoneDir = new File(dirName).getCanonicalFile();
+		zoneDir = file(dirName).getCanonicalFile();
 
 		Map<String, Long> seen = new HashMap<String, Long>();
 		reloadDnssecKeys();
@@ -882,7 +946,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			if( !zoneDir.exists() ) {
 				throw new IOException("The zone folder "+zoneDir+" ("+PROP_ZONE_DIR+") doesn't exist");
 			}
-			File [] list = getZoneFiles(); 
+			FileSource [] list = getZoneFiles();
 			if( list == null || list.length == 0 ) {
 				throw new IOException("No zone file in "+zoneDir+" ("+PROP_ZONE_DIR+"): at least the primary domain's zone, <domain>.txt, is needed (parley.dns.masterZone names the domain)");			
 			}
@@ -897,11 +961,11 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			Map<String, Zone> zones = new HashMap<String, Zone>();
 			Map<String, Zone> byFile = new HashMap<String, Zone>();
 
-			for(File file : list) {
+			for(FileSource file : list) {
 				String fileName = file.getName();
 				//  Read the timestamp before the file so an edit made while we
 				//  read it triggers another reload.
-				long modified = file.lastModified();
+				long modified = DnsFiles.lastModified(file);
 
 				Zone prev = old.byFile.get(fileName);
 				Long prevModified = oldSeen == null ? null : oldSeen.get(fileName);
@@ -1036,8 +1100,18 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		ListedDomains ld = listedDomains;
 		try {
 			if( ld == null || !ld.getSettings().equals(settings) ) {
-				IDomainList list = (IDomainList)Class.forName(c).getDeclaredConstructor().newInstance();
-				list.initialize(k -> getProperty(PROP_DOMAIN_LIST+"."+k, null));
+				IDomainList list;
+				if( c.equals(PropertiesDomainList.class.getName()) ) {
+					//  its file is on the server's file system (initialize would take the default one)
+					if( blank(file) ) {
+						throw new IOException(PropertiesDomainList.class.getSimpleName()+": the setting '"+PropertiesDomainList.FILE+"' (the properties file) is not set");
+					}
+					String key = getProperty(PROP_DOMAIN_LIST+"."+PropertiesDomainList.KEY, null);
+					list = new PropertiesDomainList(file(file), blank(key) ? null : key.trim());
+				} else {
+					list = (IDomainList)Class.forName(c).getDeclaredConstructor().newInstance();
+					list.initialize(k -> getProperty(PROP_DOMAIN_LIST+"."+k, null));
+				}
 				ld = new ListedDomains(list, settings);
 				listedDomains = ld;
 				log(PROP_DOMAIN_LIST+"="+list+": domains "+ld.domains());
@@ -1081,7 +1155,14 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			zoneErrors.remove("shared zone");
 			return null;
 		}
-		File f = new File(name.trim());
+		FileSource f;
+		try {
+			f = file(name);
+		} catch(IOException e) {
+			zoneErrors.put("shared zone", String.valueOf(e.getMessage()));
+			logError(PROP_SHARED_ZONE+": "+e.getMessage());
+			return sharedZone;
+		}
 		SharedZone sz = sharedZone;
 		if( sz == null || !sz.getFile().equals(f) ) {
 			sz = new SharedZone(f);
@@ -1113,7 +1194,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 	/**
 	 * The zones of the listed domains with no zone of their own: each inherits the shared zone and
-	 * has an SOA like its, serial 1, as {@link SharedZoneText#inheritingZone(String, String, File)} gives;
+	 * has an SOA like its, serial 1, as {@link SharedZoneText#inheritingZone(String, String, FileSource)} gives;
 	 * no file is written until one of its records is changed.
 	 */
 	private List<Zone> listedDomainZones(ListedDomains ld, Map<String, Zone> zones) {
@@ -1141,7 +1222,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		}
 		for(String d : missing) {
 			try {
-				Zone v = new Zone(new File(zoneDir, d+".txt"), Zone.inheritingText(d, sz.under(d, zoneDir).getSoa()));
+				Zone v = new Zone(zoneDir.getChild(d+".txt"), Zone.inheritingText(d, sz.under(d, zoneDir).getSoa()));
 				zones.put(d, v);
 				ret.add(v);
 			} catch(IOException | RuntimeException e) {
@@ -1224,24 +1305,42 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 * journaled beside it. From then on it is a zone with a file like any other.
 	 */
 	private void writeZoneFile(Zone own) throws IOException {
-		File file = own.getMasterFile();
+		FileSource file = own.getMasterFile();
 		if( file.exists() ) {
 			return;
 		}
-		File journal = new File(file.getPath()+".jnl");
+		FileSource journal = own.getJournalFile();
 		if( journal.exists() ) {
 			//  It would be replayed into the zone (an earlier zone of this name)
 			throw new IOException("An old journal of the zone is there: "+journal+"; move it away first");
 		}
-		File tmp = File.createTempFile("."+file.getName(), ".tmp", file.getParentFile());
+		FileSource dir = file.getParentFile();
+		FileSourceFactory factory = dir.getFileSourceFactory();
+		FileSource tmp = factory.createTempFile("."+file.getName(), ".tmp", dir);
 		try {
-			java.nio.file.Files.write(tmp.toPath(), own.getVirtualText().getBytes(java.nio.charset.StandardCharsets.UTF_8));
-			//  A link appears whole and fails if the file is there by now
-			java.nio.file.Files.createLink(file.toPath(), tmp.toPath());
-		} catch(java.nio.file.FileAlreadyExistsException e) {
-			//  written meanwhile
+			try(OutputStream out = tmp.getOutputStream()) {
+				out.write(own.getVirtualText().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			}
+			//  A link appears whole and fails if the file is there by now (a file system that
+			//  can't make links says so: there is no other way to write it whole)
+			try {
+				factory.createLink(file, tmp);
+			} catch(IOException e) {
+				if( !file.exists() ) {
+					throw e;
+				}
+				//  written meanwhile
+			}
+			if( !file.exists() ) {
+				//  (a factory may return without linking files it doesn't know)
+				throw new IOException("Can't write the zone file "+file+": the file system made no link to "+tmp);
+			}
 		} finally {
-			tmp.delete();
+			try {
+				tmp.delete();
+			} catch(IOException e) {
+				logError("Can't delete "+tmp, e);
+			}
 		}
 		log("Wrote the zone file of the listed domain "+own.getName()+": "+file);
 	}
@@ -2378,14 +2477,14 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 * replay; a failed write is cut off again.
 	 */
 	private void writeJournal(Zone zone, List<String> lines, String why) throws IOException {
-		File jnl = zone.getJournalFile();
+		FileSource jnl = zone.getJournalFile();
 		if( jnl == null ) {
 			//  A zone that was not loaded from a file (only kept in memory)
 			return;
 		}
-		try(java.nio.channels.FileChannel ch = java.nio.channels.FileChannel.open(jnl.toPath(),
-				java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE)) {
-			long start = ch.size();
+		//  ("rw" makes the file if it isn't there)
+		try(IRandomAccessStream ch = jnl.getRandomAccessStream("rw")) {
+			long start = ch.length();
 			StringBuilder b = new StringBuilder();
 			if( start == 0 ) {
 				b.append("; Dynamic updates of ").append(zone.getName()).append(" (RFC 2136), applied on top of ")
@@ -2398,18 +2497,16 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				b.append(l).append('\n');
 			}
 			b.append("end\n");
-			java.nio.ByteBuffer data = java.nio.ByteBuffer.wrap(b.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			byte [] data = b.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
 			try {
-				ch.position(start);
-				while( data.hasRemaining() ) {
-					ch.write(data);
-				}
-				ch.force(true);
+				ch.seek(start);
+				ch.write(data);
+				ch.sync();
 			} catch(IOException | RuntimeException ex) {
 				//  no half update left at the end of the journal
 				try {
-					ch.truncate(start);
-					ch.force(true);
+					ch.setLength(start);
+					ch.sync();
 				} catch(IOException ignore) {
 				}
 				throw ex;
@@ -2453,7 +2550,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	}
 
 	/** The folder of the zone files, once they are loaded */
-	public File getZoneDirectory() {
+	public FileSource getZoneDirectory() {
 		return zoneDir;
 	}
 
@@ -2705,7 +2802,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	/** The directory the DNSSEC keys are read from (null if there is none yet). */
 	public FileSource getDnssecKeyDir() {
 		FileSource d = dnssecKeyDir;
-		return d != null ? d : zoneDir == null ? null : FileSource.of(zoneDir);
+		return d != null ? d : zoneDir;
+
 	}
 
 	/** How long signatures are valid, in seconds (at least an hour). */

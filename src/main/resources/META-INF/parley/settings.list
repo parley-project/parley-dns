@@ -25,6 +25,10 @@ parley.dns.dnssecValidity
 parley.dns.domainList
 parley.dns.ednsUdpSize
 parley.dns.exitOnFatalError
+# the server's file system (a factory type id) and its connection settings
+parley.dns.fileSource
+parley.dns.fileSource.**
+
 parley.dns.masterZone
 parley.dns.maxCacheAge
 parley.dns.maxCacheEntries

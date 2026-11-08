@@ -3,9 +3,8 @@ package us.bringardner.parley.dns.resolve;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
 import java.net.InetAddress;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -13,6 +12,7 @@ import java.util.function.UnaryOperator;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
@@ -21,8 +21,10 @@ import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Rrsig;
 import us.bringardner.parley.dns.Section;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.dnssec.DnssecKey;
 import us.bringardner.parley.dns.server.DnsServer;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Round 5 #76 (KeyTrap, CVE-2023-50387): a validation may make at most
@@ -33,6 +35,9 @@ import us.bringardner.parley.dns.server.DnsServer;
  */
 public class TestValidatorLimits {
 
+	@TempDir
+	static Path tmp;
+
 	private static final InetAddress LOOPBACK = InetAddress.getLoopbackAddress();
 	private final AtomicLong now = new AtomicLong(System.currentTimeMillis()/1000);
 	private volatile UnaryOperator<Message> tamper = UnaryOperator.identity();
@@ -41,7 +46,7 @@ public class TestValidatorLimits {
 
 	@BeforeEach
 	public void setup() throws Exception {
-		File dir = Files.createTempDirectory("vlimits").toFile();
+		FileSource dir = TestFiles.newFolder(tmp, "vlimits");
 		server = new DnsServer();
 		anchorKey = TestValidator.hierarchy(dir, server);
 		tamper = UnaryOperator.identity();

@@ -27,22 +27,24 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.InetAddress;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.dns.resolve.ResolverThread;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Offline tests: a query for a name we are not authoritative for, that we
@@ -51,15 +53,18 @@ import us.bringardner.parley.dns.resolve.ResolverThread;
  */
 public class TestRefusedForOtherNames {
 
-	private static File dir;
+	@TempDir
+	static Path tmp;
+
+	private static FileSource dir;
 	private static DnsServer server;
 	private static String savedZoneDir;
 	private static String savedMaster;
 
 	@BeforeAll
 	public static void setup() throws IOException {
-		dir = Files.createTempDirectory("refused").toFile();
-		try(FileWriter w = new FileWriter(new File(dir,"own.test.txt"))) {
+		dir = TestFiles.newFolder(tmp, "refused");
+		try(Writer w = TestFiles.writer(dir.getChild("own.test.txt"))) {
 			w.write("@\tIN\tSOA\tns1.own.test. postmaster.own.test. (\n"
 					+"\t\t\t1 ; serial\n\t\t\t3600 ; refresh\n\t\t\t1800 ; retry\n"
 					+"\t\t\t1209600 ; expire\n\t\t\t300 ) ; minimum\n\n"
@@ -79,10 +84,6 @@ public class TestRefusedForOtherNames {
 	public static void cleanup() {
 		restore(DnsServer.PROP_ZONE_DIR, savedZoneDir);
 		restore(DnsServer.PROP_DEFAULT_ZONE, savedMaster);
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	private static void restore(String k, String v) {

@@ -25,22 +25,24 @@ package us.bringardner.parley.dns.server;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.InetAddress;
-import java.nio.file.Files;
+import java.nio.file.Path;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Soa;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.resolve.QueryData;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Offline tests for authoritative answers: NXDOMAIN vs NODATA vs positive
@@ -48,14 +50,17 @@ import us.bringardner.parley.dns.resolve.QueryData;
  */
 public class TestAuthoritativeAnswers {
 
-	private static File dir;
+	@TempDir
+	static Path tmp;
+
+	private static FileSource dir;
 	private static DnsServer server;
 
 	@BeforeAll
 	public static void setup() throws IOException {
-		dir = Files.createTempDirectory("auth").toFile();
-		File zone = new File(dir,"auth.test.txt");
-		try(FileWriter w = new FileWriter(zone)) {
+		dir = TestFiles.newFolder(tmp, "auth");
+		FileSource zone = dir.getChild("auth.test.txt");
+		try(Writer w = TestFiles.writer(zone)) {
 			w.write("@\tIN\tSOA\tns1.auth.test. postmaster.auth.test. (\n"
 					+"\t\t\t1 ; serial\n\t\t\t3600 ; refresh\n\t\t\t1800 ; retry\n"
 					+"\t\t\t1209600 ; expire\n\t\t\t300 ) ; minimum\n\n"
@@ -77,10 +82,6 @@ public class TestAuthoritativeAnswers {
 
 	@AfterAll
 	public static void cleanup() {
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	/** Ask and return the response as a client would see it (through the wire format). */

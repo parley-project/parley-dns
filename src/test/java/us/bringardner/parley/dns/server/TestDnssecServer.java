@@ -29,12 +29,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -43,6 +42,7 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.ByteBuffer;
@@ -54,10 +54,12 @@ import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.Nsec;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Rrsig;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.dnssec.Algorithm;
 import us.bringardner.parley.dns.dnssec.Canonical;
 import us.bringardner.parley.dns.dnssec.DnssecKey;
 import us.bringardner.parley.dns.resolve.QueryData;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * A signed zone served with DNSSEC (RFC 4033-4035): every answer to a DO
@@ -67,10 +69,13 @@ import us.bringardner.parley.dns.resolve.QueryData;
  */
 public class TestDnssecServer {
 
+	@TempDir
+	static Path tmp;
+
 	private static final InetAddress LOOPBACK = InetAddress.getLoopbackAddress();
 
-	private File dir;
-	private File zoneFile;
+	private FileSource dir;
+	private FileSource zoneFile;
 	private DnsServer server;
 	private DnssecKey ksk;
 	private DnssecKey zsk;
@@ -98,31 +103,27 @@ public class TestDnssecServer {
 
 	@BeforeEach
 	public void setup() throws Exception {
-		dir = Files.createTempDirectory("dnssec").toFile();
+		dir = TestFiles.newFolder(tmp, "dnssec");
 		ksk = DnssecKey.generate("sec.test", Algorithm.of(Algorithm.ECDSAP256SHA256), true, 0);
 		zsk = DnssecKey.generate("sec.test", Algorithm.of(Algorithm.ECDSAP256SHA256), false, 0);
-		ksk.save(us.bringardner.parley.files.FileSource.of(dir));
-		zsk.save(us.bringardner.parley.files.FileSource.of(dir));
+		ksk.save(dir);
+		zsk.save(dir);
 		DnssecKey child = DnssecKey.generate("secure.sec.test", Algorithm.of(Algorithm.ECDSAP256SHA256), true, 0);
 		childDs = child.toDs(Ds.SHA256, 3600).getRdataAsString();
-		zoneFile = new File(dir, "sec.test.txt");
+		zoneFile = dir.getChild("sec.test.txt");
 		write(zoneFile, zoneText(100, childDs));
 		server = new DnsServer();
 		server.setRecursionAvailable(false);
-		server.setDnssecKeyDir(us.bringardner.parley.files.FileSource.of(dir));
+		server.setDnssecKeyDir(dir);
 		server.addZone(new Zone(zoneFile));
 	}
 
 	@AfterEach
 	public void cleanup() {
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
-	private static void write(File f, String text) throws IOException {
-		try(FileWriter w = new FileWriter(f)) {
+	private static void write(FileSource f, String text) throws IOException {
+		try(Writer w = TestFiles.writer(f)) {
 			w.write(text);
 		}
 	}
@@ -513,7 +514,7 @@ public class TestDnssecServer {
 		m = ask("sec.test", DNS.SOA);
 		verify(m, "new SOA signed");
 		//  The journal has the change, not the DNSSEC records
-		String jnl = new String(Files.readAllBytes(new File(dir, "sec.test.txt.jnl").toPath()), StandardCharsets.UTF_8);
+		String jnl = new String(TestFiles.bytes(dir.getChild("sec.test.txt.jnl")), StandardCharsets.UTF_8);
 		assertTrue(jnl.contains("add new.sec.test. 300 IN A 10.7.7.7"), jnl);
 		assertFalse(jnl.contains("NSEC") || jnl.contains("RRSIG"), jnl);
 		//  DNSSEC records can't be changed by an update
@@ -545,7 +546,7 @@ public class TestDnssecServer {
 		SignedZone after = zone().getSigned();
 		assertTrue(after != before);
 		assertEquals(101, zone().getSoa().getSerial(), "secondaries see the change");
-		String jnl = new String(Files.readAllBytes(new File(dir, "sec.test.txt.jnl").toPath()), StandardCharsets.UTF_8);
+		String jnl = new String(TestFiles.bytes(dir.getChild("sec.test.txt.jnl")), StandardCharsets.UTF_8);
 		assertTrue(jnl.contains("base 100\n") && jnl.contains("serial 101\n"), jnl);
 		//  Survives a restart: the journal is replayed
 		assertEquals(101, new Zone(zoneFile).getSoa().getSerial());
@@ -556,8 +557,8 @@ public class TestDnssecServer {
 	public void keysDecideWhatIsSigned() throws Exception {
 		//  A published-only key (no .private) is in the DNSKEY set but signs nothing
 		DnssecKey next = DnssecKey.generate("sec.test", Algorithm.of(Algorithm.ECDSAP256SHA256), false, 0);
-		next.save(us.bringardner.parley.files.FileSource.of(dir));
-		assertTrue(new File(dir, next.baseName()+".private").delete());
+		next.save(dir);
+		assertTrue(dir.getChild(next.baseName()+".private").delete());
 		server.addZone(new Zone(zoneFile));
 		Message m = ask("sec.test", DNS.DNSKEY);
 		assertEquals(3, count(m.getAnswer(), DNS.DNSKEY));
@@ -565,7 +566,7 @@ public class TestDnssecServer {
 		assertEquals(1, count(m.getAnswer(), DNS.RRSIG));
 		assertEquals(zsk.getKeyTag(), ((Rrsig)of(m.getAnswer(), "www.sec.test", DNS.RRSIG).get(0)).getKeyTag());
 		//  Without keys the zone is served unsigned
-		for(File f : dir.listFiles()) {
+		for(FileSource f : dir.listFiles()) {
 			if( f.getName().startsWith("K") ) {
 				assertTrue(f.delete());
 			}
@@ -578,14 +579,14 @@ public class TestDnssecServer {
 
 	@Test
 	public void combinedSigningKeySignsEverything() throws Exception {
-		for(File f : dir.listFiles()) {
+		for(FileSource f : dir.listFiles()) {
 			if( f.getName().startsWith("K") ) {
 				assertTrue(f.delete());
 			}
 		}
 		ksk = DnssecKey.generate("sec.test", Algorithm.of(Algorithm.ECDSAP256SHA256), true, 0);
 		zsk = ksk;
-		ksk.save(us.bringardner.parley.files.FileSource.of(dir));
+		ksk.save(dir);
 		server.addZone(new Zone(zoneFile));
 		Message m = ask("www.sec.test", DNS.A);
 		assertEquals(ksk.getKeyTag(), ((Rrsig)of(m.getAnswer(), "www.sec.test", DNS.RRSIG).get(0)).getKeyTag());
@@ -595,13 +596,13 @@ public class TestDnssecServer {
 
 	@Test
 	public void zoneFilesTakeDsButNotHalfSignedData() throws Exception {
-		File bad = new File(dir, "bad.test.txt");
+		FileSource bad = dir.getChild("bad.test.txt");
 		write(bad, "@\tIN\tSOA\tns1 hostmaster ( 1 3600 900 1209600 300 )\n\tNS\tns1\nns1\tA\t10.0.0.1\n"
 				+"@\tDNSKEY\t257 3 13 AAAA\n");
 		IOException ex = org.junit.jupiter.api.Assertions.assertThrows(IOException.class, () -> new Zone(bad));
 		assertTrue(ex.getMessage().contains("no RRSIG"), ex.getMessage());
 		//  A DS with its digest split in two
-		File ok = new File(dir, "ok.test.txt");
+		FileSource ok = dir.getChild("ok.test.txt");
 		write(ok, "@\tIN\tSOA\tns1 hostmaster ( 1 3600 900 1209600 300 )\n\tNS\tns1\nns1\tA\t10.0.0.1\n"
 				+"sub\tNS\tns1\nsub\tDS\t12345 13 2 ( 0123456789ABCDEF0123456789ABCDEF\n\t0123456789ABCDEF0123456789ABCDEF )\n");
 		Zone z = new Zone(ok);
@@ -611,7 +612,7 @@ public class TestDnssecServer {
 
 	@Test
 	public void unsignedZonesAreUnchanged() throws Exception {
-		File plain = new File(dir, "plain.test.txt");
+		FileSource plain = dir.getChild("plain.test.txt");
 		write(plain, "@\tIN\tSOA\tns1 hostmaster ( 1 3600 900 1209600 300 )\n\tNS\tns1\nns1\tA\t10.0.0.1\n*\tA\t10.0.0.2\n");
 		server.addZone(new Zone(plain));
 		assertNull(server.getZone("plain.test").getSigned());
@@ -629,8 +630,8 @@ public class TestDnssecServer {
 		SignedZone before = zone().getSigned();
 		assertNotNull(before);
 		//  the private keys are gone: nothing can sign
-		new File(dir, ksk.baseName()+".private").delete();
-		new File(dir, zsk.baseName()+".private").delete();
+		dir.getChild(ksk.baseName()+".private").delete();
+		dir.getChild(zsk.baseName()+".private").delete();
 		server.reloadDnssecKeys();
 		assertNotNull(zone().getSigned(), "still signed after the keys changed");
 		verify(ask("www.sec.test", DNS.A), "the previous signatures");
@@ -639,7 +640,7 @@ public class TestDnssecServer {
 		a.setAddress("10.7.7.8");
 		a.setTTL(300);
 		assertEquals(DNS.SERVER_ERROR, update(a));
-		assertFalse(new File(dir, "sec.test.txt.jnl").exists(), "nothing journaled");
+		assertFalse(dir.getChild("sec.test.txt.jnl").exists(), "nothing journaled");
 		assertEquals(0, ask("nosign.sec.test", DNS.A).getAnswerCount());
 		//  nor a re-sign: the signatures already there are served
 		assertEquals(0, server.resignDue(before.refreshAt+1));
@@ -652,6 +653,6 @@ public class TestDnssecServer {
 		verify(ask("www.sec.test", DNS.A), "still the previous signatures");
 		//  an UPDATE to that older version would be journaled against the old serial
 		assertEquals(DNS.SERVER_ERROR, update(a));
-		assertFalse(new File(dir, "sec.test.txt.jnl").exists());
+		assertFalse(dir.getChild("sec.test.txt.jnl").exists());
 	}
 }

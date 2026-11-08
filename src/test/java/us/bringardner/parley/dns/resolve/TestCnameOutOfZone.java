@@ -27,28 +27,30 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.SocketTimeoutException;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.server.DnsServer;
 import us.bringardner.parley.dns.server.UDPProsessor;
 import us.bringardner.parley.dns.server.Zone;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Offline tests: a CNAME in a local zone that points outside our zones.
@@ -58,14 +60,17 @@ import us.bringardner.parley.dns.server.Zone;
  */
 public class TestCnameOutOfZone {
 
-	private static File dir;
+	@TempDir
+	static Path tmp;
+
+	private static FileSource dir;
 	private static Zone zone;
 
 	@BeforeAll
 	public static void setup() throws IOException {
-		dir = Files.createTempDirectory("cnameout").toFile();
-		File f = new File(dir,"out.test.txt");
-		try(FileWriter w = new FileWriter(f)) {
+		dir = TestFiles.newFolder(tmp, "cnameout");
+		FileSource f = dir.getChild("out.test.txt");
+		try(Writer w = TestFiles.writer(f)) {
 			w.write("@\tIN\tSOA\tns1.out.test. postmaster.out.test. (\n"
 					+"\t\t\t1 ; serial\n\t\t\t3600 ; refresh\n\t\t\t1800 ; retry\n"
 					+"\t\t\t1209600 ; expire\n\t\t\t300 ) ; minimum\n\n"
@@ -80,10 +85,6 @@ public class TestCnameOutOfZone {
 
 	@AfterAll
 	public static void cleanup() {
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	private static DnsServer server(boolean recursion) {

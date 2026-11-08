@@ -6,11 +6,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -22,11 +21,18 @@ import javax.management.ObjectName;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import us.bringardner.parley.dns.TestFiles;
+import us.bringardner.parley.files.FileSource;
 
 /** The DNS server's management bean, used as a JMX client would (through an MXBean proxy). */
 public class TestDnsManagement {
 
-	private File dir;
+	@TempDir
+	static Path tmp;
+
+	private FileSource dir;
 	private DnsServer server;
 	private MBeanServer mbeans;
 	private DnsServerMXBean bean;
@@ -36,14 +42,14 @@ public class TestDnsManagement {
 
 	@BeforeEach
 	public void setup() throws Exception {
-		dir = Files.createTempDirectory("dnsjmx").toFile();
+		dir = TestFiles.newFolder(tmp, "dnsjmx");
 		write("primary.test.txt", TestInheritedZones.primary(10, ""));
 		write("child.test.txt", TestInheritedZones.child(5, ""));
 		write("shared.zone", TestInheritedZones.primary(10, ""));
 		savedDir = System.getProperty(DnsServer.PROP_ZONE_DIR);
 		savedDefault = System.getProperty(DnsServer.PROP_DEFAULT_ZONE);
 		savedShared = System.getProperty(DnsServer.PROP_SHARED_ZONE);
-		System.setProperty(DnsServer.PROP_SHARED_ZONE, new File(dir, "shared.zone").getAbsolutePath());
+		System.setProperty(DnsServer.PROP_SHARED_ZONE, dir.getChild("shared.zone").getAbsolutePath());
 		System.setProperty(DnsServer.PROP_ZONE_DIR, dir.getAbsolutePath());
 		System.setProperty(DnsServer.PROP_DEFAULT_ZONE, "primary.test");
 		server = new DnsServer();
@@ -60,10 +66,6 @@ public class TestDnsManagement {
 		restore(DnsServer.PROP_ZONE_DIR, savedDir);
 		restore(DnsServer.PROP_DEFAULT_ZONE, savedDefault);
 		restore(DnsServer.PROP_SHARED_ZONE, savedShared);
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	private static void restore(String key, String value) {
@@ -75,7 +77,7 @@ public class TestDnsManagement {
 	}
 
 	private void write(String name, String text) throws IOException {
-		try(FileWriter w = new FileWriter(new File(dir, name))) {
+		try(Writer w = TestFiles.writer(dir.getChild(name))) {
 			w.write(text);
 		}
 	}
@@ -100,11 +102,11 @@ public class TestDnsManagement {
 	}
 
 	@Test
-	public void zonesAndRecords() {
+	public void zonesAndRecords() throws Exception {
 		assertEquals("STOPPED", bean.getState());
 		assertEquals(0, bean.getStarted());
-		assertEquals(dir.getAbsoluteFile().toPath().normalize().toString(),
-				new File(bean.getZoneDirectory()).toPath().normalize().toString());
+		assertEquals(dir.getCanonicalPath(), FileSource.of(bean.getZoneDirectory()).getCanonicalPath());
+
 		DnsZoneInfo p = zone("primary.test");
 		assertNull(p.getInheritFrom());
 		assertEquals(10, p.getSerial());
@@ -129,14 +131,14 @@ public class TestDnsManagement {
 	public void errorsAreReported() throws Exception {
 		write("broken.test.txt", "@ IN SOA ns1 postmaster ( 1 3600 1800 1209600 300 )\nx IN BOGUS 1\n");
 		write("shared.zone", TestInheritedZones.primary(11, "x IN BOGUS 1\n"));
-		new File(dir, "shared.zone").setLastModified(System.currentTimeMillis()+5000);
+		dir.getChild("shared.zone").setLastModified(System.currentTimeMillis()+5000);
 		bean.reload();
 		String errors = String.join("\n", bean.getErrors());
 		assertTrue(errors.contains("broken.test.txt: "), errors);
 		assertTrue(errors.contains("shared zone: ") && errors.contains("shared.zone"), errors);
-		new File(dir, "broken.test.txt").delete();
+		dir.getChild("broken.test.txt").delete();
 		write("shared.zone", TestInheritedZones.primary(11, ""));
-		new File(dir, "shared.zone").setLastModified(System.currentTimeMillis()+10000);
+		dir.getChild("shared.zone").setLastModified(System.currentTimeMillis()+10000);
 		bean.reload();
 		assertEquals(0, bean.getErrors().length, String.join("\n", bean.getErrors()));
 	}
@@ -144,7 +146,7 @@ public class TestDnsManagement {
 	@Test
 	public void aNewInheritingZoneFileIsServedAfterAReload() throws Exception {
 		// the server writes no zone file: whoever manages them does (SharedZoneText gives the text)
-		String shared = new String(Files.readAllBytes(new File(dir, "shared.zone").toPath()), StandardCharsets.UTF_8);
+		String shared = new String(TestFiles.bytes(dir.getChild("shared.zone")), StandardCharsets.UTF_8);
 		String text = SharedZoneText.inheritingZone("New.Example.", shared, dir);
 		assertTrue(text.contains("$INHERIT\n"), text);
 		write("new.example.txt", text);
@@ -188,7 +190,7 @@ public class TestDnsManagement {
 
 	@Test
 	public void sharedZoneRecords() throws Exception {
-		File f = new File(dir, "shared.zone");
+		FileSource f = dir.getChild("shared.zone");
 		assertEquals(f.getAbsolutePath(), bean.getSharedZoneFile());
 		List<String> recs = shared();
 		assertTrue(recs.get(0).startsWith("@ SOA ") && recs.get(0).contains(" ns1 postmaster 10 3600 1800 1209600 300"), recs.get(0));
@@ -201,7 +203,7 @@ public class TestDnsManagement {
 		//  the file rewritten from its records (as a managing program would), a record added: served
 		//  by the inheriting zone after a reload
 		List<SharedZoneText.Record> list = new ArrayList<SharedZoneText.Record>(
-				SharedZoneText.records(new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8)));
+				SharedZoneText.records(new String(TestFiles.bytes(f), StandardCharsets.UTF_8)));
 		SharedZoneText.Record soa = list.get(0);
 		list.set(0, new SharedZoneText.Record("@", soa.getTtl(), "SOA", soa.getData().replace(" 10 3600", " 11 3600")));
 		list.add(new SharedZoneText.Record("ftp", 600, "A", "10.0.0.21"));
@@ -221,7 +223,7 @@ public class TestDnsManagement {
 		write("shared.zone", TestInheritedZones.primary(11, "$INCLUDE common.inc\n"));
 		bean.reload();
 		assertTrue(shared().contains("ftp A 300 10.0.0.21"), shared().toString());
-		String shared = new String(Files.readAllBytes(new File(dir, "shared.zone").toPath()), StandardCharsets.UTF_8);
+		String shared = new String(TestFiles.bytes(dir.getChild("shared.zone")), StandardCharsets.UTF_8);
 		assertTrue(SharedZoneText.inheritingZone("new.example", shared, dir).contains("$INHERIT"));
 		assertEquals(11, SharedZoneText.check(shared, dir));
 	}

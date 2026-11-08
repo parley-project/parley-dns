@@ -7,16 +7,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileWriter;
 import java.io.PrintStream;
-import java.nio.file.Files;
+import java.io.Writer;
+import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.function.Function;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.core.util.Hex;
 import us.bringardner.parley.dns.ByteBuffer;
@@ -25,11 +25,16 @@ import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Section;
 import us.bringardner.parley.dns.Sshfp;
+import us.bringardner.parley.dns.TestFiles;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Chunk 8: SSHFP records (RFC 4255, 6594) and checking a host key against them.
  */
 public class TestSshfp {
+
+	@TempDir
+	static Path tmp;
 
 	static final String ED25519 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f test@host";
 	static final String ED25519_SHA256 = "66402c9468c58941dd19ffd650bf2b42f9226f83d3bd06ad515d0e5104a77020";
@@ -84,10 +89,10 @@ public class TestSshfp {
 
 	@Test
 	public void inAZoneFile() throws Exception {
-		File dir = Files.createTempDirectory("sshfp").toFile();
-		File zone = new File(dir, "sshfp.test.txt");
+		FileSource dir = TestFiles.newFolder(tmp, "sshfp");
+		FileSource zone = dir.getChild("sshfp.test.txt");
 		try {
-			try(FileWriter w = new FileWriter(zone)) {
+			try(Writer w = TestFiles.writer(zone)) {
 				w.write("@\tIN\tSOA\tns1.sshfp.test. postmaster.sshfp.test. ( 1 3600 1800 1209600 300 )\n"
 						+"\t\tNS\tns1\n"
 						+"ns1\tIN\tA\t10.0.0.53\n"
@@ -205,9 +210,9 @@ public class TestSshfp {
 
 	@Test
 	public void theToolPrintsRecords() throws Exception {
-		File f = File.createTempFile("host", ".pub");
+		FileSource f = TestFiles.newFolder(tmp, "host").getChild("host.pub");
 		try {
-			Files.write(f.toPath(), (ED25519+"\n# comment\n\n"+RSA+"\n").getBytes());
+			TestFiles.writeBytes(f, (ED25519+"\n# comment\n\n"+RSA+"\n").getBytes());
 			ByteArrayOutputStream out = new ByteArrayOutputStream();
 			ByteArrayOutputStream err = new ByteArrayOutputStream();
 			int rc = us.bringardner.parley.dns.util.SshfpToolAccess.run(new String[] {"-sha1", "host.example", f.getPath()},
@@ -218,7 +223,7 @@ public class TestSshfp {
 			assertTrue(text.contains("host.example. IN SSHFP 4 1 "+ED25519_SHA1), text);
 			assertTrue(text.contains("host.example. IN SSHFP 1 2 "+RSA_SHA256), text);
 			assertEquals(2, us.bringardner.parley.dns.util.SshfpToolAccess.run(new String[0], new PrintStream(out), new PrintStream(err)));
-			Files.write(f.toPath(), "garbage line\n".getBytes());
+			TestFiles.writeBytes(f, "garbage line\n".getBytes());
 			assertEquals(1, us.bringardner.parley.dns.util.SshfpToolAccess.run(new String[] {"h", f.getPath()}, new PrintStream(out), new PrintStream(err)));
 		} finally {
 			f.delete();
@@ -279,9 +284,9 @@ public class TestSshfp {
 		PrintStream e = new PrintStream(err);
 		assertEquals(2, us.bringardner.parley.dns.util.SshfpToolAccess.run(new String[] {"-sha256", "h"}, o, e));
 		assertEquals(1, us.bringardner.parley.dns.util.SshfpToolAccess.run(new String[] {"h", "/nonexistent/key.pub"}, o, e));
-		File f = File.createTempFile("host", ".pub");
+		FileSource f = TestFiles.newFolder(tmp, "host").getChild("host.pub");
 		try {
-			Files.write(f.toPath(), (ED25519.replace("test@host", "root@h\u00f6st")+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+			TestFiles.writeBytes(f, (ED25519.replace("test@host", "root@h\u00f6st")+"\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
 			assertEquals(0, us.bringardner.parley.dns.util.SshfpToolAccess.run(new String[] {"h", f.getPath()}, o, e), "a non-ASCII comment");
 		} finally {
 			f.delete();

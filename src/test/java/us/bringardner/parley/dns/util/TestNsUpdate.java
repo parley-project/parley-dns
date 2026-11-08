@@ -30,7 +30,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
-import java.io.File;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.io.StringReader;
@@ -39,25 +38,27 @@ import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
+import us.bringardner.parley.dns.Fixtures;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.Tsig;
 import us.bringardner.parley.dns.server.DnsServer;
 import us.bringardner.parley.dns.server.TCPProsessor;
 import us.bringardner.parley.dns.server.UDPProsessor;
 import us.bringardner.parley.dns.server.Zone;
-import us.bringardner.parley.dns.Fixtures;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * NsUpdate against a DnsServer on the loopback. The expected output and
@@ -67,20 +68,23 @@ import us.bringardner.parley.dns.Fixtures;
  */
 public class TestNsUpdate {
 
-	private static final File FIXTURES = Fixtures.file("TestFiles/nsupdate");
+	@TempDir
+	static Path tmp;
+
+	private static final FileSource FIXTURES = Fixtures.file("TestFiles/nsupdate");
 	private static final String BIND_VERSION = "9.18.39-0ubuntu0.24.04.7-Ubuntu";
 
 	private static DnsServer server;
 	private static int port;
-	private static File dir;
+	private static FileSource dir;
 	private static DatagramSocket sink;
 	private static int closed;
 
 	@BeforeAll
 	public static void startServer() throws Exception {
-		dir = Files.createTempDirectory("nsupdate").toFile();
+		dir = TestFiles.newFolder(tmp, "nsupdate");
 		String secret = null;
-		for(String line : Files.readAllLines(new File(FIXTURES, "upd.conf").toPath())) {
+		for(String line : TestFiles.lines(FIXTURES.getChild("upd.conf"))) {
 			if( line.contains("secret") ) {
 				secret = line.replaceAll(".*\"(.*)\".*", "$1");
 			}
@@ -122,9 +126,9 @@ public class TestNsUpdate {
 
 	/** A new copy of the zone (each case starts from the file). */
 	private static void freshZone() throws Exception {
-		File d = Files.createTempDirectory(dir.toPath(), "z").toFile();
-		File z = new File(d, "upd.test.txt");
-		Files.copy(new File(FIXTURES, "upd.test.txt").toPath(), z.toPath(), StandardCopyOption.REPLACE_EXISTING);
+		FileSource d = TestFiles.newFolder(dir, "z");
+		FileSource z = d.getChild("upd.test.txt");
+		TestFiles.copy(FIXTURES.getChild("upd.test.txt"), z);
 		server.addZone(new Zone(z));
 	}
 
@@ -139,10 +143,10 @@ public class TestNsUpdate {
 		delete(dir);
 	}
 
-	private static void delete(File f) {
-		File [] list = f.listFiles();
+	private static void delete(FileSource f) throws Exception {
+		FileSource [] list = f.listFiles();
 		if( list != null ) {
-			for(File c : list) {
+			for(FileSource c : list) {
 				delete(c);
 			}
 		}
@@ -232,7 +236,7 @@ public class TestNsUpdate {
 		List<Case> ret = new ArrayList<Case>();
 		Case c = null;
 		StringBuilder into = null;
-		for(String line : Files.readAllLines(new File(FIXTURES, "expected.txt").toPath(), StandardCharsets.UTF_8)) {
+		for(String line : TestFiles.lines(FIXTURES.getChild("expected.txt"))) {
 			if( line.startsWith("=== ") ) {
 				c = new Case();
 				c.name = line.substring(4);
@@ -268,13 +272,13 @@ public class TestNsUpdate {
 		return ret;
 	}
 
-	private static File script;
+	private static FileSource script;
 
 	private static String subst(String s) throws Exception {
 		if( script == null ) {
 			//  script.txt with the port filled in
-			script = new File(dir, "script.txt");
-			Files.write(script.toPath(), new String(Files.readAllBytes(new File(FIXTURES, "script.txt").toPath()), StandardCharsets.UTF_8)
+			script = dir.getChild("script.txt");
+			TestFiles.writeBytes(script, new String(TestFiles.bytes(FIXTURES.getChild("script.txt")), StandardCharsets.UTF_8)
 					.replace("${PORT}", String.valueOf(port)).getBytes(StandardCharsets.UTF_8));
 		}
 		return s.replace("${SCRIPT}", script.getPath()).replace("${PORT}", String.valueOf(port)).replace("${DIR}", FIXTURES.getPath())

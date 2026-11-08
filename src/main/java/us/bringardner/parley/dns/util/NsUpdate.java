@@ -22,7 +22,6 @@
  */
 package us.bringardner.parley.dns.util;
 
-import us.bringardner.parley.dns.DnsTransport;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -42,7 +41,6 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
-
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -54,8 +52,8 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.dns.ByteBuffer;
+import us.bringardner.parley.dns.DnsTransport;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.Mx;
 import us.bringardner.parley.dns.Ns;
@@ -68,6 +66,7 @@ import us.bringardner.parley.dns.Srv;
 import us.bringardner.parley.dns.Tsig;
 import us.bringardner.parley.dns.Utility;
 import us.bringardner.parley.dns.server.Zone;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * A work-alike of the ISC BIND 9 nsupdate (RFC 2136 dynamic update): the
@@ -687,7 +686,7 @@ public class NsUpdate extends Utility {
 		}
 	}
 
-	/** A file's lines (UTF-8), as Files.readAllLines. */
+	/** A file's lines (UTF-8). */
 	private static List<String> readLines(FileSource f) throws IOException {
 		List<String> ret = new ArrayList<String>();
 		try(BufferedReader in = new BufferedReader(new InputStreamReader(f.getInputStream(), StandardCharsets.UTF_8))) {

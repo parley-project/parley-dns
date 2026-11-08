@@ -2,6 +2,34 @@
 
 ## parley-dns 2.0.0 (unreleased)
 
+### Changed (2026-11-08: the server's files are FileSources, To-Do 18.15)
+
+The server's files can be on any parley-files file system, not only the local disk.
+
+- **New setting `parley.dns.fileSource`**: the file system of the server's files, a parley-files factory type
+  (`sftp`, `jdbc`, `memory`...), with its connection settings as `parley.dns.fileSource.<key>`, as
+  `parley.mail.fileSource` is for the mail servers. Every file setting (`parley.dns.dnsDir`, `zoneDir`, `sharedZone`,
+  `domainList.file`, `tsigKeyFile`, `dnssecKeyDir`, `dnssecTrustAnchors`, `udpDumpFile`) is a path on it, or a
+  `filesource:` URL (a file system of its own); a relative `tsigKeyFile` or `dnssecTrustAnchors` is still under
+  `parley.dns.dnsDir`. Zone files' `$INCLUDE`s, journals and the root hints are beside the files that name them.
+  Default: the default file system. The server makes its own factory, once (`DnsServer.getFileSourceFactory()`).
+- **`java.io.File` is gone from the API**, replaced by `us.bringardner.parley.files.FileSource` (no `File`
+  versions are kept): `Zone(FileSource)`, `Zone.getMasterFile()`, `getJournalFile()` and `getIncludedFiles()`,
+  `DnsServer.getZoneDirectory()` and `set/getDnssecKeyDir`, `Tsig.KeyRing.load`, `Validator.loadAnchors`,
+  `DnssecKey.save`, `load`, `loadDir`, `dirStamp` and `getKeyFile`, `SharedZoneText.check`, `records` and
+  `inheritingZone` (the folder), and `UDPProsessor.initUDPProsessor` (the dump file). New:
+  `Resolver.initResolver(Properties, FileSourceFactory)`, which the server calls with its own file system, and
+  `DnsFiles` (the factory a server's settings name, and the file a setting names).
+- **A listed domain's new zone file** is still written whole: a temporary file linked to its name. A file system
+  that can't make links says so (the update fails); there is no other way to write it.
+- **A DNSSEC key's files** are made with the atomic `createNewFile` (an existing file or link is refused); the
+  `.private` file is made readable by its owner only before the key goes in, and refused if the file system still
+  says others can read it.
+- **Zone files, the TSIG key file and resolv.conf are read as UTF-8** (they were read in the platform's encoding).
+- The command-line tools (`NsUpdate`, `NsLookup`, `SshfpTool`, `DnssecKeyTool -d`) take a path on the default file
+  system or a `filesource:` URL; `/etc/resolv.conf` and `/etc/ssh` are on the default file system.
+
+
 
 ### Removed (2026-11-05: the admin port, dynamic entries and the database)
 

@@ -29,15 +29,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileWriter;
 import java.io.PrintStream;
 import java.io.StringReader;
+import java.io.Writer;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.ServerSocket;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -45,17 +43,20 @@ import java.util.List;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
+import us.bringardner.parley.dns.Fixtures;
 import us.bringardner.parley.dns.Hinfo;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.server.DnsServer;
 import us.bringardner.parley.dns.server.TCPProsessor;
 import us.bringardner.parley.dns.server.UDPProsessor;
 import us.bringardner.parley.dns.server.Zone;
-import us.bringardner.parley.dns.Fixtures;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * NsLookup against a DnsServer on the loopback, so it runs without the
@@ -65,7 +66,10 @@ import us.bringardner.parley.dns.Fixtures;
  */
 public class TestNsLookupOffline {
 
-	private static final File FIXTURES = Fixtures.file("TestFiles/nslookup");
+	@TempDir
+	static Path tmp;
+
+	private static final FileSource FIXTURES = Fixtures.file("TestFiles/nslookup");
 
 	private static int port;
 
@@ -73,7 +77,7 @@ public class TestNsLookupOffline {
 	public static void startServer() throws Exception {
 		DnsServer server = new DnsServer();
 		for(String f : new String[] {"nsl.test.txt", "1.10.in-addr.arpa.txt", "8.b.d.0.1.0.0.2.ip6.arpa.txt"}) {
-			server.addZone(new Zone(new File(FIXTURES, f)));
+			server.addZone(new Zone(FIXTURES.getChild(f)));
 		}
 		server.setRecursionAvailable(false);
 		port = freePort();
@@ -136,7 +140,7 @@ public class TestNsLookupOffline {
 		Result r = new Result();
 		String saved = System.getProperty(NsLookup.PROP_RESOLV_CONF);
 		//  The recording machine's resolv.conf, not this one's (for its options)
-		System.setProperty(NsLookup.PROP_RESOLV_CONF, new File(FIXTURES, "resolv.conf").getPath());
+		System.setProperty(NsLookup.PROP_RESOLV_CONF, FIXTURES.getChild("resolv.conf").getPath());
 		try {
 			r.exit = NsLookup.run(args);
 		} finally {
@@ -171,7 +175,7 @@ public class TestNsLookupOffline {
 	/** The cases recorded from the Linux nslookup. */
 	private static List<Case> recorded() throws Exception {
 		List<Case> ret = new ArrayList<Case>();
-		List<String> lines = Files.readAllLines(new File(FIXTURES, "expected.txt").toPath(), StandardCharsets.UTF_8);
+		List<String> lines = TestFiles.lines(FIXTURES.getChild("expected.txt"));
 		Case c = null;
 		boolean body = false;
 		for(String line : lines) {
@@ -243,9 +247,9 @@ public class TestNsLookupOffline {
 
 	@Test
 	public void resolvConfGivesTheServersAndSearchList() throws Exception {
-		File dir = Files.createTempDirectory("resolv").toFile();
-		File conf = new File(dir, "resolv.conf");
-		try(FileWriter w = new FileWriter(conf)) {
+		FileSource dir = TestFiles.newFolder(tmp, "resolv");
+		FileSource conf = dir.getChild("resolv.conf");
+		try(Writer w = TestFiles.writer(conf)) {
 			//  The first server does not answer; the second is ours
 			w.write("# test\nnameserver 127.0.0.2 ; unreachable\nnameserver 127.0.0.1\n"
 					+"search nsl.test example.invalid\noptions ndots:1 timeout:1 attempts:1 rotate\n");
@@ -281,9 +285,9 @@ public class TestNsLookupOffline {
 
 	@Test
 	public void resolvConfWithoutNameServerMeansThisHost() throws Exception {
-		File dir = Files.createTempDirectory("resolv").toFile();
-		File conf = new File(dir, "resolv.conf");
-		try(FileWriter w = new FileWriter(conf)) {
+		FileSource dir = TestFiles.newFolder(tmp, "resolv");
+		FileSource conf = dir.getChild("resolv.conf");
+		try(Writer w = TestFiles.writer(conf)) {
 			w.write("domain nsl.test\n");
 		}
 		ByteArrayOutputStream out = new ByteArrayOutputStream();

@@ -27,14 +27,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
@@ -43,6 +42,7 @@ import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.ByteBuffer;
@@ -53,8 +53,10 @@ import us.bringardner.parley.dns.Mx;
 import us.bringardner.parley.dns.Ns;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Soa;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.Tsig;
 import us.bringardner.parley.dns.resolve.QueryData;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Dynamic UPDATE (RFC 2136) with a journal (rec #43).
@@ -62,11 +64,14 @@ import us.bringardner.parley.dns.resolve.QueryData;
  */
 public class TestDynamicUpdate {
 
+	@TempDir
+	static Path tmp;
+
 	private static final InetAddress LOOPBACK = InetAddress.getLoopbackAddress();
 	private static final int ANY = ZoneUpdater.CLASS_ANY;
 	private static final int NONE = ZoneUpdater.CLASS_NONE;
-	private File dir;
-	private File zoneFile;
+	private FileSource dir;
+	private FileSource zoneFile;
 	private DnsServer server;
 	private String savedDir;
 	private String savedDefault;
@@ -86,8 +91,8 @@ public class TestDynamicUpdate {
 
 	@BeforeEach
 	public void setup() throws Exception {
-		dir = Files.createTempDirectory("update").toFile();
-		zoneFile = new File(dir, "up.test.txt");
+		dir = TestFiles.newFolder(tmp, "update");
+		zoneFile = dir.getChild("up.test.txt");
 		write(zoneFile, zoneText(100));
 		savedDir = System.getProperty(DnsServer.PROP_ZONE_DIR);
 		savedDefault = System.getProperty(DnsServer.PROP_DEFAULT_ZONE);
@@ -107,10 +112,6 @@ public class TestDynamicUpdate {
 		if( n != null ) {
 			n.shutdown();
 		}
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	private static void restore(String key, String value) {
@@ -121,8 +122,8 @@ public class TestDynamicUpdate {
 		}
 	}
 
-	private static void write(File f, String text) throws IOException {
-		try(FileWriter w = new FileWriter(f)) {
+	private static void write(FileSource f, String text) throws IOException {
+		try(Writer w = TestFiles.writer(f)) {
 			w.write(text);
 		}
 	}
@@ -209,14 +210,14 @@ public class TestDynamicUpdate {
 		return zone().getSoa().getSerial();
 	}
 
-	private File journal() {
-		return new File(dir, "up.test.txt.jnl");
+	private FileSource journal() throws Exception {
+		return dir.getChild("up.test.txt.jnl");
 	}
 
 	// ------------------------------------------------------------ access
 
 	@Test
-	public void refusedUnlessAllowed() {
+	public void refusedUnlessAllowed() throws Exception {
 		server.setUpdateAllow(null);
 		assertEquals(DNS.REFUSED, send(new Update().add(a("x.up.test","10.0.0.1"))));
 		assertTrue(data("x.up.test", DNS.A).isEmpty());
@@ -245,8 +246,8 @@ public class TestDynamicUpdate {
 		Message r = server.query(new QueryData(LOOPBACK, 5353, new Message(new ByteBuffer(q.toByteArray())))).get(0);
 		assertEquals(1, r.getAnswerCount());
 		//  The zone file is untouched; the journal has the change
-		assertEquals(zoneText(100), new String(Files.readAllBytes(zoneFile.toPath()), StandardCharsets.UTF_8));
-		String jnl = new String(Files.readAllBytes(journal().toPath()), StandardCharsets.UTF_8);
+		assertEquals(zoneText(100), new String(TestFiles.bytes(zoneFile), StandardCharsets.UTF_8));
+		String jnl = new String(TestFiles.bytes(journal()), StandardCharsets.UTF_8);
 		assertTrue(jnl.contains("base 100\n"), jnl);
 		assertTrue(jnl.contains("add new.up.test. 300 IN A 10.1.1.1\n"), jnl);
 		assertTrue(jnl.contains("serial 101\n"), jnl);
@@ -317,7 +318,7 @@ public class TestDynamicUpdate {
 	}
 
 	@Test
-	public void addingWhatIsThereIsNotAChange() {
+	public void addingWhatIsThereIsNotAChange() throws Exception {
 		assertEquals(DNS.NOERROR, send(new Update().deleteName("nothing.up.test")));
 		assertEquals(100, serial(), "no change, no new serial");
 		assertFalse(journal().exists());
@@ -342,7 +343,7 @@ public class TestDynamicUpdate {
 	}
 
 	@Test
-	public void failedPrerequisiteChangesNothing() {
+	public void failedPrerequisiteChangesNothing() throws Exception {
 		assertEquals(ZoneUpdater.YXDOMAIN, send(new Update().nameNotInUse("www.up.test").add(a("x.up.test","10.0.0.1"))));
 		assertTrue(data("x.up.test", DNS.A).isEmpty());
 		assertFalse(journal().exists());
@@ -388,7 +389,7 @@ public class TestDynamicUpdate {
 		assertTrue(zone().exactRecords("new.up.test").isEmpty());
 		assertEquals(200, serial());
 		assertFalse(journal().exists());
-		assertTrue(new File(dir, "up.test.txt.jnl.old").exists());
+		assertTrue(dir.getChild("up.test.txt.jnl.old").exists());
 	}
 
 	@Test
@@ -470,8 +471,8 @@ public class TestDynamicUpdate {
 	// ------------------------------------------------------------ round 5 #74: journal text
 
 	private String journalText() throws IOException {
-		File j = new File(dir, "up.test.txt.jnl");
-		return j.exists() ? new String(Files.readAllBytes(j.toPath()), StandardCharsets.UTF_8) : "";
+		FileSource j = dir.getChild("up.test.txt.jnl");
+		return j.exists() ? new String(TestFiles.bytes(j), StandardCharsets.UTF_8) : "";
 	}
 
 	@Test
@@ -550,7 +551,7 @@ public class TestDynamicUpdate {
 	@Test
 	/** Round 5 #84: journal crash safety (an empty journal left by a failed first write). */
 	public void anEmptyJournalDoesntStopTheZoneLoading() throws Exception {
-		assertTrue(new File(dir, "up.test.txt.jnl").createNewFile());
+		assertTrue(dir.getChild("up.test.txt.jnl").createNewFile());
 		assertEquals(DNS.NOERROR, send(new Update().add(a("new.up.test", "10.1.1.3"))));
 		//  the update used to be appended without the 'base' line: the zone didn't load again
 		Zone again = new Zone(zoneFile);
@@ -561,12 +562,11 @@ public class TestDynamicUpdate {
 	@Test
 	public void aTornLastUpdateIsIgnored() throws Exception {
 		assertEquals(DNS.NOERROR, send(new Update().add(a("one.up.test", "10.1.1.4"))));
-		File jnl = new File(dir, "up.test.txt.jnl");
-		String text = new String(java.nio.file.Files.readAllBytes(jnl.toPath()), java.nio.charset.StandardCharsets.UTF_8);
+		FileSource jnl = dir.getChild("up.test.txt.jnl");
+		String text = new String(TestFiles.bytes(jnl), java.nio.charset.StandardCharsets.UTF_8);
 		assertTrue(text.contains("\nbegin\n") && text.contains("\nend\n"), text);
 		//  a crash in the middle of the next one
-		java.nio.file.Files.write(jnl.toPath(), "; torn\nbegin\nadd two.up.test. 300 IN A 10.1.1.5\nadd thr".getBytes(),
-				java.nio.file.StandardOpenOption.APPEND);
+		TestFiles.appendBytes(jnl, "; torn\nbegin\nadd two.up.test. 300 IN A 10.1.1.5\nadd thr".getBytes());
 		Zone again = new Zone(zoneFile);
 		assertEquals(1, again.exactRecords("one.up.test").size());
 		assertEquals(0, again.exactRecords("two.up.test").size(), "not applied");
@@ -576,8 +576,8 @@ public class TestDynamicUpdate {
 	@Test
 	public void anUnframedJournalStillReplays() throws Exception {
 		Zone z = new Zone(zoneFile);
-		File jnl = new File(dir, "up.test.txt.jnl");
-		java.nio.file.Files.write(jnl.toPath(), ("base "+Integer.toUnsignedString(z.getSoa().getSerial())+"\n; old style\nadd old.up.test. 300 IN A 10.1.1.6\n").getBytes());
+		FileSource jnl = dir.getChild("up.test.txt.jnl");
+		TestFiles.writeBytes(jnl, ("base "+Integer.toUnsignedString(z.getSoa().getSerial())+"\n; old style\nadd old.up.test. 300 IN A 10.1.1.6\n").getBytes());
 		assertEquals(1, new Zone(zoneFile).exactRecords("old.up.test").size());
 	}
 
@@ -617,9 +617,8 @@ public class TestDynamicUpdate {
 	@Test
 	public void anUpdateAfterATornOneStillReplays() throws Exception {
 		assertEquals(DNS.NOERROR, send(new Update().add(a("one.up.test", "10.1.1.4"))));
-		File jnl = new File(dir, "up.test.txt.jnl");
-		java.nio.file.Files.write(jnl.toPath(), "; torn\nbegin\nadd two.up.test. 300 IN A 10.1.1.5\nadd thr".getBytes(),
-				java.nio.file.StandardOpenOption.APPEND);
+		FileSource jnl = dir.getChild("up.test.txt.jnl");
+		TestFiles.appendBytes(jnl, "; torn\nbegin\nadd two.up.test. 300 IN A 10.1.1.5\nadd thr".getBytes());
 		//  restart: the torn end is cut off
 		restart();
 		assertEquals(DNS.NOERROR, send(new Update().add(a("four.up.test", "10.1.1.7"))));
@@ -633,8 +632,8 @@ public class TestDynamicUpdate {
 	/** Round 5 #84 (review): a header cut off before its 'base' line starts the journal again. */
 	@Test
 	public void aTornHeaderStartsTheJournalAgain() throws Exception {
-		File jnl = new File(dir, "up.test.txt.jnl");
-		java.nio.file.Files.write(jnl.toPath(), "; Dynamic updates of up.te".getBytes());
+		FileSource jnl = dir.getChild("up.test.txt.jnl");
+		TestFiles.writeBytes(jnl, "; Dynamic updates of up.te".getBytes());
 		restart();
 		assertEquals(DNS.NOERROR, send(new Update().add(a("five.up.test", "10.1.1.8"))));
 		assertEquals(1, new Zone(zoneFile).exactRecords("five.up.test").size());

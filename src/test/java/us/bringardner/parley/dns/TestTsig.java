@@ -24,24 +24,29 @@ package us.bringardner.parley.dns;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
+import java.io.Writer;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Base64;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import us.bringardner.parley.files.FileSource;
 
 /**
  * TSIG (RFC 8945): keys, signing and checking (rec #42).
  * The same code was also checked against dnspython (queries, AXFR, errors).
  */
 public class TestTsig {
+
+	@TempDir
+	static Path tmp;
 
 	private static final String SECRET = Base64.getEncoder().encodeToString("0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.US_ASCII));
 	private static final Tsig.KeyRing KEYS = Tsig.KeyRing.parse(
@@ -78,8 +83,8 @@ public class TestTsig {
 		for(String bad : new String[] {"k:hmac-sha3:"+SECRET, "k:hmac-sha256:not*base64", "k:hmac-sha256", "k:hmac-sha256:"+SECRET+" k:hmac-sha1:"+SECRET}) {
 			assertThrows(IllegalArgumentException.class, () -> Tsig.KeyRing.parse(bad), bad);
 		}
-		File f = Files.createTempFile("keys", ".txt").toFile();
-		try(FileWriter w = new FileWriter(f)) {
+		FileSource f = TestFiles.newFolder(tmp, "keys").getChild("keys.txt");
+		try(Writer w = TestFiles.writer(f)) {
 			w.write("# transfer keys\nxfr.example. hmac-sha256 "+SECRET+"   # for the secondaries\n\n");
 		}
 		assertEquals("hmac-sha256", Tsig.KeyRing.load(f).get("xfr.example").getAlgorithm());

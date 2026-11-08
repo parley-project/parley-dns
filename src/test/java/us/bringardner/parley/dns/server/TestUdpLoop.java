@@ -25,18 +25,20 @@ package us.bringardner.parley.dns.server;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
+import java.io.Writer;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.nio.file.Files;
+import java.nio.file.Path;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
+import us.bringardner.parley.dns.TestFiles;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * UDP processor loop: the reused receive buffer handles requests of
@@ -45,11 +47,14 @@ import us.bringardner.parley.dns.Message;
  */
 public class TestUdpLoop {
 
+	@TempDir
+	static Path tmp;
+
 	@Test
 	public void reusedBufferAndClosedSocket() throws Exception {
-		File dir = Files.createTempDirectory("udploop").toFile();
-		File zone = new File(dir,"loop.test.txt");
-		try(FileWriter w = new FileWriter(zone)) {
+		FileSource dir = TestFiles.newFolder(tmp, "udploop");
+		FileSource zone = dir.getChild("loop.test.txt");
+		try(Writer w = TestFiles.writer(zone)) {
 			w.write("@\tIN\tSOA\tns1.loop.test. postmaster.loop.test. (\n"
 					+"\t\t\t1 ; serial\n\t\t\t3600 ; refresh\n\t\t\t1800 ; retry\n"
 					+"\t\t\t1209600 ; expire\n\t\t\t300 ) ; minimum\n\n"
@@ -94,9 +99,5 @@ public class TestUdpLoop {
 		UDPProsessor.getSock().close();
 		t.join(3000);
 		assertTrue(!t.isAlive(), "ended instead of spinning on a closed socket");
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 }

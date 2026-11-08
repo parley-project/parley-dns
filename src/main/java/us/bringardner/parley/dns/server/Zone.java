@@ -26,9 +26,10 @@
 package us.bringardner.parley.dns.server;
 
 import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -41,6 +42,8 @@ import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Soa;
 import us.bringardner.parley.dns.Txt;
 import us.bringardner.parley.dns.Utility;
+import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.files.IRandomAccessStream;
 /**
  * 
  * Creation date: (8/23/01 9:03:07 AM)
@@ -80,7 +83,9 @@ public class Zone implements DNS {
 
 	private String [] lables;
 
-	private File masterFile;
+	private FileSource masterFile;
+	//  its journal (masterFile's name plus .jnl, beside it), or null
+	private FileSource journalFile;
 
 	//  DNSSEC: set on the signed copy that is served (see ZoneSigner)
 	private volatile SignedZone signed;
@@ -266,10 +271,19 @@ public class Zone implements DNS {
 	 * Zone constructor comment.
 	 */
 
-	public Zone(File masterFile) throws IOException {
+	/**
+	 * A zone read from its zone file (and the files it includes), on any file system.
+	 * @param masterFile the zone file, &lt;domain&gt;.txt
+	 */
+	public Zone(FileSource masterFile) throws IOException {
 		this();
-		this.masterFile = masterFile;
+		setMasterFile(masterFile);
 		readZoneInfo();
+	}
+
+	private void setMasterFile(FileSource masterFile) throws IOException {
+		this.masterFile = masterFile;
+		this.journalFile = masterFile == null ? null : DnsFiles.sibling(masterFile, ".jnl");
 	}
 
 	/**
@@ -278,9 +292,9 @@ public class Zone implements DNS {
 	 * {@link #getVirtualText()} is written to masterFile, and the change to its journal beside it.
 	 * @param masterFile the file the zone will have (it does not exist)
 	 */
-	Zone(File masterFile, String text) throws IOException {
+	Zone(FileSource masterFile, String text) throws IOException {
 		this();
-		this.masterFile = masterFile;
+		setMasterFile(masterFile);
 		this.virtualText = text;
 		readZoneInfo();
 	}
@@ -841,8 +855,8 @@ public class Zone implements DNS {
 			dir = args[0];
 		}
 
-		File f = new File(dir);
-		String [] list = f.list();
+		FileSource f = FileSource.of(dir);
+		String [] list = f.isDirectory() ? f.list() : null;
 		if( list == null || list.length == 0 ) {
 			System.out.println("No files to load in "+f);
 			return;
@@ -951,15 +965,15 @@ public class Zone implements DNS {
 	//  Owner of the previous record, absolute (for lines that start with white space)
 	private transient String lastOwner;
 	//  Files on the current $INCLUDE chain (to reject loops)
-	private transient java.util.Set<File> includeStack;
+	private transient java.util.Set<String> includeStack;
 
 	//  Files read with $INCLUDE, so a change to one of them reloads the zone
-	private List<File> includedFiles = new ArrayList<File>();
+	private List<FileSource> includedFiles = new ArrayList<FileSource>();
 
 	/**
 	 * @return the files this zone read with $INCLUDE (empty if none).
 	 */
-	public List<File> getIncludedFiles() {
+	public List<FileSource> getIncludedFiles() {
 		return Collections.unmodifiableList(includedFiles);
 	}
 
@@ -1093,14 +1107,15 @@ public class Zone implements DNS {
 	/**
 	 * Read a zone file (and, through $INCLUDE, the files it names).
 	 */
-	private void readZoneFile(File file, int depth) throws IOException {
-		File canonical = file.getCanonicalFile();
+	private void readZoneFile(FileSource file, int depth) throws IOException {
+		String canonical = file.getCanonicalPath();
 		if( !includeStack.add(canonical) ) {
 			throw new IOException("$INCLUDE loop: "+file+" includes itself");
 		}
-		//  (a zone with no file yet is read from its text; what it includes is read from files)
+		//  (a zone with no file yet is read from its text; what it includes is read from files,
+		//  as UTF-8: FileReader used the platform's encoding)
 		try(BufferedReader in = new BufferedReader(virtualText != null && depth == 0
-				? new java.io.StringReader(virtualText) : new FileReader(file))) {
+				? new java.io.StringReader(virtualText) : new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
 			LineSource src = new LineSource(in);
 			ZoneLine zl;
 			while( true ) {
@@ -1140,7 +1155,7 @@ public class Zone implements DNS {
 	 * RFC 4592 wildcards (e.g. *.*. for any 2-label name). It is now an ordinary
 	 * label, so the entry matches only that literal name: say so, once per name.
 	 */
-	private void warnIfPositional(File file, String owner) {
+	private void warnIfPositional(FileSource file, String owner) {
 		String abs = stripDot(absolute(owner));
 		String [] labels = abs.split("\\.");
 		for(int i=1; i < labels.length; i++ ) {
@@ -1164,12 +1179,12 @@ public class Zone implements DNS {
 	/** An error in a zone file: which file, which line, and why. */
 	static class ZoneFileException extends IOException {
 		private static final long serialVersionUID = 1L;
-		ZoneFileException(File file, int line, Throwable cause) {
+		ZoneFileException(FileSource file, int line, Throwable cause) {
 			super("Error in "+file.getName()+" at line "+line+": "+cause.getMessage(), cause);
 		}
 	}
 
-	private void processLine(File file, String line, int depth) throws IOException {
+	private void processLine(FileSource file, String line, int depth) throws IOException {
 		List<String> list = parseLine(lastOwner, line);
 		if( list.isEmpty() ) {
 			return;
@@ -1263,7 +1278,7 @@ public class Zone implements DNS {
 	}
 
 	/** $ORIGIN, $TTL and $INCLUDE (RFC 1035 5.1, RFC 2308 4), and Parley's $INHERIT. */
-	private void directive(File file, List<String> list, int depth) throws IOException {
+	private void directive(FileSource file, List<String> list, int depth) throws IOException {
 		String d = list.get(0).toUpperCase(java.util.Locale.ROOT);
 		switch(d) {
 		case "$TTL":
@@ -1286,12 +1301,10 @@ public class Zone implements DNS {
 			if( depth >= MAX_INCLUDE_DEPTH ) {
 				throw new IOException("$INCLUDE nested more than "+MAX_INCLUDE_DEPTH+" levels");
 			}
-			File inc = new File(list.get(1));
-			if( !inc.isAbsolute() ) {
-				//  Relative to the file that includes it
-				File dir = file.getAbsoluteFile().getParentFile();
-				inc = new File(dir, list.get(1));
-			}
+			//  A path on the zone file's file system, relative to the file that includes it
+			FileSource inc = DnsFiles.isAbsolutePath(list.get(1))
+					? file.getFileSourceFactory().createFileSource(list.get(1))
+					: file.getParentFile().getChild(list.get(1));
 			if( !inc.isFile() ) {
 				throw new IOException("$INCLUDE file not found: "+inc);
 			}
@@ -1303,7 +1316,7 @@ public class Zone implements DNS {
 				origin = stripDot(absolute(list.get(2)));
 				originSet = true;
 			}
-			includedFiles.add(inc.getAbsoluteFile());
+			includedFiles.add(inc);
 			try {
 				readZoneFile(inc, depth+1);
 			} finally {
@@ -1340,7 +1353,7 @@ public class Zone implements DNS {
 	 * Read a zone
 	 **/
 	private void readZoneInfo() throws IOException {
-		lastModified = masterFile.lastModified();
+		lastModified = DnsFiles.lastModified(masterFile);
 		fileName = masterFile.getName();
 		int idx = fileName.lastIndexOf('.');
 		if( idx >0) {
@@ -1356,12 +1369,12 @@ public class Zone implements DNS {
 
 		rrs = new ArrayList<List<RR>>();
 		names = new ArrayList<Name>();
-		includedFiles = new ArrayList<File>();
+		includedFiles = new ArrayList<FileSource>();
 		origin = stripDot(name);
 		originSet = false;
 		defaultTtl = -1;
 		lastOwner = "@";
-		includeStack = new java.util.HashSet<File>();
+		includeStack = new java.util.HashSet<String>();
 		try {
 			readZoneFile(masterFile, 0);
 			if( soa == null ) {
@@ -1392,16 +1405,19 @@ public class Zone implements DNS {
 	 * zone file's serial it applies to: if the zone file was edited and its
 	 * serial changed, the journal is set aside (renamed .jnl.old) and not used.
 	 */
-	public File getJournalFile() {
-		return masterFile == null ? null : new File(masterFile.getPath()+".jnl");
+	public FileSource getJournalFile() {
+		return journalFile;
 	}
 
 	private void replayJournal() throws IOException {
-		File jnl = getJournalFile();
+		FileSource jnl = getJournalFile();
 		if( jnl == null || !jnl.isFile() ) {
 			return;
 		}
-		byte [] data = java.nio.file.Files.readAllBytes(jnl.toPath());
+		byte [] data;
+		try(InputStream in = jnl.getInputStream()) {
+			data = in.readAllBytes();
+		}
 		int line = 0;
 		boolean outOfDate = false;
 		boolean based = false;
@@ -1479,9 +1495,8 @@ public class Zone implements DNS {
 			throw new IOException("Error in "+jnl.getName()+" at line "+line+": "+e.getMessage(), e);
 		}
 		if( outOfDate ) {
-			File old = new File(jnl.getPath()+".old");
-			old.delete();
-			if( !jnl.renameTo(old) ) {
+			FileSource old = DnsFiles.sibling(jnl, ".old");
+			if( !jnl.renameTo(old, true) ) {
 				throw new IOException("Error in "+jnl.getName()+" at line "+line+": can't set aside the out of date journal "+jnl);
 			}
 			return;
@@ -1498,9 +1513,9 @@ public class Zone implements DNS {
 			cut = 0;
 		}
 		if( cut < data.length ) {
-			try(java.nio.channels.FileChannel ch = java.nio.channels.FileChannel.open(jnl.toPath(), java.nio.file.StandardOpenOption.WRITE)) {
-				ch.truncate(cut);
-				ch.force(true);
+			try(IRandomAccessStream ch = jnl.getRandomAccessStream("rw")) {
+				ch.setLength(cut);
+				ch.sync();
 				final long c = cut;
 				LOG.logWarn(jnl.getName()+": cut off at byte "+c+" (a write that didn't finish)");
 			} catch(IOException ex) {
@@ -1775,6 +1790,7 @@ public class Zone implements DNS {
 		z.name = name;
 		z.soa = soa;
 		z.masterFile = masterFile;
+		z.journalFile = journalFile;
 		z.includedFiles = includedFiles;
 		z.presignedSigs = presignedSigs;
 		z.presignedNsec3 = presignedNsec3;
@@ -2063,7 +2079,8 @@ public class Zone implements DNS {
 		return ret.toString();
 	}
 
-	public File getMasterFile() {
+	public FileSource getMasterFile() {
+
 		return masterFile;
 	}
 }

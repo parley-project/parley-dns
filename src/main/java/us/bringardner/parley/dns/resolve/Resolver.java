@@ -26,14 +26,12 @@
 package us.bringardner.parley.dns.resolve;
 
 import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -42,14 +40,17 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
+import us.bringardner.parley.core.NamedThreadFactory;
 import us.bringardner.parley.dns.Cname;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.DnsBaseClass;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Section;
+import us.bringardner.parley.dns.server.DnsFiles;
 import us.bringardner.parley.dns.server.DnsServer;
-import us.bringardner.parley.core.NamedThreadFactory;
+import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.files.FileSourceFactory;
 import us.bringardner.parley.io.IoUtils;
 
 public class Resolver  extends DnsBaseClass
@@ -89,7 +90,12 @@ public class Resolver  extends DnsBaseClass
 	public static final String PROP_UPSTREAM_HOLD_OFF_MAX = "parley.dns.upstreamHoldOffMax";
 	/** Validate the answers of recursive queries with DNSSEC (default false). */
 	public static final String PROP_DNSSEC_VALIDATION = "parley.dns.dnssecValidation";
-	/** File of trust anchors (DS or DNSKEY records); relative to parley.dns.dnsDir. Default: the root zone's keys, built in. */
+	/**
+	 * File of trust anchors (DS or DNSKEY records), on the DNS server's file system
+	 * ({@link DnsServer#PROP_FILE_SOURCE}) or a {@code filesource:} URL; a relative path is under
+	 * parley.dns.dnsDir. Default: the root zone's keys, built in.
+	 */
+
 	public static final String PROP_DNSSEC_TRUST_ANCHORS = "parley.dns.dnssecTrustAnchors";
 
 	//  DNSSEC validation (null: off)
@@ -417,25 +423,42 @@ public class Resolver  extends DnsBaseClass
 	 * Start the resolver (one per JVM: its cache and threads are shared) with these settings: the
 	 * DNS server's own configuration, or the system properties.
 	 *
+	 * Its files (the root hints and the trust anchors) are on the file system the settings name
+	 * ({@link DnsServer#PROP_FILE_SOURCE}): a new one for a resolver alone, so a DNS server gives
+	 * its own ({@link #initResolver(Properties, FileSourceFactory)}).
+	 *
 	 * @param prop the settings (parley.dns.*)
 	 * @since 2.0.0
 	 */
 	public static void initResolver(Properties prop) throws IOException	{
-		String dnsDir = null;
+		initResolver(prop, DnsFiles.factory(prop));
+	}
+
+	/**
+	 * The same, with its files on this file system: the root hints in parley.dns.dnsDir, and
+	 * {@link #PROP_DNSSEC_TRUST_ANCHORS} (a relative path is under parley.dns.dnsDir).
+	 *
+	 * @param prop the settings (parley.dns.*)
+	 * @param files the file system of the settings' paths (a DNS server's own, {@link DnsServer#getFileSourceFactory()})
+	 * @since 2.0.0
+	 */
+	public static void initResolver(Properties prop, FileSourceFactory files) throws IOException	{
+		String dnsDirName = null;
 
 
-		if( (dnsDir=prop.getProperty(DnsServer.PROP_DNS_DIR)) == null ) {
-			dnsDir = DnsServer.DEFAULT_DNS_DIR;
+		if( (dnsDirName=prop.getProperty(DnsServer.PROP_DNS_DIR)) == null ) {
+			dnsDirName = DnsServer.DEFAULT_DNS_DIR;
 		}
+		FileSource dnsDir = files.resolve(dnsDirName);
 
 
-		java.io.File f = new File(dnsDir, ROOT_HINTS_FILE);
+		FileSource f = dnsDir.getChild(ROOT_HINTS_FILE);
 
 
 		//  First load the properties from the file
 		Properties p = new Properties();
 		if( f.exists() ) {
-			InputStream in = new FileInputStream(f);
+			InputStream in = f.getInputStream();
 			try {
 				p.load(in);
 			} finally {
@@ -537,11 +560,7 @@ public class Resolver  extends DnsBaseClass
 			List<us.bringardner.parley.dns.Ds> anchors = Validator.rootAnchors();
 			String af = prop.getProperty(PROP_DNSSEC_TRUST_ANCHORS);
 			if( af != null && !af.trim().isEmpty() ) {
-				File a = new File(af.trim());
-				if( !a.isAbsolute() ) {
-					a = new File(dnsDir, af.trim());
-				}
-				anchors = Validator.loadAnchors(a);
+				anchors = Validator.loadAnchors(DnsFiles.resolve(files, dnsDir, af));
 			}
 			setValidator(newValidator(anchors));
 			new Resolver().log("DNSSEC validation on, "+anchors.size()+" trust anchors");

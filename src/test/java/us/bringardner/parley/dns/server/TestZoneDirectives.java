@@ -28,14 +28,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
-import java.nio.file.Files;
+import java.io.Writer;
+import java.nio.file.Path;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.DNS;
@@ -43,15 +43,20 @@ import us.bringardner.parley.dns.Mx;
 import us.bringardner.parley.dns.Ns;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Soa;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.Txt;
 import us.bringardner.parley.dns.Utility;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * $ORIGIN, $TTL and $INCLUDE, and the zone file syntax around them (rec #38).
  */
 public class TestZoneDirectives {
 
-	private File dir;
+	@TempDir
+	static Path tmp;
+
+	private FileSource dir;
 
 	private static final String SOA =
 			"@\tIN\tSOA\tns1 postmaster (\n"
@@ -62,28 +67,28 @@ public class TestZoneDirectives {
 
 	@BeforeEach
 	public void setup() throws IOException {
-		dir = Files.createTempDirectory("directives").toFile();
+		dir = TestFiles.newFolder(tmp, "directives");
 	}
 
 	@AfterEach
-	public void cleanup() {
+	public void cleanup() throws Exception {
 		delete(dir);
 	}
 
-	private static void delete(File f) {
-		File [] list = f.listFiles();
+	private static void delete(FileSource f) throws Exception {
+		FileSource [] list = f.listFiles();
 		if( list != null ) {
-			for(File c : list) {
+			for(FileSource c : list) {
 				delete(c);
 			}
 		}
 		f.delete();
 	}
 
-	private File write(String name, String text) throws IOException {
-		File f = new File(dir, name);
+	private FileSource write(String name, String text) throws IOException {
+		FileSource f = dir.getChild(name);
 		f.getParentFile().mkdirs();
-		try(FileWriter w = new FileWriter(f)) {
+		try(Writer w = TestFiles.writer(f)) {
 			w.write(text);
 		}
 		return f;
@@ -276,9 +281,9 @@ public class TestZoneDirectives {
 
 	@Test
 	public void editingAnIncludedFileReloadsTheZone() throws Exception {
-		File zones = new File(dir,"zones");
+		FileSource zones = dir.getChild("zones");
 		zones.mkdirs();
-		File inc = write("zones/hosts.inc", "www\tIN\tA\t10.0.0.1\n");
+		FileSource inc = write("zones/hosts.inc", "www\tIN\tA\t10.0.0.1\n");
 		write("zones/d.test.txt", SOA+"$INCLUDE hosts.inc\n");
 		String savedDir = System.getProperty(DnsServer.PROP_ZONE_DIR);
 		String savedDefault = System.getProperty(DnsServer.PROP_DEFAULT_ZONE);
@@ -290,7 +295,7 @@ public class TestZoneDirectives {
 			assertEquals("10.0.0.1", a(server.getZone("d.test"),"www.d.test"));
 			assertTrue(!server.shouldReloadZones(), "nothing changed");
 
-			try(FileWriter w = new FileWriter(inc)) {
+			try(Writer w = TestFiles.writer(inc)) {
 				w.write("www\tIN\tA\t10.0.0.2\n");
 			}
 			inc.setLastModified(inc.lastModified()+2000);

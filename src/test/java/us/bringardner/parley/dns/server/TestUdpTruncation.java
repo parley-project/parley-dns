@@ -26,22 +26,24 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.nio.file.Files;
+import java.nio.file.Path;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.Txt;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Offline tests for UDP response size limits (RFC 1035 4.2.1, RFC 2181 9)
@@ -49,6 +51,9 @@ import us.bringardner.parley.dns.Txt;
  * UDP and TCP processors on a loopback port.
  */
 public class TestUdpTruncation {
+
+	@TempDir
+	static Path tmp;
 
 	private static String text(char c, int n) {
 		StringBuilder sb = new StringBuilder();
@@ -134,13 +139,13 @@ public class TestUdpTruncation {
 
 	// ------------------------------------------------------------ end to end
 
-	private static File dir;
+	private static FileSource dir;
 	private static int port;
 
 	@BeforeAll
 	public static void startServer() throws IOException {
-		dir = Files.createTempDirectory("trunc").toFile();
-		File zone = new File(dir,"trunc.test.txt");
+		dir = TestFiles.newFolder(tmp, "trunc");
+		FileSource zone = dir.getChild("trunc.test.txt");
 		StringBuilder z = new StringBuilder();
 		z.append("@\tIN\tSOA\tns1.trunc.test. postmaster.trunc.test. (\n"
 				+"\t\t\t1 ; serial\n\t\t\t3600 ; refresh\n\t\t\t1800 ; retry\n"
@@ -152,7 +157,7 @@ public class TestUdpTruncation {
 		for(char c='b'; c<='d'; c++ ) {
 			z.append("\t\tTXT\t\""+text(c,200)+"\"\n");
 		}
-		try(FileWriter w = new FileWriter(zone)) {
+		try(Writer w = TestFiles.writer(zone)) {
 			w.write(z.toString());
 		}
 
@@ -191,10 +196,6 @@ public class TestUdpTruncation {
 		Thread.sleep(500);
 		UDPProsessor.getSock().close();
 		DnsServer.setShutdown(false);
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	private static Message query(String name, int type, boolean fallback) throws IOException {

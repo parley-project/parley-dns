@@ -337,6 +337,8 @@ A bind address of `localhost` means this host's own name (its network address), 
 | Property | Default | Meaning |
 |---|---|---|
 | `parley.dns.configFile` | `parley-dns.properties` in Parley's administrator folder (`/etc/parley`, Windows `%ProgramData%\Parley`, or the folder of `$PARLEY_CONF`) | The properties file to load at startup |
+| `parley.dns.fileSource` | the default file system (the local disk) | The file system of the server's files: a parley-files factory type (`sftp`, `jdbc`, `memory`...), with its connection settings as `parley.dns.fileSource.<key>` (a secret as a reference, `@file:...` or `@keychain:...`). Every file and folder setting below is a path on it, or a `filesource:` URL (a file system of its own) |
+
 | `parley.dns.dnsDir` | `/data/services/dns/config` | Directory for the TSIG key file, the trust anchors and the root hints (`root.hints`, `name=address` lines; without it the built-in root servers are used) |
 | `parley.dns.zoneDir` | `zones` | Directory of the zone files (`<zone>.txt`); a changed file is reloaded |
 | `parley.dns.masterZone` | required | The primary domain's zone; it serves the listed domains' DMARC report authorizations |

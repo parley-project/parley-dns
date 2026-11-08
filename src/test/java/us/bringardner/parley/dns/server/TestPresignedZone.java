@@ -29,11 +29,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.InetAddress;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -42,21 +41,24 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Dnskey;
 import us.bringardner.parley.dns.Edns;
+import us.bringardner.parley.dns.Fixtures;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.Nsec;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Rrsig;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.dnssec.Algorithm;
 import us.bringardner.parley.dns.dnssec.Canonical;
 import us.bringardner.parley.dns.dnssec.DnssecKey;
 import us.bringardner.parley.dns.resolve.QueryData;
-import us.bringardner.parley.dns.Fixtures;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Zones signed elsewhere: the fixtures were signed by BIND's
@@ -65,30 +67,29 @@ import us.bringardner.parley.dns.Fixtures;
  */
 public class TestPresignedZone {
 
+	@TempDir
+	static Path tmp;
+
 	private static final InetAddress LOOPBACK = InetAddress.getLoopbackAddress();
-	private static final File FIXTURES = Fixtures.file("TestFiles/presigned");
+	private static final FileSource FIXTURES = Fixtures.file("TestFiles/presigned");
 
 	private DnsServer server;
-	private File dir;
+	private FileSource dir;
 
 	@BeforeEach
 	public void setup() throws IOException {
 		server = new DnsServer();
 		server.setRecursionAvailable(false);
-		dir = Files.createTempDirectory("presigned").toFile();
-		server.setDnssecKeyDir(us.bringardner.parley.files.FileSource.of(dir));
+		dir = TestFiles.newFolder(tmp, "presigned");
+		server.setDnssecKeyDir(dir);
 	}
 
 	@AfterEach
 	public void cleanup() {
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	private Zone load(String variant) throws IOException {
-		Zone z = new Zone(new File(FIXTURES, variant+"/signed.test.txt"));
+		Zone z = new Zone(FIXTURES.getChild(variant+"/signed.test.txt"));
 		server.addZone(z);
 		return server.getZone("signed.test");
 	}
@@ -217,7 +218,7 @@ public class TestPresignedZone {
 	@Test
 	public void ourKeysAreNotUsedAndNothingIsResigned() throws Exception {
 		DnssecKey mine = DnssecKey.generate("signed.test", Algorithm.of(13), true, 0);
-		mine.save(us.bringardner.parley.files.FileSource.of(dir));
+		mine.save(dir);
 		Zone z = load("nsec");
 		SignedZone sz = z.getSigned();
 		assertTrue(sz.isPresigned());
@@ -258,8 +259,8 @@ public class TestPresignedZone {
 	@Test
 	public void ourOwnSignedZoneTextLoadsBack() throws Exception {
 		//  Sign with our signer, write the zone out as text, load it as a presigned zone
-		File zf = new File(dir, "own.test.txt");
-		try(FileWriter w = new FileWriter(zf)) {
+		FileSource zf = dir.getChild("own.test.txt");
+		try(Writer w = TestFiles.writer(zf)) {
 			w.write("$TTL 300\n@ IN SOA ns1 h ( 1 3600 900 1209600 60 )\n NS ns1\nns1 A 10.0.0.1\nwww A 10.0.0.2\n*.w TXT \"x\"\n");
 		}
 		DnssecKey k = DnssecKey.generate("own.test", Algorithm.of(13), true, 0);
@@ -278,10 +279,10 @@ public class TestPresignedZone {
 				text.append(Zone.recordLine(s)).append('\n');
 			}
 		}
-		File out = new File(dir, "presigned");
+		FileSource out = dir.getChild("presigned");
 		out.mkdir();
-		File pf = new File(out, "own.test.txt");
-		Files.write(pf.toPath(), text.toString().getBytes("UTF-8"));
+		FileSource pf = out.getChild("own.test.txt");
+		TestFiles.writeBytes(pf, text.toString().getBytes("UTF-8"));
 		try {
 			Zone back = new Zone(pf);
 			assertTrue(back.isPresigned());
@@ -295,8 +296,8 @@ public class TestPresignedZone {
 
 	@Test
 	public void incompleteDnssecDataIsRejected() throws Exception {
-		File zf = new File(dir, "half.test.txt");
-		try(FileWriter w = new FileWriter(zf)) {
+		FileSource zf = dir.getChild("half.test.txt");
+		try(Writer w = TestFiles.writer(zf)) {
 			w.write("@ IN SOA ns1 h ( 1 3600 900 1209600 60 )\n NS ns1\nns1 A 10.0.0.1\n"
 					+"@ DNSKEY 257 3 13 AAAA\n");
 		}

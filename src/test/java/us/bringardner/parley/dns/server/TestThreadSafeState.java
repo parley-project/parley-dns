@@ -23,31 +23,18 @@
 package us.bringardner.parley.dns.server;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.net.InetAddress;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import us.bringardner.parley.dns.A;
-import us.bringardner.parley.dns.DNS;
-import us.bringardner.parley.dns.Message;
-import us.bringardner.parley.dns.RR;
-import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.dns.resolve.RemoteServer;
 import us.bringardner.parley.dns.resolve.ServerA;
 

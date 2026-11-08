@@ -29,10 +29,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
+import java.io.Writer;
 import java.net.InetAddress;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -41,9 +40,10 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
-import us.bringardner.parley.dns.A;
 import us.bringardner.parley.core.util.Base32Hex;
+import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Dnskey;
@@ -53,11 +53,13 @@ import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.Nsec3;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Rrsig;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.dnssec.Algorithm;
 import us.bringardner.parley.dns.dnssec.Canonical;
 import us.bringardner.parley.dns.dnssec.DnssecKey;
 import us.bringardner.parley.dns.dnssec.Nsec3Params;
 import us.bringardner.parley.dns.resolve.QueryData;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * A zone signed with NSEC3 (RFC 5155): the proofs a validator needs
@@ -67,22 +69,25 @@ import us.bringardner.parley.dns.resolve.QueryData;
  */
 public class TestNsec3Server {
 
+	@TempDir
+	static Path tmp;
+
 	private static final InetAddress LOOPBACK = InetAddress.getLoopbackAddress();
 
-	private File dir;
-	private File zoneFile;
+	private FileSource dir;
+	private FileSource zoneFile;
 	private DnsServer server;
 	private DnssecKey key;
 	private Nsec3Params params = Nsec3Params.DEFAULT;
 
 	@BeforeEach
 	public void setup() throws Exception {
-		dir = Files.createTempDirectory("nsec3").toFile();
+		dir = TestFiles.newFolder(tmp, "nsec3");
 		key = DnssecKey.generate("sec.test", Algorithm.of(Algorithm.ECDSAP256SHA256), true, 0);
-		key.save(us.bringardner.parley.files.FileSource.of(dir));
+		key.save(dir);
 		DnssecKey child = DnssecKey.generate("secure.sec.test", Algorithm.of(Algorithm.ECDSAP256SHA256), true, 0);
-		zoneFile = new File(dir, "sec.test.txt");
-		try(FileWriter w = new FileWriter(zoneFile)) {
+		zoneFile = dir.getChild("sec.test.txt");
+		try(Writer w = TestFiles.writer(zoneFile)) {
 			w.write("$TTL 3600\n"
 				+"@\tIN\tSOA\tns1 hostmaster ( 100 3600 900 1209600 300 )\n"
 				+"\tNS\tns1\n"
@@ -101,17 +106,13 @@ public class TestNsec3Server {
 		}
 		server = new DnsServer();
 		server.setRecursionAvailable(false);
-		server.setDnssecKeyDir(us.bringardner.parley.files.FileSource.of(dir));
+		server.setDnssecKeyDir(dir);
 		server.setDnssecNsec3("*", params);
 		server.addZone(new Zone(zoneFile));
 	}
 
 	@AfterEach
 	public void cleanup() {
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	private Zone zone() {

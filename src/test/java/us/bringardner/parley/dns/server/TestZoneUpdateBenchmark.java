@@ -3,19 +3,21 @@ package us.bringardner.parley.dns.server;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
-import java.nio.file.Files;
+import java.io.Writer;
+import java.nio.file.Path;
 import java.util.Locale;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.Name;
 import us.bringardner.parley.dns.RR;
+import us.bringardner.parley.dns.TestFiles;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Benchmark for the zone's write path (what a dynamic update, RFC 2136, does):
@@ -29,16 +31,19 @@ import us.bringardner.parley.dns.RR;
  */
 public class TestZoneUpdateBenchmark {
 
+	@TempDir
+	static Path tmp;
+
 	private static final int ZONE_NAMES = 20000;
 	private static final int OPS = 2000;
 
-	private static File dir;
-	private static File zoneFile;
+	private static FileSource dir;
+	private static FileSource zoneFile;
 
 	@BeforeAll
 	public static void setup() throws IOException {
-		dir = Files.createTempDirectory("zbench").toFile();
-		zoneFile = new File(dir, "bench.test.txt");
+		dir = TestFiles.newFolder(tmp, "zbench");
+		zoneFile = dir.getChild("bench.test.txt");
 		StringBuilder z = new StringBuilder();
 		z.append("@\tIN\tSOA\tns1.bench.test. postmaster.bench.test. (\n"
 				+ "\t\t\t1 ; serial\n\t\t\t3600 ; refresh\n\t\t\t1800 ; retry\n"
@@ -49,17 +54,13 @@ public class TestZoneUpdateBenchmark {
 		for(int i=0; i < ZONE_NAMES; i++ ) {
 			z.append("h"+i+"\tIN\tA\t10.1."+(i/250%250)+"."+(1+i%250)+"\n");
 		}
-		try(FileWriter w = new FileWriter(zoneFile)) {
+		try(Writer w = TestFiles.writer(zoneFile)) {
 			w.write(z.toString());
 		}
 	}
 
 	@AfterAll
 	public static void cleanup() {
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	private static RR a(String name, int i) {

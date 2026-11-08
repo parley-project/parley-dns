@@ -1,10 +1,16 @@
 package us.bringardner.parley.dns;
 
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.io.Writer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.FileSourceFactory;
@@ -44,6 +50,16 @@ public final class TestFiles {
 		return ret;
 	}
 
+	/** A new, empty folder with a unique name (PREFIX and a number) in the @TempDir */
+	public static FileSource newFolder(Path tempDir, String prefix) throws IOException {
+		return newFolder(local(tempDir), prefix);
+	}
+
+	/** A new, empty folder with a unique name (PREFIX and a number) in DIR */
+	public static FileSource newFolder(FileSource dir, String prefix) throws IOException {
+		return dir.getFileSourceFactory().createTempDirectory(prefix, dir);
+	}
+
 	/** A new folder under DIR (made) */
 	public static FileSource mkdir(FileSource dir, String name) throws IOException {
 		FileSource ret = dir.getChild(name);
@@ -67,6 +83,40 @@ public final class TestFiles {
 			out.write(text.getBytes(StandardCharsets.UTF_8));
 		}
 		return f;
+	}
+
+	/** Write DATA to F */
+	public static FileSource writeBytes(FileSource f, byte[] data) throws IOException {
+		try(OutputStream out = f.getOutputStream()) {
+			out.write(data);
+		}
+		return f;
+	}
+
+	/** Append DATA to F */
+	public static FileSource appendBytes(FileSource f, byte[] data) throws IOException {
+		try(OutputStream out = f.getOutputStream(true)) {
+			out.write(data);
+		}
+		return f;
+	}
+
+	/** A writer of F's text (UTF-8), from the start */
+
+	public static Writer writer(FileSource f) throws IOException {
+		return new OutputStreamWriter(f.getOutputStream(), StandardCharsets.UTF_8);
+	}
+
+	/** F's lines (UTF-8) */
+	public static List<String> lines(FileSource f) throws IOException {
+		List<String> ret = new ArrayList<String>();
+		try(BufferedReader in = new BufferedReader(new InputStreamReader(f.getInputStream(), StandardCharsets.UTF_8))) {
+			String line;
+			while( (line = in.readLine()) != null ) {
+				ret.add(line);
+			}
+		}
+		return ret;
 	}
 
 	/** Append TEXT (UTF-8) to F */
@@ -98,8 +148,5 @@ public final class TestFiles {
 		return to;
 	}
 
-	/** A test resource (src/test/resources) as a FileSource on the local file system */
-	public static FileSource fixture(String path) {
-		return FileSource.of(Fixtures.file(path));
-	}
+
 }

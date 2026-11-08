@@ -1,9 +1,8 @@
 package us.bringardner.parley.dns.server;
 
-import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -15,6 +14,7 @@ import java.util.TreeMap;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Soa;
 import us.bringardner.parley.dns.Utility;
+import us.bringardner.parley.files.FileSource;
 
 /** {@link DnsServerMXBean} for a {@link DnsServer}; see {@link DnsServer#registerManagement}. */
 class DnsServerManagement implements DnsServerMXBean {
@@ -52,7 +52,7 @@ class DnsServerManagement implements DnsServerMXBean {
 
 	@Override
 	public String getZoneDirectory() {
-		File d = server.getZoneDirectory();
+		FileSource d = server.getZoneDirectory();
 		return d == null ? null : d.getPath();
 	}
 
@@ -62,7 +62,7 @@ class DnsServerManagement implements DnsServerMXBean {
 		List<DnsZoneInfo> ret = new ArrayList<DnsZoneInfo>();
 		for(Zone z : sorted.values()) {
 			Zone own = z.getOwn();
-			File f = own.getMasterFile();
+			FileSource f = own.getMasterFile();
 			ret.add(new DnsZoneInfo(strip(z.getName()), z.isInherited() ? own.getInheritFrom() : null,
 					Integer.toUnsignedLong(z.getSoa().getSerial()), Integer.toUnsignedLong(own.getSoa().getSerial()),
 					count(z.getUnsigned()), count(own), z.getSigned() != null, f == null || own.isVirtual() ? null : f.getPath()));
@@ -154,13 +154,18 @@ class DnsServerManagement implements DnsServerMXBean {
 	}
 
 	private static List<SharedZoneText.Record> current(SharedZone s) throws IOException {
-		File f = s.getFile();
+		FileSource f = s.getFile();
 		if( !f.exists() ) {
 			throw new IllegalStateException("The shared zone's file "+f+" doesn't exist");
 		}
 		try {
-			return SharedZoneText.records(new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8), f.getAbsoluteFile().getParentFile());
+			String text;
+			try(InputStream in = f.getInputStream()) {
+				text = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+			}
+			return SharedZoneText.records(text, f.getParentFile());
 		} catch(IOException e) {
+
 			throw new IllegalStateException(e.getMessage()+" ("+f+")", e);
 		}
 	}

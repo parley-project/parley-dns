@@ -1,15 +1,16 @@
 package us.bringardner.parley.dns.server;
 
-import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+
+import us.bringardner.parley.files.FileSource;
 
 
 /**
@@ -28,18 +29,18 @@ final class SharedZone {
 	//  the name the file is checked under when it is read (the .invalid TLD is reserved, RFC 2606)
 	private static final String CHECK = "shared-zone.invalid";
 
-	private final File file;
+	private final FileSource file;
 	private volatile String text;
 	private volatile List<String> warnings = Collections.emptyList();
 	private volatile String stamp;
 	//  the zone read under each domain's name, for the current text
 	private final Map<String, Zone> byDomain = new ConcurrentHashMap<String, Zone>();
 
-	SharedZone(File file) {
+	SharedZone(FileSource file) {
 		this.file = file;
 	}
 
-	File getFile() {
+	FileSource getFile() {
 		return file;
 	}
 
@@ -72,7 +73,9 @@ final class SharedZone {
 		stamp = s;
 		String t;
 		try {
-			t = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
+			try(InputStream in = file.getInputStream()) {
+				t = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+			}
 		} catch(IOException e) {
 			throw new IOException("Can't read the shared zone "+file+": "+e.getMessage(), e);
 		}
@@ -91,7 +94,7 @@ final class SharedZone {
 	 * The shared zone read under a domain's name (for {@link Zone#inherit(Zone, Zone)}): the same
 	 * object until the file changes.
 	 */
-	Zone under(String domain, File zoneDir) throws IOException {
+	Zone under(String domain, FileSource zoneDir) throws IOException {
 		String t = text;
 		if( t == null ) {
 			throw new IOException("The shared zone "+file+" has not been read");
@@ -107,11 +110,11 @@ final class SharedZone {
 		return z;
 	}
 
-	private Zone parse(String domain, String t, File dir) throws IOException {
+	private Zone parse(String domain, String t, FileSource dir) throws IOException {
 		Zone z;
 		try {
 			//  read as the text of <domain>.txt: @ and relative names are the domain's
-			z = new Zone(new File(dir, domain+".txt"), t);
+			z = new Zone(FileSource.of(dir, domain+".txt"), t);
 		} catch(IOException e) {
 			String m = String.valueOf(e.getMessage()).replace(domain+".txt", file.getName());
 			throw new IOException("The shared zone "+file+": "+m, e);
@@ -125,9 +128,15 @@ final class SharedZone {
 		return z;
 	}
 
-	private static String stamp(File f) {
-		return f.exists() ? f.lastModified()+"/"+f.length() : "-";
+	/** The file's time and size; "-" if it doesn't exist or can't be asked (read() then says why). */
+	private static String stamp(FileSource f) {
+		try {
+			return f.exists() ? f.lastModified()+"/"+f.length() : "-";
+		} catch(IOException e) {
+			return "-";
+		}
 	}
+
 
 	private static String strip(String n) {
 		return n.endsWith(".") ? n.substring(0, n.length()-1) : n;
