@@ -26,7 +26,7 @@
 package us.bringardner.parley.dns;
 
 import java.io.BufferedReader;
-import java.io.FileReader;
+import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.util.HashMap;
 import java.util.List;
@@ -391,7 +391,7 @@ ARCOUNT         an unsigned 16 bit integer specifying the number of
 			throws Exception
 	{
 
-		BufferedReader in = new BufferedReader(new FileReader(file));
+		BufferedReader in = new BufferedReader(new InputStreamReader(us.bringardner.parley.files.FileSource.of(file).getInputStream(), java.nio.charset.StandardCharsets.UTF_8));
 		String line = in.readLine();
 		line = in.readLine();
 		line = in.readLine();
@@ -432,7 +432,8 @@ ARCOUNT         an unsigned 16 bit integer specifying the number of
 			fn = args[0];
 		}
 
-		BufferedReader in = new BufferedReader(new FileReader(fn));
+		BufferedReader in = new BufferedReader(new InputStreamReader(us.bringardner.parley.files.FileSource.of(fn).getInputStream(), java.nio.charset.StandardCharsets.UTF_8));
+
 		String line = in.readLine();
 		line = in.readLine();
 		line = in.readLine();
