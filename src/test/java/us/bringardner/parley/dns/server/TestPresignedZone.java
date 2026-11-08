@@ -76,7 +76,7 @@ public class TestPresignedZone {
 		server = new DnsServer();
 		server.setRecursionAvailable(false);
 		dir = Files.createTempDirectory("presigned").toFile();
-		server.setDnssecKeyDir(dir);
+		server.setDnssecKeyDir(us.bringardner.parley.files.FileSource.of(dir));
 	}
 
 	@AfterEach
@@ -217,7 +217,7 @@ public class TestPresignedZone {
 	@Test
 	public void ourKeysAreNotUsedAndNothingIsResigned() throws Exception {
 		DnssecKey mine = DnssecKey.generate("signed.test", Algorithm.of(13), true, 0);
-		mine.save(dir);
+		mine.save(us.bringardner.parley.files.FileSource.of(dir));
 		Zone z = load("nsec");
 		SignedZone sz = z.getSigned();
 		assertTrue(sz.isPresigned());

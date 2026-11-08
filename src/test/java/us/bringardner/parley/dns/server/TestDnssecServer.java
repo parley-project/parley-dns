@@ -101,15 +101,15 @@ public class TestDnssecServer {
 		dir = Files.createTempDirectory("dnssec").toFile();
 		ksk = DnssecKey.generate("sec.test", Algorithm.of(Algorithm.ECDSAP256SHA256), true, 0);
 		zsk = DnssecKey.generate("sec.test", Algorithm.of(Algorithm.ECDSAP256SHA256), false, 0);
-		ksk.save(dir);
-		zsk.save(dir);
+		ksk.save(us.bringardner.parley.files.FileSource.of(dir));
+		zsk.save(us.bringardner.parley.files.FileSource.of(dir));
 		DnssecKey child = DnssecKey.generate("secure.sec.test", Algorithm.of(Algorithm.ECDSAP256SHA256), true, 0);
 		childDs = child.toDs(Ds.SHA256, 3600).getRdataAsString();
 		zoneFile = new File(dir, "sec.test.txt");
 		write(zoneFile, zoneText(100, childDs));
 		server = new DnsServer();
 		server.setRecursionAvailable(false);
-		server.setDnssecKeyDir(dir);
+		server.setDnssecKeyDir(us.bringardner.parley.files.FileSource.of(dir));
 		server.addZone(new Zone(zoneFile));
 	}
 
@@ -556,7 +556,7 @@ public class TestDnssecServer {
 	public void keysDecideWhatIsSigned() throws Exception {
 		//  A published-only key (no .private) is in the DNSKEY set but signs nothing
 		DnssecKey next = DnssecKey.generate("sec.test", Algorithm.of(Algorithm.ECDSAP256SHA256), false, 0);
-		next.save(dir);
+		next.save(us.bringardner.parley.files.FileSource.of(dir));
 		assertTrue(new File(dir, next.baseName()+".private").delete());
 		server.addZone(new Zone(zoneFile));
 		Message m = ask("sec.test", DNS.DNSKEY);
@@ -585,7 +585,7 @@ public class TestDnssecServer {
 		}
 		ksk = DnssecKey.generate("sec.test", Algorithm.of(Algorithm.ECDSAP256SHA256), true, 0);
 		zsk = ksk;
-		ksk.save(dir);
+		ksk.save(us.bringardner.parley.files.FileSource.of(dir));
 		server.addZone(new Zone(zoneFile));
 		Message m = ask("www.sec.test", DNS.A);
 		assertEquals(ksk.getKeyTag(), ((Rrsig)of(m.getAnswer(), "www.sec.test", DNS.RRSIG).get(0)).getKeyTag());

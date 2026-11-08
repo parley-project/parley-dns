@@ -23,13 +23,13 @@
  */
 package us.bringardner.parley.dns.dnssec;
 
-import java.io.File;
 import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 import us.bringardner.parley.dns.Ds;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Command line tool for DNSSEC keys.
@@ -64,7 +64,7 @@ public final class DnssecKeyTool {
 		String alg = "ECDSAP256SHA256";
 		int bits = 0;
 		String kind = "csk";
-		File dir = new File(".");
+		String dirName = null;
 		String zone = null;
 		try {
 			for(int i=1; i < args.length; i++ ) {
@@ -74,7 +74,7 @@ public final class DnssecKeyTool {
 				case "-b": bits = Integer.parseInt(args[++i]); break;
 				case "-ksk": kind = "ksk"; break;
 				case "-zsk": kind = "zsk"; break;
-				case "-d": dir = new File(args[++i]); break;
+				case "-d": dirName = args[++i]; break;
 				default:
 					if( a.startsWith("-") || zone != null ) {
 						return usage(err);
@@ -89,6 +89,10 @@ public final class DnssecKeyTool {
 			return usage(err);
 		}
 		try {
+			//  a path on the default file system, or a filesource: URL; by default the working
+			//  directory (its canonical path: FileSource.of(".") would end in "/.")
+			FileSource dir = dirName == null ? FileSource.of(".").getCanonicalFile() : FileSource.of(dirName);
+
 			switch(cmd) {
 			case "keygen": {
 				if( !dir.isDirectory() ) {
@@ -96,7 +100,8 @@ public final class DnssecKeyTool {
 					return 1;
 				}
 				DnssecKey k = DnssecKey.generate(zone, Algorithm.of(alg), !kind.equals("zsk"), bits);
-				File f = k.save(dir);
+				FileSource f = k.save(dir);
+
 				out.println("Wrote "+f+" and its .private file ("+k+")");
 				if( k.isKsk() ) {
 					out.println("DS records for the parent zone of "+k.getZone()+":");

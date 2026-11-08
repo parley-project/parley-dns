@@ -744,7 +744,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			setAxfrAllow(stringProperty(PROP_AXFR_ALLOW));
 			notifyKeyName = stringProperty(PROP_NOTIFY_KEY);
 			String kd = stringProperty(PROP_DNSSEC_KEY_DIR);
-			setDnssecKeyDir(kd == null ? null : new File(kd));
+			setDnssecKeyDir(kd == null ? null : FileSource.of(kd));
 			setDnssecValidity(durationSecondsProperty(PROP_DNSSEC_VALIDITY, dnssecValidity));
 			setDnssecNsec3(stringProperty(PROP_DNSSEC_NSEC3),
 					us.bringardner.parley.dns.dnssec.Nsec3Params.parse(intProperty(PROP_DNSSEC_NSEC3_ITERATIONS, 0),
@@ -2691,21 +2691,21 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 */
 	// ------------------------------------------------------------ DNSSEC
 
-	private volatile File dnssecKeyDir;
+	private volatile FileSource dnssecKeyDir;
 	private volatile int dnssecValidity = ZoneSigner.DEFAULT_VALIDITY;
 	private volatile Map<String, List<DnssecKey>> dnssecKeys = Collections.emptyMap();
 	private volatile long dnssecKeyStamp = Long.MIN_VALUE;
 
 	/** The directory of the DNSSEC keys; null for the default (the zone directory). */
-	public void setDnssecKeyDir(File dir) {
+	public void setDnssecKeyDir(FileSource dir) {
 		dnssecKeyDir = dir;
 		dnssecKeyStamp = Long.MIN_VALUE;
 	}
 
 	/** The directory the DNSSEC keys are read from (null if there is none yet). */
-	public File getDnssecKeyDir() {
-		File d = dnssecKeyDir;
-		return d != null ? d : zoneDir;
+	public FileSource getDnssecKeyDir() {
+		FileSource d = dnssecKeyDir;
+		return d != null ? d : zoneDir == null ? null : FileSource.of(zoneDir);
 	}
 
 	/** How long signatures are valid, in seconds (at least an hour). */
@@ -2763,8 +2763,9 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 	/** Read the key directory again if a key file was added, removed or changed. */
 	synchronized void reloadDnssecKeys() {
-		File dir = getDnssecKeyDir();
+		FileSource dir = getDnssecKeyDir();
 		long stamp = DnssecKey.dirStamp(dir);
+
 		if( stamp == dnssecKeyStamp ) {
 			return;
 		}

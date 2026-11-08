@@ -24,11 +24,10 @@
 package us.bringardner.parley.dns.dnssec;
 
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.MessageDigest;
@@ -43,6 +42,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TimeZone;
 
+import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.DnsBaseClass;
 import us.bringardner.parley.dns.Dnskey;
@@ -67,10 +67,10 @@ public final class DnssecKey {
 	private final Dnskey dnskey;
 	private final Algorithm algorithm;
 	private final PrivateKey privateKey;
-	private final File keyFile;
+	private final FileSource keyFile;
 	private final Map<String, Long> times;
 
-	private DnssecKey(String zone, Dnskey dnskey, PrivateKey privateKey, File keyFile, Map<String, Long> times) {
+	private DnssecKey(String zone, Dnskey dnskey, PrivateKey privateKey, FileSource keyFile, Map<String, Long> times) {
 		this.zone = Canonical.key(zone);
 		this.dnskey = dnskey;
 		this.algorithm = Algorithm.of(dnskey.getAlgorithm());
@@ -107,7 +107,7 @@ public final class DnssecKey {
 	}
 
 	/** The .key file this key was read from (null if it was never saved). */
-	public File getKeyFile() {
+	public FileSource getKeyFile() {
 		return keyFile;
 	}
 
@@ -224,16 +224,18 @@ public final class DnssecKey {
 	 * Write the .key and .private files into dir (the private file readable
 	 * by the owner only, where the file system allows it).
 	 *
+	 * @param dir the folder, on any file system
 	 * @return the .key file
 	 */
-	public File save(File dir) throws IOException {
+	public FileSource save(FileSource dir) throws IOException {
 		if( pair == null ) {
 			throw new IllegalStateException("only a newly generated key can be saved");
 		}
-		File key = new File(dir, baseName()+".key");
-		File priv = new File(dir, baseName()+".private");
-		for(File f : new File[] {key, priv}) {
-			if( Files.exists(f.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS) ) {
+		FileSource key = dir.getChild(baseName()+".key");
+		FileSource priv = dir.getChild(baseName()+".private");
+		for(FileSource f : new FileSource[] {key, priv}) {
+			//  (a link is refused even if what it leads to is missing)
+			if( f.getLinkedTo() != null || f.exists() ) {
 				throw new IOException(f+" already exists");
 			}
 		}
@@ -249,8 +251,8 @@ public final class DnssecKey {
 			}
 		}
 		//  Round 5 #94: created new (an existing file or symlink is refused) and readable by
-		//  its owner only from the start, not chmod'ed after it was created
-		us.bringardner.parley.core.util.PrivateKeys.writePrivateFile(priv, p.toString());
+		//  its owner only before the key goes in
+		writeNewFile(priv, p.toString(), true);
 		StringBuilder k = new StringBuilder();
 		k.append("; This is a ").append(isKsk() ? "key-signing" : "zone-signing").append(" key, keyid ")
 			.append(getKeyTag()).append(", for ").append(zone).append(".\n");
@@ -263,14 +265,86 @@ public final class DnssecKey {
 		k.append(zone).append(". ").append(dnskey.getTTL()).append(" IN DNSKEY ").append(dnskey.getRdataAsString()).append('\n');
 		try {
 			//  a new file only: never through a link planted where it goes
-			Files.write(key.toPath(), k.toString().getBytes(StandardCharsets.US_ASCII), java.nio.file.StandardOpenOption.CREATE_NEW,
-					java.nio.file.StandardOpenOption.WRITE);
+			writeNewFile(key, k.toString(), false);
 		} catch(IOException | RuntimeException ex) {
 			//  no .private without its .key (a retry would find it in the way)
-			Files.deleteIfExists(priv.toPath());
+			deleteQuietly(priv, ex);
 			throw ex;
 		}
 		return key;
+	}
+
+	/**
+	 * Write TEXT (US-ASCII) to a new file: createNewFile is atomic, so an existing file or link
+	 * (planted where it goes) is refused, not written through.
+	 * @param ownerOnly readable by its owner only (a private key), before anything is written into it
+	 */
+	private static void writeNewFile(FileSource f, String text, boolean ownerOnly) throws IOException {
+		if( !f.createNewFile() ) {
+			throw new IOException(f+" already exists");
+		}
+		try {
+			if( f.getLinkedTo() != null ) {
+				//  replaced by a link since it was created
+				throw new IOException(f+" is a link");
+			}
+			if( ownerOnly ) {
+				restrictToOwner(f);
+			}
+			try(OutputStream out = f.getOutputStream()) {
+				out.write(text.getBytes(StandardCharsets.US_ASCII));
+			}
+		} catch(IOException | RuntimeException ex) {
+			deleteQuietly(f, ex);
+			throw ex;
+		}
+	}
+
+	/**
+	 * Only its owner can read or write the file. Where the file system has permissions it must
+	 * take them: a file it still says others can read is refused.
+	 */
+	private static void restrictToOwner(FileSource f) throws IOException {
+		f.setOwnerReadable(true);
+		f.setOwnerWritable(true);
+		f.setOwnerExecutable(false);
+		f.setGroupReadable(false);
+		f.setGroupWritable(false);
+		f.setGroupExecutable(false);
+		f.setOtherReadable(false);
+		f.setOtherWritable(false);
+		f.setOtherExecutable(false);
+		String exposed = exposure(f);
+		if( exposed != null ) {
+			throw new IOException("Can't make "+f+" readable by its owner only: it is "+exposed);
+		}
+	}
+
+	/**
+	 * A private key file others can read may already be in other hands.
+	 * @return what is wrong ("readable by everyone", "readable by its group"), or null if only its
+	 *  owner can read it, or the file system can't tell
+	 */
+	static String exposure(FileSource f) {
+		try {
+			if( f.canOtherRead() ) {
+				return "readable by everyone";
+			}
+			if( f.canGroupRead() ) {
+				return "readable by its group";
+			}
+			return null;
+		} catch(IOException | UnsupportedOperationException e) {
+			return null;
+		}
+	}
+
+	private static void deleteQuietly(FileSource f, Exception why) {
+		try {
+			f.delete();
+		} catch(IOException e) {
+			why.addSuppressed(e);
+		}
 	}
 
 	// ------------------------------------------------------------ reading keys
@@ -279,14 +353,14 @@ public final class DnssecKey {
 	 * Read a key from its .key file and, if it exists next to it, the
 	 * .private file.
 	 */
-	public static DnssecKey load(File keyFile) throws IOException {
+	public static DnssecKey load(FileSource keyFile) throws IOException {
 		Dnskey k = readKeyFile(keyFile);
-		String path = keyFile.getPath();
-		File priv = new File(path.substring(0, path.length()-".key".length())+".private");
+		String name = keyFile.getName();
+		FileSource priv = DnssecKey.sibling(keyFile, name.substring(0, name.length()-".key".length())+".private");
 		PrivateKey pk = null;
 		Map<String, Long> times = new LinkedHashMap<String, Long>();
 		if( priv.isFile() ) {
-			String exposed = us.bringardner.parley.core.util.PrivateKeys.exposure(priv);
+			String exposed = exposure(priv);
 			if( exposed != null ) {
 				//  Round 5 #94: the key may already be in other hands. A group-readable key is
 				//  a common setup (root:named 0640), so that is only noted.
@@ -323,7 +397,13 @@ public final class DnssecKey {
 		return new DnssecKey(k.getName(), k, pk, keyFile, times);
 	}
 
-	private static Long parseTime(File f, String name, String v) throws IOException {
+	/** The file named NAME in F's folder. */
+	private static FileSource sibling(FileSource f, String name) throws IOException {
+		FileSource dir = f.getParentFile();
+		return dir == null ? f.getFileSourceFactory().createFileSource(name) : dir.getChild(name);
+	}
+
+	private static Long parseTime(FileSource f, String name, String v) throws IOException {
 		try {
 			SimpleDateFormat fmt = new SimpleDateFormat("yyyyMMddHHmmss");
 			fmt.setTimeZone(TimeZone.getTimeZone("UTC"));
@@ -340,9 +420,9 @@ public final class DnssecKey {
 		return fmt.format(new Date(secs*1000));
 	}
 
-	private static Map<String, String> readFields(File f) throws IOException {
+	private static Map<String, String> readFields(FileSource f) throws IOException {
 		Map<String, String> ret = new LinkedHashMap<String, String>();
-		try(BufferedReader in = new BufferedReader(new InputStreamReader(Files.newInputStream(f.toPath()), StandardCharsets.US_ASCII))) {
+		try(BufferedReader in = new BufferedReader(new InputStreamReader(f.getInputStream(), StandardCharsets.US_ASCII))) {
 			String line;
 			while( (line = in.readLine()) != null ) {
 				int i = line.indexOf(':');
@@ -355,9 +435,9 @@ public final class DnssecKey {
 	}
 
 	/** The DNSKEY record in a .key file: owner [ttl] [class] DNSKEY flags protocol algorithm key. */
-	static Dnskey readKeyFile(File f) throws IOException {
+	static Dnskey readKeyFile(FileSource f) throws IOException {
 		StringBuilder text = new StringBuilder();
-		try(BufferedReader in = new BufferedReader(new InputStreamReader(Files.newInputStream(f.toPath()), StandardCharsets.US_ASCII))) {
+		try(BufferedReader in = new BufferedReader(new InputStreamReader(f.getInputStream(), StandardCharsets.US_ASCII))) {
 			String line;
 			while( (line = in.readLine()) != null ) {
 				int c = line.indexOf(';');
@@ -416,16 +496,21 @@ public final class DnssecKey {
 	/**
 	 * All the keys in a directory (files K*.key), grouped by zone (lower
 	 * case, no trailing dot). A key file that can't be read is reported to
-	 * errors and skipped.
+	 * errors and skipped; so is a directory that can't be listed.
 	 */
-	public static Map<String, List<DnssecKey>> loadDir(File dir, List<String> errors) {
+	public static Map<String, List<DnssecKey>> loadDir(FileSource dir, List<String> errors) {
 		Map<String, List<DnssecKey>> ret = new LinkedHashMap<String, List<DnssecKey>>();
-		File [] list = dir == null ? null : dir.listFiles((d, n) -> n.startsWith("K") && n.endsWith(".key"));
+		FileSource [] list;
+		try {
+			list = keyFiles(dir, false);
+		} catch(IOException ex) {
+			errors.add(dir+": can't list it: "+ex.getMessage());
+			return ret;
+		}
 		if( list == null ) {
 			return ret;
 		}
-		java.util.Arrays.sort(list);
-		for(File f : list) {
+		for(FileSource f : list) {
 			try {
 				DnssecKey k = load(f);
 				ret.computeIfAbsent(k.getZone(), z -> new ArrayList<DnssecKey>()).add(k);
@@ -436,19 +521,44 @@ public final class DnssecKey {
 		return ret;
 	}
 
-	/** A stamp that changes when a key file is added, removed or changed. */
-	public static long dirStamp(File dir) {
-		File [] list = dir == null ? null : dir.listFiles((d, n) -> n.startsWith("K") && (n.endsWith(".key") || n.endsWith(".private")));
-		if( list == null ) {
-			return 0;
-		}
-		java.util.Arrays.sort(list);
+	/**
+	 * A stamp that changes when a key file is added, removed or changed. A directory that
+	 * doesn't exist or can't be listed has the stamp 0 (loadDir says why).
+	 */
+	public static long dirStamp(FileSource dir) {
 		long ret = 17;
-		for(File f : list) {
-			ret = ret*31 + f.getName().hashCode();
-			ret = ret*31 + f.lastModified();
-			ret = ret*31 + f.length();
+		try {
+			FileSource [] list = keyFiles(dir, true);
+			if( list == null ) {
+				return 0;
+			}
+			for(FileSource f : list) {
+				ret = ret*31 + f.getName().hashCode();
+				ret = ret*31 + f.lastModified();
+				ret = ret*31 + f.length();
+			}
+		} catch(IOException ex) {
+			return 0;
 		}
 		return ret;
 	}
+
+	/**
+	 * The key files in DIR (K*.key, and K*.private too if withPrivate), sorted by name; null if
+	 * dir is null or not a directory (as File.listFiles).
+	 */
+	private static FileSource [] keyFiles(FileSource dir, boolean withPrivate) throws IOException {
+		if( dir == null || !dir.isDirectory() ) {
+			return null;
+		}
+		FileSource [] ret = dir.listFiles(f -> {
+			String n = f.getName();
+			return n.startsWith("K") && (n.endsWith(".key") || (withPrivate && n.endsWith(".private")));
+		});
+		if( ret != null ) {
+			java.util.Arrays.sort(ret, (a, b) -> a.getName().compareTo(b.getName()));
+		}
+		return ret;
+	}
+
 }

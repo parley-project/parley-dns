@@ -79,7 +79,7 @@ public class TestNsec3Server {
 	public void setup() throws Exception {
 		dir = Files.createTempDirectory("nsec3").toFile();
 		key = DnssecKey.generate("sec.test", Algorithm.of(Algorithm.ECDSAP256SHA256), true, 0);
-		key.save(dir);
+		key.save(us.bringardner.parley.files.FileSource.of(dir));
 		DnssecKey child = DnssecKey.generate("secure.sec.test", Algorithm.of(Algorithm.ECDSAP256SHA256), true, 0);
 		zoneFile = new File(dir, "sec.test.txt");
 		try(FileWriter w = new FileWriter(zoneFile)) {
@@ -101,7 +101,7 @@ public class TestNsec3Server {
 		}
 		server = new DnsServer();
 		server.setRecursionAvailable(false);
-		server.setDnssecKeyDir(dir);
+		server.setDnssecKeyDir(us.bringardner.parley.files.FileSource.of(dir));
 		server.setDnssecNsec3("*", params);
 		server.addZone(new Zone(zoneFile));
 	}

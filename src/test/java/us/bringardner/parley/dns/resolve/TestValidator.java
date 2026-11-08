@@ -79,7 +79,7 @@ public class TestValidator {
 
 	private static DnssecKey key(File dir, String zone) throws Exception {
 		DnssecKey k = DnssecKey.generate(zone, Algorithm.of(Algorithm.ECDSAP256SHA256), true, 0);
-		k.save(dir);
+		k.save(us.bringardner.parley.files.FileSource.of(dir));
 		return k;
 	}
 
@@ -102,7 +102,7 @@ public class TestValidator {
 		zone(dir, "insecure.test", "ns1 A 10.0.0.4\nwww A 10.0.2.80\nssh SSHFP 4 2 "+TestSshfp.ED25519_SHA256+"\n");
 		zone(dir, "bogus.test", "ns1 A 10.0.0.5\nwww A 10.0.3.80\n");
 		server.setRecursionAvailable(false);
-		server.setDnssecKeyDir(dir);
+		server.setDnssecKeyDir(us.bringardner.parley.files.FileSource.of(dir));
 		server.setDnssecNsec3("n3.test", Nsec3Params.DEFAULT);
 		for(String z : new String[] {"test", "sec.test", "n3.test", "insecure.test", "bogus.test"}) {
 			server.addZone(new Zone(new File(dir, z+".txt")));

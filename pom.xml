@@ -113,6 +113,15 @@
 			<scope>test</scope>
 		</dependency>
 
+		<!-- @ParameterizedTest: tests run on the local and the memory file system -->
+		<dependency>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter-params</artifactId>
+			<version>5.11.4</version>
+			<scope>test</scope>
+		</dependency>
+
+
 
 	</dependencies>
 
