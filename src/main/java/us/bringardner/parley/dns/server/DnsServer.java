@@ -26,7 +26,6 @@
 package us.bringardner.parley.dns.server;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InputStream;
@@ -63,6 +62,7 @@ import us.bringardner.parley.dns.dnssec.Canonical;
 import us.bringardner.parley.dns.dnssec.DnssecKey;
 import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.dns.resolve.Resolver;
+import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.net.server.IDomainList;
 import us.bringardner.parley.net.server.PropertiesDomainList;
 
@@ -424,15 +424,16 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 */
 	private void loadSettingsFile() throws IOException {
 		String propertyFile = getProperty(PROP_DNS_PROPERTIES);
-		File f = (propertyFile == null || propertyFile.trim().isEmpty()
-				? new File(us.bringardner.parley.net.server.ServerMain.confDir(), DEFAULT_PROPERTIES_FILE_NAME)
-				: new File(propertyFile.trim())).getCanonicalFile();
+		// (parley-net's confDir is a FileSource; the setting may be a filesource: URL)
+		FileSource f = (propertyFile == null || propertyFile.trim().isEmpty()
+				? us.bringardner.parley.net.server.ServerMain.confDir().getChild(DEFAULT_PROPERTIES_FILE_NAME)
+				: FileSource.of(propertyFile.trim())).getCanonicalFile();
 
 		Properties prop1 = System.getProperties();
 		//  First load the properties from the file
 		if( f.exists() ) {
 			log("Loading properties from "+f);
-			InputStream in = new FileInputStream(f);
+			InputStream in = f.getInputStream();
 			try {
 				Properties prop2 = new Properties();
 				prop2.load(in);
