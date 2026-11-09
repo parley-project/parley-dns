@@ -26,9 +26,6 @@
 package us.bringardner.parley.dns;
 
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-
-import java.io.File;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
@@ -70,14 +67,6 @@ public class TestDns implements DNS {
 
 
 
-	static class TestFIle extends File {
-
-		private static final long serialVersionUID = 1L;
-
-		public TestFIle(String name) {
-			super( name);
-		}		
-	}
 
 	private int testQCodes[] = {A,NS,MX,CNAME,SOA,MB,MG,MR,WKS,PTR,HINFO,MINFO,TXT};
 

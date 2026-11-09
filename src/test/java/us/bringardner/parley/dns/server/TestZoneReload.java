@@ -30,22 +30,27 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
-import java.nio.file.Files;
+import java.io.Writer;
+import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.DNS;
+import us.bringardner.parley.dns.TestFiles;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Offline tests for atomic zone loading / reloading in DnsServer.
  */
 public class TestZoneReload {
+
+	@TempDir
+	static Path tmp;
 
 	private static String zoneText(String zone, String wwwIp) {
 		return "@\tIN\tSOA\tns1."+zone+". postmaster."+zone+". (\n"
@@ -56,14 +61,14 @@ public class TestZoneReload {
 				+"www\tIN\tA\t"+wwwIp+"\n";
 	}
 
-	private static void write(File f, String text) throws IOException {
-		try(FileWriter w = new FileWriter(f)) {
+	private static void write(FileSource f, String text) throws IOException {
+		try(Writer w = TestFiles.writer(f)) {
 			w.write(text);
 		}
 	}
 
 	/** Make a file look modified (timestamps can have 1s resolution). */
-	private static void touch(File f, long bumpMs) {
+	private static void touch(FileSource f, long bumpMs) throws Exception {
 		f.setLastModified(f.lastModified()+bumpMs);
 	}
 
@@ -74,9 +79,9 @@ public class TestZoneReload {
 
 	/** A server whose zone dir holds a.test (default) and b.test */
 	private static class Fixture implements AutoCloseable {
-		final File dir;
-		final File a;
-		final File b;
+		final FileSource dir;
+		final FileSource a;
+		final FileSource b;
 		final DnsServer server = new DnsServer();
 		//  Restored in close(): left behind, they pointed later tests (TestDns)
 		//  at a deleted zone directory.
@@ -84,9 +89,9 @@ public class TestZoneReload {
 		final String savedDefaultZone = System.getProperty(DnsServer.PROP_DEFAULT_ZONE);
 
 		Fixture() throws IOException {
-			dir = Files.createTempDirectory("zones").toFile();
-			a = new File(dir,"a.test.txt");
-			b = new File(dir,"b.test.txt");
+			dir = TestFiles.newFolder(tmp, "zones");
+			a = dir.getChild("a.test.txt");
+			b = dir.getChild("b.test.txt");
 			write(a, zoneText("a.test","10.0.0.1"));
 			write(b, zoneText("b.test","10.0.0.2"));
 			System.setProperty(DnsServer.PROP_ZONE_DIR, dir.getAbsolutePath());
@@ -98,10 +103,6 @@ public class TestZoneReload {
 		public void close() {
 			restore(DnsServer.PROP_ZONE_DIR, savedZoneDir);
 			restore(DnsServer.PROP_DEFAULT_ZONE, savedDefaultZone);
-			for(File f : dir.listFiles()) {
-				f.delete();
-			}
-			dir.delete();
 		}
 
 		private void restore(String key, String value) {
@@ -142,7 +143,7 @@ public class TestZoneReload {
 	@Test
 	public void addedAndRemovedFiles() throws Exception {
 		try(Fixture fx = new Fixture()) {
-			File c = new File(fx.dir,"c.test.txt");
+			FileSource c = fx.dir.getChild("c.test.txt");
 			write(c, zoneText("c.test","10.0.0.3"));
 			assertTrue(fx.server.shouldReloadZones());
 			fx.server.loadZones();
@@ -161,7 +162,7 @@ public class TestZoneReload {
 		// The old check compared the file count to zones.size(), so one bad
 		// file made shouldReloadZones() true forever (reload every minute).
 		try(Fixture fx = new Fixture()) {
-			File bad = new File(fx.dir,"bad.test.txt");
+			FileSource bad = fx.dir.getChild("bad.test.txt");
 			write(bad, zoneText("bad.test","not.an.ip.address"));
 			fx.server.loadZones();
 			assertNull(fx.server.getZone("bad.test"));
@@ -232,7 +233,7 @@ public class TestZoneReload {
 	@Test
 	public void addZoneStillWorks() throws Exception {
 		try(Fixture fx = new Fixture()) {
-			File extra = new File(fx.dir,"x.test.txt.later");
+			FileSource extra = fx.dir.getChild("x.test.txt.later");
 			write(extra, zoneText("x.test","10.0.0.8"));
 			Zone x = new Zone(extra);
 			fx.server.addZone(x);

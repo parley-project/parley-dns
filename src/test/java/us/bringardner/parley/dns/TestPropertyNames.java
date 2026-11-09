@@ -23,22 +23,23 @@
  */
 package us.bringardner.parley.dns;
 
-import us.bringardner.parley.core.util.RenamedProperty;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.junit.jupiter.api.Test;
+
+import us.bringardner.parley.core.util.RenamedProperty;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Property naming rules: every property has a PROP_ constant whose value
@@ -79,7 +80,7 @@ public class TestPropertyNames {
 
 	@Test
 	public void everyPropertyIsInTheReadme() throws Exception {
-		String readme = new String(Files.readAllBytes(new File(Fixtures.projectDir(), "README.md").toPath()), StandardCharsets.UTF_8);
+		String readme = new String(TestFiles.bytes(Fixtures.projectDir().getChild("README.md")), StandardCharsets.UTF_8);
 		for(String n : propertyNames()) {
 			String value = n.substring(n.indexOf('=')+1);
 			assertTrue(readme.contains("`"+value+"`"), value+" ("+n.substring(0, n.indexOf('='))+") is not in README.md");
@@ -91,11 +92,11 @@ public class TestPropertyNames {
 		//  Literal names passed to the property readers (NsLookup excluded)
 		Pattern p = Pattern.compile("(?:getProperty|stringProperty|intProperty|RenamedProperty\\.get)\\(\\s*\"([^\"]+)\"");
 		List<String> found = new ArrayList<String>();
-		for(File f : sources(new File(Fixtures.projectDir(), "src/main/java"))) {
+		for(FileSource f : sources(Fixtures.projectDir().getChild("src/main/java"))) {
 			if( f.getName().equals("NsLookup.java") ) {
 				continue;
 			}
-			String text = new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
+			String text = new String(TestFiles.bytes(f), StandardCharsets.UTF_8);
 			Matcher m = p.matcher(text);
 			while( m.find() ) {
 				found.add(f.getName()+": "+m.group(1));
@@ -104,11 +105,11 @@ public class TestPropertyNames {
 		assertEquals("[]", found.toString());
 	}
 
-	private static List<File> sources(File dir) {
-		List<File> ret = new ArrayList<File>();
-		File [] list = dir.listFiles();
+	private static List<FileSource> sources(FileSource dir) throws IOException {
+		List<FileSource> ret = new ArrayList<FileSource>();
+		FileSource [] list = dir.listFiles();
 		if( list != null ) {
-			for(File f : list) {
+			for(FileSource f : list) {
 				if( f.isDirectory() ) {
 					ret.addAll(sources(f));
 				} else if( f.getName().endsWith(".java") ) {

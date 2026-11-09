@@ -29,16 +29,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -47,21 +46,27 @@ import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import us.bringardner.parley.core.util.AddressMatcher;
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Soa;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.resolve.QueryData;
-import us.bringardner.parley.core.util.AddressMatcher;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Zone transfers (AXFR, RFC 5936) and NOTIFY (RFC 1996) (rec #41).
  */
 public class TestZoneTransfer {
 
-	private File dir;
+	@TempDir
+	static Path tmp;
+
+	private FileSource dir;
 	private DnsServer server;
 	private static final InetAddress LOOPBACK = InetAddress.getLoopbackAddress();
 	private static final int TCP = -1;		//  QueryData port for a TCP request
@@ -80,10 +85,10 @@ public class TestZoneTransfer {
 				+extra;
 	}
 
-	private File write(String name, String text) throws IOException {
-		File f = new File(dir, name);
+	private FileSource write(String name, String text) throws IOException {
+		FileSource f = dir.getChild(name);
 		f.getParentFile().mkdirs();
-		try(FileWriter w = new FileWriter(f)) {
+		try(Writer w = TestFiles.writer(f)) {
 			w.write(text);
 		}
 		return f;
@@ -91,14 +96,14 @@ public class TestZoneTransfer {
 
 	@BeforeEach
 	public void setup() throws IOException {
-		dir = Files.createTempDirectory("axfr").toFile();
+		dir = TestFiles.newFolder(tmp, "axfr");
 		server = new DnsServer();
 		server.addZone(new Zone(write("xfr.test.txt", zoneText("xfr.test", 7, ""))));
 		server.setRecursionAvailable(false);
 	}
 
 	@AfterEach
-	public void cleanup() {
+	public void cleanup() throws Exception {
 		ZoneNotifier n = server.getNotifier();
 		if( n != null ) {
 			n.shutdown();
@@ -106,10 +111,10 @@ public class TestZoneTransfer {
 		delete(dir);
 	}
 
-	private static void delete(File f) {
-		File [] list = f.listFiles();
+	private static void delete(FileSource f) throws Exception {
+		FileSource [] list = f.listFiles();
 		if( list != null ) {
-			for(File c : list) {
+			for(FileSource c : list) {
 				delete(c);
 			}
 		}
@@ -362,8 +367,8 @@ public class TestZoneTransfer {
 
 	@Test
 	public void notifyOnLoadAndOnSerialChange() throws Exception {
-		File zones = new File(dir,"zones");
-		File zf = write("zones/n.test.txt", zoneText("n.test", 1, ""));
+		FileSource zones = dir.getChild("zones");
+		FileSource zf = write("zones/n.test.txt", zoneText("n.test", 1, ""));
 		String savedDir = System.getProperty(DnsServer.PROP_ZONE_DIR);
 		String savedDefault = System.getProperty(DnsServer.PROP_DEFAULT_ZONE);
 		System.setProperty(DnsServer.PROP_ZONE_DIR, zones.getAbsolutePath());
@@ -390,7 +395,7 @@ public class TestZoneTransfer {
 			assertEquals(1, sec.received.size());
 
 			//  New serial: NOTIFY again
-			try(FileWriter w = new FileWriter(zf)) {
+			try(Writer w = TestFiles.writer(zf)) {
 				w.write(zoneText("n.test", 2, "extra\tIN\tA\t10.0.0.7\n"));
 			}
 			zf.setLastModified(zf.lastModified()+4000);

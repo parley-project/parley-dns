@@ -22,11 +22,8 @@
  */
 package us.bringardner.parley.dns.util;
 
-import us.bringardner.parley.dns.DnsTransport;
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -44,7 +41,6 @@ import java.net.Socket;
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -57,6 +53,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import us.bringardner.parley.dns.ByteBuffer;
+import us.bringardner.parley.dns.DnsTransport;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.Mx;
 import us.bringardner.parley.dns.Ns;
@@ -69,6 +66,7 @@ import us.bringardner.parley.dns.Srv;
 import us.bringardner.parley.dns.Tsig;
 import us.bringardner.parley.dns.Utility;
 import us.bringardner.parley.dns.server.Zone;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * A work-alike of the ISC BIND 9 nsupdate (RFC 2136 dynamic update): the
@@ -545,7 +543,7 @@ public class NsUpdate extends Utility {
 			String f = args[argIndex];
 			if( !f.equals("-") ) {
 				try {
-					in = new BufferedReader(new InputStreamReader(new FileInputStream(f), StandardCharsets.UTF_8));
+					in = new BufferedReader(new InputStreamReader(FileSource.of(f).getInputStream(), StandardCharsets.UTF_8));
 				} catch(IOException ex) {
 					println(err, "could not open '"+f+"': file not found");
 					throw new Exit(1);
@@ -569,10 +567,11 @@ public class NsUpdate extends Utility {
 	static void setupSystem() {
 		ddebug("setup_system()");
 		List<InetAddress> ns = new ArrayList<InetAddress>();
-		File rc = new File(resolvConf);
-		if( rc.exists() ) {
-			try {
-				for(String line : Files.readAllLines(rc.toPath(), StandardCharsets.UTF_8)) {
+		try {
+			//  the operating system's file: on the default file system
+			FileSource rc = FileSource.of(resolvConf);
+			if( rc.exists() ) {
+				for(String line : readLines(rc)) {
 					String [] tok = line.trim().split("\\s+");
 					if( tok.length >= 2 && tok[0].equals("nameserver") ) {
 						String a = tok[1];
@@ -581,9 +580,9 @@ public class NsUpdate extends Utility {
 						}
 					}
 				}
-			} catch(IOException ex) {
-				fatal("parse of "+resolvConf+" failed");
 			}
+		} catch(IOException ex) {
+			fatal("parse of "+resolvConf+" failed");
 		}
 		servers = new ArrayList<InetSocketAddress>();
 		nsInUse = 0;
@@ -680,15 +679,35 @@ public class NsUpdate extends Utility {
 		}
 	}
 
-	/** named.conf key clause: key "name" { algorithm hmac-sha256; secret "..."; }; */
-	static boolean readSessionKey(String file) {
-		File f = new File(file);
-		if( !f.exists() ) {
-			return false;
+	/** A file's text (UTF-8). */
+	private static String readText(FileSource f) throws IOException {
+		try(InputStream in = f.getInputStream()) {
+			return new String(in.readAllBytes(), StandardCharsets.UTF_8);
 		}
+	}
+
+	/** A file's lines (UTF-8). */
+	private static List<String> readLines(FileSource f) throws IOException {
+		List<String> ret = new ArrayList<String>();
+		try(BufferedReader in = new BufferedReader(new InputStreamReader(f.getInputStream(), StandardCharsets.UTF_8))) {
+			String line;
+			while( (line = in.readLine()) != null ) {
+				ret.add(line);
+			}
+		}
+		return ret;
+	}
+
+	/** named.conf key clause: key "name" { algorithm hmac-sha256; secret "..."; }; */
+
+	static boolean readSessionKey(String file) {
 		String text;
 		try {
-			text = new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8);
+			FileSource f = FileSource.of(file);
+			if( !f.exists() ) {
+				return false;
+			}
+			text = readText(f);
 		} catch(IOException ex) {
 			return false;
 		}
@@ -729,15 +748,15 @@ public class NsUpdate extends Utility {
 		} else if( base.length() > 4 && base.endsWith(".key") ) {
 			base = base.substring(0, base.length()-4);
 		}
-		File priv = new File(base+".private");
-		File pub = new File(base+".key");
-		if( priv.exists() && pub.exists() ) {
-			try {
-				String p = new String(Files.readAllBytes(priv.toPath()), StandardCharsets.UTF_8);
+		try {
+			FileSource priv = FileSource.of(base+".private");
+			FileSource pub = FileSource.of(base+".key");
+			if( priv.exists() && pub.exists() ) {
+				String p = readText(priv);
 				Matcher alg = Pattern.compile("(?m)^Algorithm:\\s*(\\d+)").matcher(p);
 				Matcher key = Pattern.compile("(?m)^Key:\\s*(\\S+)").matcher(p);
 				String name = null;
-				for(String line : Files.readAllLines(pub.toPath(), StandardCharsets.UTF_8)) {
+				for(String line : readLines(pub)) {
 					line = line.trim();
 					if( !line.isEmpty() && !line.startsWith(";") ) {
 						name = line.split("\\s+")[0];
@@ -756,9 +775,9 @@ public class NsUpdate extends Utility {
 					setupKeyStr(a+":"+name+":"+key.group(1));
 					return;
 				}
-			} catch(IOException | RuntimeException ex) {
-				//  (try the other format)
 			}
+		} catch(IOException | RuntimeException ex) {
+			//  (try the other format)
 		}
 		if( readSessionKey(file) ) {
 			return;

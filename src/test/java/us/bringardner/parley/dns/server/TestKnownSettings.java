@@ -2,14 +2,13 @@ package us.bringardner.parley.dns.server;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import java.io.File;
 import java.net.ServerSocket;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.net.server.KnownSettings;
+
 
 /**
  * To-Do 2.16: parley-dns's list of settings (META-INF/parley/settings.list) has every name its code
@@ -18,8 +17,6 @@ import us.bringardner.parley.net.server.KnownSettings;
  */
 public class TestKnownSettings {
 
-	@TempDir
-	File dir;
 
 	@Test
 	public void everyConstantIsListed() throws Exception {

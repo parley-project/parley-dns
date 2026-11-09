@@ -7,27 +7,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.io.Writer;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.dns.resolve.ResolverThread;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Rec #53 / #54: a request must have exactly one question (RFC 9619; one
@@ -41,8 +43,11 @@ import us.bringardner.parley.dns.resolve.ResolverThread;
  */
 public class TestQuestionCount {
 
+	@TempDir
+	static Path tmp;
+
 	private static final InetAddress LOOPBACK = InetAddress.getLoopbackAddress();
-	private static File dir;
+	private static FileSource dir;
 	private static DnsServer server;
 	private static Thread udp;
 	private static Thread tcp;
@@ -53,8 +58,8 @@ public class TestQuestionCount {
 
 	@BeforeAll
 	public static void setup() throws Exception {
-		dir = Files.createTempDirectory("qcount").toFile();
-		try(FileWriter w = new FileWriter(new File(dir,"qc.test.txt"))) {
+		dir = TestFiles.newFolder(tmp, "qcount");
+		try(Writer w = TestFiles.writer(dir.getChild("qc.test.txt"))) {
 			w.write("@\tIN\tSOA\tns1.qc.test. postmaster.qc.test. (\n"
 					+"\t\t\t1 ; serial\n\t\t\t3600 ; refresh\n\t\t\t1800 ; retry\n"
 					+"\t\t\t1209600 ; expire\n\t\t\t300 ) ; minimum\n\n"
@@ -97,10 +102,6 @@ public class TestQuestionCount {
 		DnsServer.setShutdown(false);
 		restore(DnsServer.PROP_ZONE_DIR, savedZoneDir);
 		restore(DnsServer.PROP_DEFAULT_ZONE, savedMaster);
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	private static void restore(String k, String v) {

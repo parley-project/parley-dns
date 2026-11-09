@@ -27,8 +27,6 @@ package us.bringardner.parley.dns.util;
 
 import us.bringardner.parley.dns.DnsTransport;
 import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -56,6 +54,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import us.bringardner.parley.core.ParleyLogger;
+import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.core.ILogger;
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.ByteBuffer;
@@ -634,13 +633,18 @@ public class NsLookup extends Utility {
 	/** resolv.conf: servers, search list, ndots, timeout and attempts. */
 	static void loadResolvConf() {
 		String path = System.getProperty(PROP_RESOLV_CONF, DEFAULT_RESOLV_CONF);
-		File f = new File(path);
-		if( !f.canRead() ) {
-			return;
-		}
-		try(Reader r = new FileReader(f)) {
-			applyResolvConf(r);
+		try {
+			//  the operating system's file: on the default file system
+			FileSource f = FileSource.of(path);
+			if( !f.exists() || !f.canRead() ) {
+				return;
+			}
+			//  (was read in the platform's encoding: resolv.conf is ASCII)
+			try(Reader r = new InputStreamReader(f.getInputStream(), java.nio.charset.StandardCharsets.UTF_8)) {
+				applyResolvConf(r);
+			}
 		} catch(IOException ex) {
+
 			println(err, "nslookup: can't read "+path+": "+ex.getMessage());
 		}
 	}

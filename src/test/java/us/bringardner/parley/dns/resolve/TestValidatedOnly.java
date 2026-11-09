@@ -4,15 +4,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
 import java.net.InetAddress;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.UnaryOperator;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.ByteBuffer;
@@ -23,8 +23,10 @@ import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.Ns;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Section;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.dnssec.DnssecKey;
 import us.bringardner.parley.dns.server.DnsServer;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Round 5 #83: a SECURE answer went out with the AD bit although only the
@@ -35,6 +37,9 @@ import us.bringardner.parley.dns.server.DnsServer;
  */
 public class TestValidatedOnly {
 
+	@TempDir
+	static Path tmp;
+
 	private static final InetAddress LOOPBACK = InetAddress.getLoopbackAddress();
 	private final AtomicLong now = new AtomicLong(System.currentTimeMillis()/1000);
 	private volatile UnaryOperator<Message> tamper = UnaryOperator.identity();
@@ -44,7 +49,7 @@ public class TestValidatedOnly {
 
 	@BeforeEach
 	public void setup() throws Exception {
-		File dir = Files.createTempDirectory("validonly").toFile();
+		FileSource dir = TestFiles.newFolder(tmp, "validonly");
 		server = new DnsServer();
 		anchorKey = TestValidator.hierarchy(dir, server);
 		v = new Validator(this::ask, now::get, Validator.parseAnchors("test. IN DS "

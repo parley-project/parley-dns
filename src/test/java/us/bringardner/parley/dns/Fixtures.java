@@ -1,13 +1,15 @@
 package us.bringardner.parley.dns;
 
-import java.io.File;
+import java.io.IOException;
 import java.net.URISyntaxException;
 import java.net.URL;
+
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Test fixtures (zone files, nslookup / nsupdate scripts, keys) live in src/test/resources and are
  * found on the test class path, so the tests don't depend on the working directory or on where the
- * build puts its output.
+ * build puts its output. They are FileSources on the local file system.
  */
 public final class Fixtures {
 
@@ -21,17 +23,17 @@ public final class Fixtures {
 	 * @return the project folder
 	 * @throws IllegalStateException if there is no pom.xml above the test classes
 	 */
-	public static File projectDir() {
-		File dir;
+	public static FileSource projectDir() {
+		FileSource dir;
 		try {
-			dir = new File(Fixtures.class.getProtectionDomain().getCodeSource().getLocation().toURI());
-		} catch(URISyntaxException e) {
-			throw new IllegalStateException(e);
-		}
-		for(File d = dir; d != null; d = d.getParentFile()) {
-			if( new File(d, "pom.xml").isFile() ) {
-				return d;
+			dir = FileSource.of(Fixtures.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+			for(FileSource d = dir; d != null; d = d.getParentFile()) {
+				if( d.getChild("pom.xml").isFile() ) {
+					return d;
+				}
 			}
+		} catch(URISyntaxException | IOException e) {
+			throw new IllegalStateException(e);
 		}
 		throw new IllegalStateException("no pom.xml above "+dir);
 	}
@@ -41,15 +43,16 @@ public final class Fixtures {
 	 * @return the fixture as a file
 	 * @throws IllegalStateException if it is not on the test class path
 	 */
-	public static File file(String path) {
+	public static FileSource file(String path) {
 		URL url = Fixtures.class.getResource("/"+path);
 		if( url == null ) {
 			throw new IllegalStateException(path+" is not on the test class path (src/test/resources)");
 		}
 		try {
-			return new File(url.toURI());
-		} catch(URISyntaxException e) {
+			return FileSource.of(url.toURI());
+		} catch(URISyntaxException | IOException e) {
 			throw new IllegalStateException(url.toString(), e);
 		}
 	}
+
 }

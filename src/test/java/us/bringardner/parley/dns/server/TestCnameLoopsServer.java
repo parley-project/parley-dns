@@ -26,23 +26,25 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.InetAddress;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.resolve.QueryData;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Offline tests: the authoritative server must not recurse forever on CNAME
@@ -50,13 +52,16 @@ import us.bringardner.parley.dns.resolve.QueryData;
  */
 public class TestCnameLoopsServer {
 
-	private static File dir;
+	@TempDir
+	static Path tmp;
+
+	private static FileSource dir;
 	private static DnsServer server;
 
 	@BeforeAll
 	public static void setup() throws IOException {
-		dir = Files.createTempDirectory("cnameloop").toFile();
-		File zone = new File(dir,"loop.test.txt");
+		dir = TestFiles.newFolder(tmp, "cnameloop");
+		FileSource zone = dir.getChild("loop.test.txt");
 		StringBuilder z = new StringBuilder();
 		z.append("@\tIN\tSOA\tns1.loop.test. postmaster.loop.test. (\n");
 		z.append("\t\t\t1 ; serial\n\t\t\t3600 ; refresh\n\t\t\t1800 ; retry\n");
@@ -73,7 +78,7 @@ public class TestCnameLoopsServer {
 			z.append("c"+i+"\tIN\tCNAME\tc"+(i+1)+".loop.test.\n");
 		}
 		z.append("c20\tIN\tA\t10.0.0.20\n");
-		try(FileWriter w = new FileWriter(zone)) {
+		try(Writer w = TestFiles.writer(zone)) {
 			w.write(z.toString());
 		}
 		server = new DnsServer();
@@ -83,10 +88,6 @@ public class TestCnameLoopsServer {
 
 	@AfterAll
 	public static void cleanup() {
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	private static Message ask(String name) {

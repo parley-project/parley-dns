@@ -24,24 +24,26 @@ package us.bringardner.parley.dns.server;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
-import java.nio.file.Files;
+import java.io.Writer;
+import java.nio.file.Path;
 import java.util.List;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import us.bringardner.parley.dns.Fixtures;
 import us.bringardner.parley.dns.Name;
 import us.bringardner.parley.dns.RR;
-import us.bringardner.parley.dns.Fixtures;
+import us.bringardner.parley.dns.TestFiles;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Offline tests of the zone's lookup index: exact names, mixed case,
@@ -50,14 +52,17 @@ import us.bringardner.parley.dns.Fixtures;
  */
 public class TestZoneIndex {
 
-	private static File dir;
+	@TempDir
+	static Path tmp;
+
+	private static FileSource dir;
 	private static Zone big;
 	private static Zone fixture;
 
 	@BeforeAll
 	public static void setup() throws IOException {
-		dir = Files.createTempDirectory("zidx").toFile();
-		File f = new File(dir,"big.test.txt");
+		dir = TestFiles.newFolder(tmp, "zidx");
+		FileSource f = dir.getChild("big.test.txt");
 		StringBuilder z = new StringBuilder();
 		z.append("@\tIN\tSOA\tns1.big.test. postmaster.big.test. (\n"
 				+"\t\t\t1 ; serial\n\t\t\t3600 ; refresh\n\t\t\t1800 ; retry\n"
@@ -69,7 +74,7 @@ public class TestZoneIndex {
 		for(int i=0; i< 5000; i++ ) {
 			z.append("h"+i+"\tIN\tA\t10.1."+(i/250)+"."+(1+i%250)+"\n");
 		}
-		try(FileWriter w = new FileWriter(f)) {
+		try(Writer w = TestFiles.writer(f)) {
 			w.write(z.toString());
 		}
 		big = new Zone(f);
@@ -78,10 +83,6 @@ public class TestZoneIndex {
 
 	@AfterAll
 	public static void cleanup() {
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	@Test

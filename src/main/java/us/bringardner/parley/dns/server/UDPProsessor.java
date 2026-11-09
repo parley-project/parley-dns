@@ -25,7 +25,7 @@
  */
 package us.bringardner.parley.dns.server;
 
-import java.io.FileOutputStream;
+
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.io.PrintStream;
@@ -111,18 +111,20 @@ public static void initUDPProsessor(int bindPort,InetAddress bindAddress,int tim
 }
 
 /**
- * @param dumpFile the file every request is written to (the udpDumpFile setting), or null for none
+ * @param dumpFile the file every request is written to (the udpDumpFile setting, on the server's
+ *        file system), or null for none
  * @since 2.0.0
  */
-public synchronized static void initUDPProsessor(int bindPort,InetAddress bindAddress,int timeout,String dumpFile) throws IOException
+public synchronized static void initUDPProsessor(int bindPort,InetAddress bindAddress,int timeout,us.bringardner.parley.files.FileSource dumpFile) throws IOException
 {
 
 		sock = new DatagramSocket(bindPort,bindAddress);
 		sock.setSoTimeout(timeout);
 
-		if( dumpFile != null && !dumpFile.trim().isEmpty() && !dumpFile.equals("null")) {
-			dumpBuf = new PrintStream(new FileOutputStream(dumpFile.trim()));
+		if( dumpFile != null ) {
+			dumpBuf = new PrintStream(dumpFile.getOutputStream());
 		}
+
 
 }
 /**

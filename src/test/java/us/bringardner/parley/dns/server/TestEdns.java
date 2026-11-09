@@ -27,17 +27,17 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
-import java.nio.file.Files;
+import java.nio.file.Path;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.ByteBuffer;
@@ -46,6 +46,8 @@ import us.bringardner.parley.dns.Edns;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.Name;
 import us.bringardner.parley.dns.RR;
+import us.bringardner.parley.dns.TestFiles;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * EDNS(0) (RFC 6891): clients that send an OPT record get UDP answers up to
@@ -54,8 +56,11 @@ import us.bringardner.parley.dns.RR;
  */
 public class TestEdns {
 
+	@TempDir
+	static Path tmp;
+
 	private static final int BIG_COUNT = 40;   //  40 A records: about 700 bytes
-	private static File dir;
+	private static FileSource dir;
 	private static DnsServer server;
 	private static Thread udp;
 	private static int port;
@@ -64,8 +69,8 @@ public class TestEdns {
 
 	@BeforeAll
 	public static void setup() throws Exception {
-		dir = Files.createTempDirectory("edns").toFile();
-		try(FileWriter w = new FileWriter(new File(dir,"edns.test.txt"))) {
+		dir = TestFiles.newFolder(tmp, "edns");
+		try(Writer w = TestFiles.writer(dir.getChild("edns.test.txt"))) {
 			w.write("@\tIN\tSOA\tns1.edns.test. postmaster.edns.test. (\n"
 					+"\t\t\t1 ; serial\n\t\t\t3600 ; refresh\n\t\t\t1800 ; retry\n"
 					+"\t\t\t1209600 ; expire\n\t\t\t300 ) ; minimum\n\n"
@@ -103,10 +108,6 @@ public class TestEdns {
 		Edns.setServerUdpSize(Edns.DEFAULT_UDP_SIZE);
 		restore(DnsServer.PROP_ZONE_DIR, savedZoneDir);
 		restore(DnsServer.PROP_DEFAULT_ZONE, savedMaster);
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	private static void restore(String k, String v) {

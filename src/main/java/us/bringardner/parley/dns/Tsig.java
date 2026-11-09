@@ -25,9 +25,8 @@ package us.bringardner.parley.dns;
 
 import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
-import java.io.File;
-import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.util.Base64;
@@ -183,10 +182,13 @@ public final class Tsig {
 		/**
 		 * Keys from a file: one "name algorithm base64secret" per line,
 		 * '#' starts a comment. Keeps the secrets out of the properties file.
+		 * Read as UTF-8 (it was the platform's encoding; the names and secrets are ASCII).
+		 * @param file the key file, on any file system
 		 */
-		public static KeyRing load(File file) throws IOException {
+		public static KeyRing load(us.bringardner.parley.files.FileSource file) throws IOException {
 			Map<String, Key> ret = new HashMap<String, Key>();
-			try(BufferedReader in = new BufferedReader(new FileReader(file))) {
+			try(BufferedReader in = new BufferedReader(new InputStreamReader(file.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+
 				String line;
 				int n = 0;
 				while( (line = in.readLine()) != null ) {

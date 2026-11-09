@@ -28,16 +28,16 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
 import java.io.IOException;
+import java.io.Writer;
 import java.net.InetAddress;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
@@ -45,7 +45,9 @@ import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.Mx;
 import us.bringardner.parley.dns.Name;
 import us.bringardner.parley.dns.RR;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.resolve.QueryData;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Wildcards as RFC 4592 defines them, in an unsigned zone: the example zone
@@ -55,16 +57,19 @@ import us.bringardner.parley.dns.resolve.QueryData;
  */
 public class TestRfc4592Wildcards {
 
-	private static File dir;
+	@TempDir
+	static Path tmp;
+
+	private static FileSource dir;
 	private static Zone zone;
 	private static DnsServer server;
 
 	@BeforeAll
 	public static void setup() throws IOException {
-		dir = Files.createTempDirectory("rfc4592").toFile();
-		File f = new File(dir,"example.txt");
+		dir = TestFiles.newFolder(tmp, "rfc4592");
+		FileSource f = dir.getChild("example.txt");
 		//  RFC 4592 2.2.1 (the SOA and SRV data filled in)
-		try(FileWriter w = new FileWriter(f)) {
+		try(Writer w = TestFiles.writer(f)) {
 			w.write("$ORIGIN example.\n"
 					+"example.\t3600\tIN\tSOA\tns.example.com. hostmaster.example. ( 1 3600 1800 1209600 300 )\n"
 					+"example.\t3600\tNS\tns.example.com.\n"
@@ -86,10 +91,6 @@ public class TestRfc4592Wildcards {
 
 	@AfterAll
 	public static void cleanup() {
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	private static Message ask(String name, int type) {
@@ -210,8 +211,8 @@ public class TestRfc4592Wildcards {
 
 	@Test
 	public void aWildcardThatExistsOnlyAsAnEmptyNonTerminalIsNodata() throws IOException {
-		File f = new File(dir,"ent.test.txt");
-		try(FileWriter w = new FileWriter(f)) {
+		FileSource f = dir.getChild("ent.test.txt");
+		try(Writer w = TestFiles.writer(f)) {
 			w.write("@\tIN\tSOA\tns1.ent.test. postmaster.ent.test. ( 1 3600 1800 1209600 300 )\n"
 					+"\t\tNS\tns1\n"
 					+"ns1\tIN\tA\t10.0.0.53\n"
@@ -227,8 +228,8 @@ public class TestRfc4592Wildcards {
 
 	@Test
 	public void positionalPatternsLoadWithAWarning() throws IOException {
-		File f = new File(dir,"old.test.txt");
-		try(FileWriter w = new FileWriter(f)) {
+		FileSource f = dir.getChild("old.test.txt");
+		try(Writer w = TestFiles.writer(f)) {
 			w.write("@\tIN\tSOA\tns1.old.test. postmaster.old.test. ( 1 3600 1800 1209600 300 )\n"
 					+"\t\tNS\tns1\n"
 					+"ns1\tIN\tA\t10.0.0.53\n"

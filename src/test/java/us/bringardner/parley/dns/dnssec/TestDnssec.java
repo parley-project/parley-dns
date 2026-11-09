@@ -31,11 +31,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayOutputStream;
-import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
@@ -44,6 +43,9 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.ByteBuffer;
@@ -55,6 +57,8 @@ import us.bringardner.parley.dns.Mx;
 import us.bringardner.parley.dns.Nsec;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Rrsig;
+import us.bringardner.parley.dns.TestFiles;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * DNSSEC records, keys, canonical form and signatures (RFC 4034), checked
@@ -71,18 +75,12 @@ public class TestDnssec {
 		return b;
 	}
 
-	private static File tempDir() throws IOException {
-		return Files.createTempDirectory("dnssec").toFile();
-	}
+	@TempDir
+	Path tmp;
 
-	private static void delete(File dir) {
-		File [] list = dir.listFiles();
-		if( list != null ) {
-			for(File f : list) {
-				f.delete();
-			}
-		}
-		dir.delete();
+	/** A new folder for key files, on the local (the @TempDir) or the memory file system */
+	private FileSource tempDir(String fs) throws IOException {
+		return TestFiles.folder(fs, tmp);
 	}
 
 	// ------------------------------------------------------------ RFC examples
@@ -271,16 +269,17 @@ public class TestDnssec {
 
 	// ------------------------------------------------------------ key files
 
-	@Test
-	public void keyFilesRoundTrip() throws Exception {
-		File dir = tempDir();
-		try {
+	@ParameterizedTest
+	@ValueSource(strings = {TestFiles.LOCAL, TestFiles.MEMORY})
+	public void keyFilesRoundTrip(String fs) throws Exception {
+		FileSource dir = tempDir(fs);
+		{
 			DnssecKey k = DnssecKey.generate("Example.Test.", Algorithm.of("ecdsap256sha256"), true, 0);
-			File f = k.save(dir);
+			FileSource f = k.save(dir);
 			assertEquals(k.baseName()+".key", f.getName());
 			assertTrue(f.getName().matches("Kexample\\.test\\.\\+013\\+\\d{5}\\.key"), f.getName());
-			File priv = new File(dir, k.baseName()+".private");
-			String p = new String(Files.readAllBytes(priv.toPath()), StandardCharsets.US_ASCII);
+			FileSource priv = dir.getChild(k.baseName()+".private");
+			String p = new String(TestFiles.bytes(priv), StandardCharsets.US_ASCII);
 			assertTrue(p.startsWith("Private-key-format: v1.3\nAlgorithm: 13 (ECDSAP256SHA256)\nPrivateKey: "), p);
 			DnssecKey back = DnssecKey.load(f);
 			assertEquals(k.getKeyTag(), back.getKeyTag());
@@ -296,22 +295,21 @@ public class TestDnssec {
 			//  Grouped by zone
 			Map<String, List<DnssecKey>> all = DnssecKey.loadDir(dir, new ArrayList<String>());
 			assertEquals(1, all.get("example.test").size());
-		} finally {
-			delete(dir);
 		}
 	}
 
-	@Test
-	public void publicOnlyKeysAndTiming() throws Exception {
-		File dir = tempDir();
-		try {
+	@ParameterizedTest
+	@ValueSource(strings = {TestFiles.LOCAL, TestFiles.MEMORY})
+	public void publicOnlyKeysAndTiming(String fs) throws Exception {
+		FileSource dir = tempDir(fs);
+		{
 			DnssecKey k = DnssecKey.generate("example.test", Algorithm.of(13), false, 0);
-			File f = k.save(dir);
-			File priv = new File(dir, k.baseName()+".private");
+			FileSource f = k.save(dir);
+			FileSource priv = dir.getChild(k.baseName()+".private");
 			//  BIND timing: Activate in the future, Delete later still
-			String text = new String(Files.readAllBytes(priv.toPath()), StandardCharsets.US_ASCII)
+			String text = new String(TestFiles.bytes(priv), StandardCharsets.US_ASCII)
 					.replaceAll("Activate: \\d+", "Activate: 20991231000000")+"Delete: 21000101000000\n";
-			Files.write(priv.toPath(), text.getBytes(StandardCharsets.US_ASCII));
+			TestFiles.write(priv, text);
 			DnssecKey timed = DnssecKey.load(f);
 			long now = System.currentTimeMillis()/1000;
 			assertTrue(timed.isPublished(now));
@@ -325,75 +323,69 @@ public class TestDnssec {
 			assertTrue(pub.isPublished(now));
 			assertFalse(pub.isActive(now));
 			assertThrows(IllegalStateException.class, () -> pub.sign(new byte[1]));
-		} finally {
-			delete(dir);
 		}
 	}
 
-	@Test
-	public void mismatchedPrivateKeyIsRejected() throws Exception {
-		File dir = tempDir();
-		try {
+	@ParameterizedTest
+	@ValueSource(strings = {TestFiles.LOCAL, TestFiles.MEMORY})
+	public void mismatchedPrivateKeyIsRejected(String fs) throws Exception {
+		FileSource dir = tempDir(fs);
+		{
 			DnssecKey a = DnssecKey.generate("example.test", Algorithm.of(13), false, 0);
 			DnssecKey b = DnssecKey.generate("example.test", Algorithm.of(13), false, 0);
-			File fa = a.save(dir);
+			FileSource fa = a.save(dir);
 			b.save(dir);
 			//  a's .key with b's .private
-			Files.copy(new File(dir, b.baseName()+".private").toPath(), new File(dir, a.baseName()+".private").toPath(),
-					java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+			TestFiles.copy(dir.getChild(b.baseName()+".private"), dir.getChild(a.baseName()+".private"));
 			IOException ex = assertThrows(IOException.class, () -> DnssecKey.load(fa));
 			assertTrue(ex.getMessage().contains("does not hold the private key"), ex.getMessage());
 			List<String> errors = new ArrayList<String>();
 			Map<String, List<DnssecKey>> all = DnssecKey.loadDir(dir, errors);
 			assertEquals(1, errors.size(), errors.toString());
 			assertEquals(1, all.get("example.test").size(), "the good key is still loaded");
-		} finally {
-			delete(dir);
 		}
 	}
 
-	@Test
-	public void keyFileWithBindLayout() throws Exception {
-		File dir = tempDir();
-		try {
+	@ParameterizedTest
+	@ValueSource(strings = {TestFiles.LOCAL, TestFiles.MEMORY})
+	public void keyFileWithBindLayout(String fs) throws Exception {
+		FileSource dir = tempDir(fs);
+		{
 			//  As dnssec-keygen writes it: comments, no TTL, the key split over lines in ( )
 			DnssecKey k = DnssecKey.generate("bind.test", Algorithm.of(13), true, 0);
 			k.save(dir);
-			File f = new File(dir, k.baseName()+".key");
+			FileSource f = dir.getChild(k.baseName()+".key");
 			String b64 = Base64.getEncoder().encodeToString(k.getDnskey().getKey());
-			Files.write(f.toPath(), ("; This is a key-signing key, keyid "+k.getKeyTag()+", for bind.test.\n"
+			TestFiles.write(f, ("; This is a key-signing key, keyid "+k.getKeyTag()+", for bind.test.\n"
 					+"; Created: 20260926000000 (Sat Sep 26 00:00:00 2026)\n"
-					+"bind.test. IN DNSKEY 257 3 13 ( "+b64.substring(0, 40)+"\n\t"+b64.substring(40)+" )\n").getBytes(StandardCharsets.US_ASCII));
+					+"bind.test. IN DNSKEY 257 3 13 ( "+b64.substring(0, 40)+"\n\t"+b64.substring(40)+" )\n"));
 			DnssecKey back = DnssecKey.load(f);
 			assertEquals(k.getKeyTag(), back.getKeyTag());
 			assertEquals(3600, back.getDnskey().getTTL(), "default TTL");
-		} finally {
-			delete(dir);
 		}
 	}
 
-	@Test
-	public void keyTool() throws Exception {
-		File dir = tempDir();
-		try {
+	@ParameterizedTest
+	@ValueSource(strings = {TestFiles.LOCAL, TestFiles.MEMORY})
+	public void keyTool(String fs) throws Exception {
+		FileSource dir = tempDir(fs);
+		{
 			ByteArrayOutputStream out = new ByteArrayOutputStream();
 			ByteArrayOutputStream err = new ByteArrayOutputStream();
-			assertEquals(0, DnssecKeyTool.run(new String[] {"keygen", "-d", dir.getPath(), "tool.test"}, new PrintStream(out), new PrintStream(err)));
+			assertEquals(0, DnssecKeyTool.run(new String[] {"keygen", "-d", TestFiles.setting(dir), "tool.test"}, new PrintStream(out), new PrintStream(err)));
 			String text = out.toString("UTF-8");
 			assertTrue(text.contains("tool.test. IN DS "), text);
-			assertEquals(2, dir.listFiles().length);
+			assertEquals(2, dir.list().length);
 			out.reset();
-			assertEquals(0, DnssecKeyTool.run(new String[] {"ds", "-d", dir.getPath(), "tool.test."}, new PrintStream(out), new PrintStream(err)));
+			assertEquals(0, DnssecKeyTool.run(new String[] {"ds", "-d", TestFiles.setting(dir), "tool.test."}, new PrintStream(out), new PrintStream(err)));
 			assertTrue(out.toString("UTF-8").matches("tool\\.test\\. IN DS \\d+ 13 2 [0-9A-F]{64}\\s*"), out.toString("UTF-8"));
 			//  A zone signing key has no DS
 			out.reset();
-			assertEquals(0, DnssecKeyTool.run(new String[] {"keygen", "-zsk", "-a", "ECDSAP384SHA384", "-d", dir.getPath(), "zsk.test"}, new PrintStream(out), new PrintStream(err)));
+			assertEquals(0, DnssecKeyTool.run(new String[] {"keygen", "-zsk", "-a", "ECDSAP384SHA384", "-d", TestFiles.setting(dir), "zsk.test"}, new PrintStream(out), new PrintStream(err)));
 			assertFalse(out.toString("UTF-8").contains(" IN DS "), out.toString("UTF-8"));
 			assertTrue(out.toString("UTF-8").contains("ZSK ECDSAP384SHA384"), out.toString("UTF-8"));
 			assertEquals(2, DnssecKeyTool.run(new String[] {"keygen"}, new PrintStream(out), new PrintStream(err)), "usage");
-			assertEquals(1, DnssecKeyTool.run(new String[] {"keygen", "-a", "RSAMD5", "-d", dir.getPath(), "x.test"}, new PrintStream(out), new PrintStream(err)));
-		} finally {
-			delete(dir);
+			assertEquals(1, DnssecKeyTool.run(new String[] {"keygen", "-a", "RSAMD5", "-d", TestFiles.setting(dir), "x.test"}, new PrintStream(out), new PrintStream(err)));
 		}
 	}
 

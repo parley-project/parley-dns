@@ -27,17 +27,18 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileWriter;
-import java.net.InetAddress;
-import java.net.ServerSocket;
-import java.nio.file.Files;
+import java.io.Writer;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import us.bringardner.parley.dns.TestFiles;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * A server that can't start reports why through awaitStarted() and stops what
@@ -46,8 +47,11 @@ import org.junit.jupiter.api.Test;
  */
 public class TestStartupFailure {
 
-	private File dir;
-	private File zones;
+	@TempDir
+	static Path tmp;
+
+	private FileSource dir;
+	private FileSource zones;
 	private final Map<String,String> saved = new HashMap<String,String>();
 
 	private void set(String key, String value) {
@@ -63,10 +67,10 @@ public class TestStartupFailure {
 
 	@BeforeEach
 	public void setup() throws Exception {
-		dir = Files.createTempDirectory("startfail").toFile();
-		zones = new File(dir,"zones");
+		dir = TestFiles.newFolder(tmp, "startfail");
+		zones = dir.getChild("zones");
 		zones.mkdirs();
-		try(FileWriter w = new FileWriter(new File(zones,"sf.test.txt"))) {
+		try(Writer w = TestFiles.writer(zones.getChild("sf.test.txt"))) {
 			w.write("@\tIN\tSOA\tns1.sf.test. postmaster.sf.test. (\n"
 					+"\t\t\t1 ; serial\n\t\t\t3600 ; refresh\n\t\t\t1800 ; retry\n"
 					+"\t\t\t1209600 ; expire\n\t\t\t300 ) ; minimum\n\n"
@@ -89,7 +93,7 @@ public class TestStartupFailure {
 	}
 
 	@AfterEach
-	public void cleanup() {
+	public void cleanup() throws Exception {
 		for(Map.Entry<String,String> e : saved.entrySet()) {
 			if( e.getValue() == null ) {
 				System.clearProperty(e.getKey());
@@ -97,29 +101,17 @@ public class TestStartupFailure {
 				System.setProperty(e.getKey(), e.getValue());
 			}
 		}
-		for(File f : zones.listFiles()) {
-			f.delete();
-		}
-		zones.delete();
-		for(File f : dir.listFiles()) {
+		for(FileSource f : dir.listFiles()) {
 			f.delete();
 		}
 		dir.delete();
 	}
 
-	private static boolean workerThreadsAlive() {
-		for(Thread t : Thread.getAllStackTraces().keySet()) {
-			String n = t.getName();
-			if( t.isAlive() && (n.startsWith("UDPProc") || n.startsWith("TCPProc")) ) {
-				return true;
-			}
-		}
-		return false;
-	}
+	
 
 	@Test
 	public void missingZoneDirIsReportedNotExit() throws Exception {
-		set(DnsServer.PROP_ZONE_DIR, new File(dir,"no-such-dir").getAbsolutePath());
+		set(DnsServer.PROP_ZONE_DIR, dir.getChild("no-such-dir").getAbsolutePath());
 		DnsServer server = new DnsServer();
 		server.start(true);		//  stand-alone used to call System.exit(-1)
 		DnsServer.StartupException ex = assertThrows(DnsServer.StartupException.class, () -> server.awaitStarted(30_000));

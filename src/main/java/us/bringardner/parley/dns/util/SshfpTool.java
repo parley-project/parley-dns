@@ -23,16 +23,18 @@
  */
 package us.bringardner.parley.dns.util;
 
-import java.io.File;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
 import us.bringardner.parley.dns.Sshfp;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * Prints SSHFP records (RFC 4255) for SSH host keys, to put in a signed zone:
@@ -71,16 +73,24 @@ public final class SshfpTool {
 			return 2;
 		}
 		String host = rest.get(0);
-		List<File> files = new ArrayList<File>();
-		for(String f : rest.subList(1, rest.size())) {
-			files.add(new File(f));
-		}
-		if( files.isEmpty() ) {
-			File[] found = new File("/etc/ssh").listFiles((d, n) -> n.startsWith("ssh_host_") && n.endsWith("_key.pub"));
-			if( found != null ) {
-				Arrays.sort(found);
-				files.addAll(Arrays.asList(found));
+		List<FileSource> files = new ArrayList<FileSource>();
+		try {
+			for(String f : rest.subList(1, rest.size())) {
+				files.add(FileSource.of(f));
 			}
+			if( files.isEmpty() ) {
+				//  the operating system's host keys: on the default file system
+				FileSource dir = FileSource.of("/etc/ssh");
+				FileSource[] found = dir.isDirectory()
+						? dir.listFiles(f -> f.getName().startsWith("ssh_host_") && f.getName().endsWith("_key.pub")) : null;
+				if( found != null ) {
+					Arrays.sort(found, (a, b) -> a.getName().compareTo(b.getName()));
+					files.addAll(Arrays.asList(found));
+				}
+			}
+		} catch(IOException ex) {
+			err.println(ex.getMessage());
+			return 1;
 		}
 		if( files.isEmpty() ) {
 			err.println("No host key files found");
@@ -88,12 +98,16 @@ public final class SshfpTool {
 		}
 		String owner = host.endsWith(".") ? host : host+".";
 		int errors = 0;
-		for(File f : files) {
-			List<String> lines;
-			try {
-				//  ISO-8859-1 reads any bytes (a comment may not be ASCII)
-				lines = Files.readAllLines(f.toPath(), StandardCharsets.ISO_8859_1);
+		for(FileSource f : files) {
+			List<String> lines = new ArrayList<String>();
+			//  ISO-8859-1 reads any bytes (a comment may not be ASCII)
+			try(BufferedReader in = new BufferedReader(new InputStreamReader(f.getInputStream(), StandardCharsets.ISO_8859_1))) {
+				String line;
+				while( (line = in.readLine()) != null ) {
+					lines.add(line);
+				}
 			} catch(IOException ex) {
+
 				err.println(f+": "+ex);
 				errors++;
 				continue;

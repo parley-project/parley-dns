@@ -25,14 +25,10 @@ package us.bringardner.parley.dns.server;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.net.InetAddress;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -40,14 +36,17 @@ import java.util.List;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.ByteBuffer;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Soa;
+import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.Txt;
 import us.bringardner.parley.dns.resolve.QueryData;
+import us.bringardner.parley.files.FileSource;
 
 /**
  * TXT records keep all their character-strings (a zone file line kept only
@@ -56,13 +55,16 @@ import us.bringardner.parley.dns.resolve.QueryData;
  */
 public class TestTxtStringsAndAny {
 
-	private static File dir;
+	@TempDir
+	static Path tmp;
+
+	private static FileSource dir;
 	private static DnsServer server;
 
 	@BeforeAll
 	public static void setup() throws IOException {
-		dir = Files.createTempDirectory("txtany").toFile();
-		write(new File(dir,"txt.test.txt"), "$TTL 3600\n"
+		dir = TestFiles.newFolder(tmp, "txtany");
+		write(dir.getChild("txt.test.txt"), "$TTL 3600\n"
 				+"@\tIN\tSOA\tns1.txt.test. hostmaster.txt.test. ( 7 3600 1800 1209600 300 )\n"
 				+"\tIN\tNS\tns1\n"
 				+"\tIN\tMX\t10 mail\n"
@@ -77,16 +79,16 @@ public class TestTxtStringsAndAny {
 				+"spf\tIN\tSPF\t\"v=spf1\" \"-all\"\n"
 				+"long\tIN\tTXT\t\""+repeat('x', 300)+"\"\n"
 				+"www\tIN\tA\t10.0.0.80\n");
-		write(new File(dir,"bare.test.txt"), "$TTL 3600\n"
+		write(dir.getChild("bare.test.txt"), "$TTL 3600\n"
 				+"@\tIN\tSOA\tns1.bare.test. hostmaster.bare.test. ( 1 3600 1800 1209600 300 )\n");
 		server = new DnsServer();
-		server.addZone(new Zone(new File(dir,"txt.test.txt")));
-		server.addZone(new Zone(new File(dir,"bare.test.txt")));
+		server.addZone(new Zone(dir.getChild("txt.test.txt")));
+		server.addZone(new Zone(dir.getChild("bare.test.txt")));
 		server.setRecursionAvailable(false);
 	}
 
-	private static void write(File f, String text) throws IOException {
-		try(Writer w = new OutputStreamWriter(new FileOutputStream(f), StandardCharsets.UTF_8)) {
+	private static void write(FileSource f, String text) throws IOException {
+		try(Writer w = TestFiles.writer(f)) {
 			w.write(text);
 		}
 	}
@@ -99,10 +101,6 @@ public class TestTxtStringsAndAny {
 
 	@AfterAll
 	public static void cleanup() {
-		for(File f : dir.listFiles()) {
-			f.delete();
-		}
-		dir.delete();
 	}
 
 	/** Ask and return the response as a client would see it (through the wire format). */
