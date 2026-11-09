@@ -34,7 +34,6 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 
-import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.resolve.RemoteServer;
 import us.bringardner.parley.dns.resolve.ServerA;
 

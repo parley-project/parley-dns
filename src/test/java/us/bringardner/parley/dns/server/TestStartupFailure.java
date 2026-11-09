@@ -107,15 +107,7 @@ public class TestStartupFailure {
 		dir.delete();
 	}
 
-	private static boolean workerThreadsAlive() {
-		for(Thread t : Thread.getAllStackTraces().keySet()) {
-			String n = t.getName();
-			if( t.isAlive() && (n.startsWith("UDPProc") || n.startsWith("TCPProc")) ) {
-				return true;
-			}
-		}
-		return false;
-	}
+	
 
 	@Test
 	public void missingZoneDirIsReportedNotExit() throws Exception {

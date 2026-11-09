@@ -41,7 +41,6 @@ import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 
 import us.bringardner.parley.core.util.AddressMatcher;
-import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.Cname;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.DnsBaseClass;
