@@ -426,7 +426,7 @@ Zone reloads and re-signing run on a thread of their own (`DnsMaintenance`), so 
 
 ### Logging (parley-core)
 
-Logging comes from the parley-core library, whose property names are its own: `logLevel` (default ERROR; e.g. DEBUG, INFO), `<logger name>.logLevel` for one logger, `logFile` (default: standard output) and `parley.core.logger` (the logger class).
+parley-dns logs through parley-core's `BaseObject`, which writes to the JDK's `System.Logger`: `parley.log.level` sets every logger's level, `parley.log.level.dns` (or a longer name) one part's (see parley-core's README). Where the messages go is the application's choice: java.util.logging unless it installs a `System.LoggerFinder`, such as parley-logging's (whose `parley.log.file` names a log file).
 
 ### Renamed properties
 

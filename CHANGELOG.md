@@ -2,6 +2,13 @@
 
 ## parley-dns 2.0.0 (unreleased)
 
+### Changed (2026-11-10: logging through System.Logger, To-Do 19.5)
+
+- **Logging through `System.Logger`** (parley-core): `Message.clone` copies the level
+  (`setLogLevel`) instead of the logger; reading a properties file calls
+  `BaseObject.refreshLogLevels()`; `NsLookup.setOut` no longer redirects the log (the application's
+  `System.Logger` decides where it goes). The tests use parley-logging (test scope only).
+
 ### Changed (2026-11-08: the server's files are FileSources, To-Do 18.15)
 
 The server's files can be on any parley-files file system, not only the local disk.

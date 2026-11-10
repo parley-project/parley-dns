@@ -46,7 +46,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import us.bringardner.parley.core.ILogger.Level;
+import us.bringardner.parley.core.LogLevel;
 
 /**
 	This class manages a DNS Message.
@@ -103,7 +103,7 @@ public class Message extends Utility {
 		ret.tcpFallback = tcpFallback;
 		ret.server = server;
 		ret.svrAddress = svrAddress;
-		ret.setLogger(getLogger());
+		ret.setLogLevel(getLogLevel());
 		for(Section s: que) {
 			ret.que.add(s);
 		}
@@ -256,11 +256,11 @@ AA              Authoritative Answer - this bit is valid in responses,
 	}
 
 	public final void debugOff() { 
-		getLogger().setLevel(Level.INFO);
+		setLogLevel(LogLevel.INFO);
 	}
 
 	public final void debugOn() { 
-		getLogger().setLevel(Level.DEBUG);
+		setLogLevel(LogLevel.DEBUG);
 	}
 
 	public final void defnameOff() { 
