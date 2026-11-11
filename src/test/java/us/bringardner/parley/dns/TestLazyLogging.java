@@ -31,18 +31,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 
-import us.bringardner.parley.core.ParleyLogger;
-import us.bringardner.parley.core.ILogger.Level;
+import us.bringardner.parley.logging.ParleyLogger;
+import us.bringardner.parley.core.LogLevel;
 
 /**
  * log(Supplier) only builds the message when debug logging is enabled (rec #33).
  */
 public class TestLazyLogging {
 
-	private static ParleyLogger logger(Level level, ByteArrayOutputStream sink) {
-		ParleyLogger ret = new ParleyLogger();
-		ret.init("TestLazyLogging");
-		ret.setLevel(level);
+	/** parley-logging (a test dependency) is the JVM's System.Logger: send DnsBaseClass's to the sink */
+	private static ParleyLogger logger(ByteArrayOutputStream sink) {
+		ParleyLogger ret = (ParleyLogger) System.getLogger(DnsBaseClass.class.getName());
 		PrintStream ps = new PrintStream(sink, true);
 		ret.setOut(ps);
 		ret.setErr(ps);
@@ -53,10 +52,16 @@ public class TestLazyLogging {
 	public void messageNotBuiltWhenDebugIsOff() {
 		ByteArrayOutputStream sink = new ByteArrayOutputStream();
 		DnsBaseClass obj = new DnsBaseClass();
-		obj.setLogger(logger(Level.ERROR, sink));
+		obj.setLogLevel(LogLevel.ERROR);
+		ParleyLogger logger = logger(sink);
 		AtomicInteger built = new AtomicInteger();
-		for(int i=0; i < 100; i++ ) {
-			obj.log(() -> "built "+built.incrementAndGet());
+		try {
+			for(int i=0; i < 100; i++ ) {
+				obj.log(() -> "built "+built.incrementAndGet());
+			}
+		} finally {
+			logger.setOut(null);
+			logger.setErr(null);
 		}
 		assertEquals(0, built.get(), "supplier must not run with debug off");
 		assertEquals(0, sink.size(), "nothing logged");
@@ -66,9 +71,15 @@ public class TestLazyLogging {
 	public void messageBuiltAndLoggedWhenDebugIsOn() {
 		ByteArrayOutputStream sink = new ByteArrayOutputStream();
 		DnsBaseClass obj = new DnsBaseClass();
-		obj.setLogger(logger(Level.DEBUG, sink));
+		obj.setLogLevel(LogLevel.DEBUG);
+		ParleyLogger logger = logger(sink);
 		AtomicInteger built = new AtomicInteger();
-		obj.log(() -> "built "+built.incrementAndGet());
+		try {
+			obj.log(() -> "built "+built.incrementAndGet());
+		} finally {
+			logger.setOut(null);
+			logger.setErr(null);
+		}
 		assertEquals(1, built.get());
 		assertTrue(sink.toString().contains("built 1"), sink.toString());
 	}

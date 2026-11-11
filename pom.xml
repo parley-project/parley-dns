@@ -98,6 +98,14 @@
 		<!--
 		https://mvnrepository.com/artifact/org.junit.jupiter/junit-jupiter-engine -->
 		<dependency>
+			<!-- Tests read what was logged through parley-logging's ParleyLogger (an application's
+			     choice, so only for the tests) -->
+			<groupId>us.bringardner.parley</groupId>
+			<artifactId>parley-logging</artifactId>
+			<version>${project.version}</version>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
 			<groupId>org.junit.jupiter</groupId>
 			<artifactId>junit-jupiter-engine</artifactId>
 			<version>5.11.4</version>

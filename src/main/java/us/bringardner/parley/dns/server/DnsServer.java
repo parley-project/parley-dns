@@ -481,8 +481,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				}
 
 				System.setProperties(prop2);
-				// logging config may have changed
-				setLogger(null);
+				// the log level settings may have changed
+				refreshLogLevels();
 			} finally {
 				in.close();
 			}
