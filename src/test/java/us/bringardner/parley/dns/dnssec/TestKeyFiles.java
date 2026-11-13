@@ -41,6 +41,8 @@ public class TestKeyFiles {
 		k.save(dir);
 		FileSource priv = dir.getChild(k.baseName()+".private");
 		Assumptions.assumeTrue(priv.canOwnerRead() || priv.canGroupRead() || priv.canOtherRead(), "no permissions");
+		//  java.io.File reports every file as executable (and group/other as readable) on Windows
+		Assumptions.assumeTrue(TestFiles.MEMORY.equals(fs) || java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix"), "no POSIX permissions");
 		assertTrue(priv.canOwnerRead());
 		assertTrue(priv.canOwnerWrite());
 		assertFalse(priv.canOwnerExecute());
