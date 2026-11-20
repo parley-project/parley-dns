@@ -127,7 +127,7 @@ public final class DnsFiles {
 	 */
 	static long lastModified(FileSource f) {
 		try {
-			return f.exists() ? f.lastModified() : 0;
+			return f.exists() ? f.contentLastModified() : 0;
 		} catch(IOException e) {
 			return 0;
 		}

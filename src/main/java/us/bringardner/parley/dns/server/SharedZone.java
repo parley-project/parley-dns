@@ -131,7 +131,7 @@ final class SharedZone {
 	/** The file's time and size; "-" if it doesn't exist or can't be asked (read() then says why). */
 	private static String stamp(FileSource f) {
 		try {
-			return f.exists() ? f.lastModified()+"/"+f.length() : "-";
+			return f.exists() ? f.contentLastModified()+"/"+f.contentLength() : "-";
 		} catch(IOException e) {
 			return "-";
 		}

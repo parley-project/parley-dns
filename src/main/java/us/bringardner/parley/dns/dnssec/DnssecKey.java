@@ -534,8 +534,8 @@ public final class DnssecKey {
 			}
 			for(FileSource f : list) {
 				ret = ret*31 + f.getName().hashCode();
-				ret = ret*31 + f.lastModified();
-				ret = ret*31 + f.length();
+				ret = ret*31 + f.contentLastModified();
+				ret = ret*31 + f.contentLength();
 			}
 		} catch(IOException ex) {
 			return 0;
