@@ -39,6 +39,8 @@ parley.dns.notifyKey
 parley.dns.notifyRetries
 parley.dns.notifyTimeout
 parley.dns.port
+parley.dns.primaryAddress
+parley.dns.primaryTsigKey
 parley.dns.recursionAvailable
 parley.dns.resolvConf
 parley.dns.resolveTimeout
@@ -46,6 +48,7 @@ parley.dns.resolverMaxBacklog
 parley.dns.resolverMaxQueueAge
 parley.dns.resolverVirtualThreads
 parley.dns.resolvers
+parley.dns.secondaryZones
 parley.dns.sharedZone
 parley.dns.reportAuthorizations
 parley.dns.tcpBacklog

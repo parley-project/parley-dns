@@ -29,6 +29,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -150,6 +151,16 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	public static final String PROP_NOTIFY_RETRIES = "parley.dns.notifyRetries";
 	/** First wait for a NOTIFY answer, a duration, doubled after each attempt (default 2s). */
 	public static final String PROP_NOTIFY_TIMEOUT = "parley.dns.notifyTimeout";
+	/**
+	 * The zones this server is a secondary for, separated by commas or spaces: it transfers them from
+	 * {@link #PROP_PRIMARY_ADDRESS} (at start, on the primary's NOTIFY and as each SOA says) and stores each as a zone file
+	 * in {@link #PROP_ZONE_DIR}. Changes to these zones are made at the primary. Default: none.
+	 */
+	public static final String PROP_SECONDARY_ZONES = "parley.dns.secondaryZones";
+	/** The primary the secondary zones are transferred from: host[:port] (an address, not a name), port 53 by default. */
+	public static final String PROP_PRIMARY_ADDRESS = "parley.dns.primaryAddress";
+	/** The TSIG key (name) that signs the requests to the primary, and its answers and NOTIFY must be signed with. Default: none. */
+	public static final String PROP_PRIMARY_TSIG_KEY = "parley.dns.primaryTsigKey";
 	/**
 	 * The listed domains: the class of the {@link us.bringardner.parley.net.server.IDomainList} that
 	 * lists them (default {@link PropertiesDomainList}); its own settings are read with this prefix
@@ -514,6 +525,11 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			throw new IOException("The DNS folder "+dnsDir+" ("+PROP_DNS_DIR+") doesn't exist");
 		}
 
+		//  A secondary first brings in the zones it has no file for (one that can't be had is retried by the maintenance)
+		SecondaryZones sec = secondaries;
+		if( sec != null ) {
+			sec.start();
+		}
 		loadZones();
 
 		int alltimeout = durationProperty(PROP_TIMEOUT, 5000);
@@ -737,6 +753,72 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		return notifier;
 	}
 
+	//  The zones this server is a secondary for (parley.dns.secondaryZones), or null
+	private volatile SecondaryZones secondaries;
+
+	/** The secondary zones, or null when this server is a secondary for none. */
+	public SecondaryZones getSecondaries() {
+		return secondaries;
+	}
+
+	/**
+	 * Make this server a secondary for the zones (initServer reads parley.dns.secondaryZones,
+	 * parley.dns.primaryAddress and parley.dns.primaryTsigKey). Set the TSIG keys first.
+	 *
+	 * @param zoneNames the zones, separated by commas or spaces; null or empty: none
+	 * @param primaryAddress the primary, host[:port] with an address for host
+	 * @param keyName the TSIG key's name, or null for no key
+	 */
+	public void setSecondaryZones(String zoneNames, String primaryAddress, String keyName, int timeoutMs) {
+		SecondaryZones old = secondaries;
+		if( zoneNames == null || zoneNames.trim().isEmpty() ) {
+			secondaries = null;
+		} else {
+			if( primaryAddress == null || primaryAddress.trim().isEmpty() ) {
+				throw new IllegalArgumentException(PROP_PRIMARY_ADDRESS+" isn't set: it names the primary for "+PROP_SECONDARY_ZONES);
+			}
+			List<InetSocketAddress> targets = ZoneNotifier.parseTargets(primaryAddress);
+			if( targets.size() != 1 ) {
+				throw new IllegalArgumentException(PROP_PRIMARY_ADDRESS+" names one primary, not "+targets.size()+": "+primaryAddress);
+			}
+			Tsig.Key key = null;
+			if( keyName != null && !keyName.trim().isEmpty() ) {
+				key = tsigKeys.get(keyName.trim());
+				if( key == null ) {
+					throw new IllegalArgumentException(PROP_PRIMARY_TSIG_KEY+" names an unknown TSIG key: "+keyName);
+				}
+			}
+			secondaries = new SecondaryZones(new SecondaryZones.Host() {
+				@Override
+				public FileSource getZoneDir() {
+					try {
+						FileSource d = file(getProperty(PROP_ZONE_DIR,"zones")).getCanonicalFile();
+						if( !d.exists() ) {
+							d.mkdirs();
+						}
+						return d;
+					} catch(IOException e) {
+						throw new IllegalStateException("Can't reach the zone folder ("+PROP_ZONE_DIR+"): "+e.getMessage(), e);
+					}
+				}
+
+				@Override
+				public Zone getZone(String zoneName) {
+					return DnsServer.this.getZone(zoneName);
+				}
+
+				@Override
+				public void reloadZones() throws IOException {
+					loadZones();
+				}
+			}, zoneNames, targets.get(0), key, tsigFudge, timeoutMs);
+			log(secondaries.toString());
+		}
+		if( old != null ) {
+			old.shutdown();
+		}
+	}
+
 	private InetAddress createBindAddress(String tmp) throws UnknownHostException {
 		InetAddress ret = InetAddress.getLoopbackAddress();
 		if( tmp.equals("localhost")) {
@@ -783,6 +865,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			setNotifyTargets(stringProperty(PROP_NOTIFY),
 					intProperty(PROP_NOTIFY_RETRIES, ZoneNotifier.DEFAULT_RETRIES),
 					durationProperty(PROP_NOTIFY_TIMEOUT, ZoneNotifier.DEFAULT_TIMEOUT));
+			setSecondaryZones(stringProperty(PROP_SECONDARY_ZONES), stringProperty(PROP_PRIMARY_ADDRESS),
+					stringProperty(PROP_PRIMARY_TSIG_KEY), ZoneTransferClient.DEFAULT_TIMEOUT);
 		} catch(IOException ex) {
 			throw new IllegalArgumentException(ex);
 		}
@@ -946,6 +1030,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				throw new IOException("The zone folder "+zoneDir+" ("+PROP_ZONE_DIR+") doesn't exist");
 			}
 			FileSource [] list = getZoneFiles();
+			if( (list == null || list.length == 0) && secondaries != null ) {
+				//  Only secondary zones, none transferred yet: served (SERVFAIL) from the first transfer on
+				list = new FileSource[0];
+			}
 			if( list == null || list.length == 0 ) {
 				throw new IOException("No zone file in "+zoneDir+" ("+PROP_ZONE_DIR+"): at least the primary domain's zone, <domain>.txt, is needed (parley.dns.masterZone names the domain)");			
 			}
@@ -1043,7 +1131,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			}
 
 			Zone def = zones.get(defaultZoneName.toLowerCase());
-			if( def == null ) {
+			if( def == null && secondaries != null && secondaries.get(defaultZoneName) != null ) {
+				//  The primary domain's zone is a secondary zone not transferred yet: SERVFAIL until it is
+				logError("The primary domain's zone, "+defaultZoneName+", is a secondary zone that has not been transferred yet");
+			} else if( def == null ) {
 				throw new IOException("The primary domain's zone, "+defaultZoneName+" ("+PROP_DEFAULT_ZONE+"), isn't in "+zoneDir+" ("+PROP_ZONE_DIR+"): it needs "+defaultZoneName+".txt there");			
 			}
 
@@ -1491,6 +1582,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			ret.add(questionCountError(req, hdr));
 		} else if( hdr.getOPCODE() == DNS.UPDATE ) {
 			ret.add(update(req, hdr));
+		} else if( hdr.getOPCODE() == DNS.NOTIFY && secondaries != null ) {
+			ret.add(notified(req, hdr, secondaries));
 		} else if( hdr.getOPCODE() != DNS.QUERY ) {
 			//  NOTIFY, UPDATE, IQUERY, STATUS...: NOTIMP (RFC 1035 4.1.1,
 			//  RFC 2136 2.2). They used to be answered as ordinary queries, so
@@ -1516,6 +1609,15 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				retMsg.setResponseCodeNoError();
 				retMsg.setMessageTypeResponse();
 				retMsg.setQuestion(s);
+				SecondaryZones sec = secondaries;
+				if( sec != null && sec.isUnavailable(s.getName()) ) {
+					//  A secondary zone not transferred yet, or expired: not served
+					final SecondaryZones.Entry e = sec.find(s.getName());
+					log(() -> "Query for "+s.getName()+" from "+req.getClient()+": SERVFAIL, the secondary zone "+e.getName()+" is "+e.getState());
+					retMsg.setResponseCodeServerFailure();
+					ret.add(retMsg);
+					continue;
+				}
 				if( s.getType() == DNS.AXFR || s.getType() == DNS.IXFR ) {
 					ret.addAll(zoneTransfer(req, s, retMsg));
 					continue;
@@ -1665,6 +1767,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		guarded("signing zones", () -> {
 			resignDue(System.currentTimeMillis()/1000);
 		});
+		SecondaryZones sec = secondaries;
+		if( sec != null ) {
+			guarded("checking secondary zones", sec::maintain);
+		}
 	}
 
 	/**
@@ -2276,8 +2382,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		//  By address (parley.dns.axfrAllow) or by TSIG key (parley.dns.axfrKeys, from anywhere)
 		String key = req.getTsigKey();
 		boolean allowed = axfrAllow.matches(req.getClient()) || (key != null && axfrKeys.contains(key));
-		if( zone == null || !allowed || (!tcp && question.getType() == DNS.AXFR) ) {
-			final String why = zone == null ? "not our zone" : !allowed ? "client not in "+PROP_AXFR_ALLOW+" and not signed with a key in "+PROP_AXFR_KEYS : "AXFR over UDP";
+		//  (a secondary zone that is not served is not ours to transfer)
+		boolean notServed = zone != null && secondaries != null && secondaries.isUnavailable(zone.getName());
+		if( zone == null || notServed || !allowed || (!tcp && question.getType() == DNS.AXFR) ) {
+			final String why = zone == null ? "not our zone" : notServed ? "a secondary zone that is not served now" : !allowed ? "client not in "+PROP_AXFR_ALLOW+" and not signed with a key in "+PROP_AXFR_KEYS : "AXFR over UDP";
 			log(() -> "Zone transfer of "+question.getName()+" for "+req.getClient()+" refused: "+why);
 			empty.setResponseCodeRefused();
 			ret.add(empty);
@@ -2347,6 +2455,42 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		return ret;
 	}
 
+	/**
+	 * A NOTIFY (RFC 1996) for a zone we are a secondary for: from the primary only (and signed with
+	 * its key when one is set), answered NOERROR and the zone is checked at once, in the background.
+	 * NOTAUTH for a zone we are not a secondary for, REFUSED from anyone else.
+	 */
+	Message notified(QueryData req, Header hdr, SecondaryZones sec) {
+		Message ret = new Message();
+		ret.setHeader(hdr);
+		ret.setMessageTypeResponse();
+		Section q = null;
+		for(Section s : req.getMessage().getQuestion()) {
+			ret.setQuestion(s);
+			q = s;
+		}
+		SecondaryZones.Entry e = q != null && q.getType() == DNS.SOA ? sec.get(q.getName()) : null;
+		if( e == null ) {
+			final Section asked = q;
+			log(() -> "NOTIFY"+(asked == null ? "" : " for "+asked.getName())+" from "+req.getClient()+" ignored: not a secondary zone of ours");
+			ret.getHeader().setRCODE(ZoneUpdater.NOTAUTH);
+			return ret;
+		}
+		String key = req.getTsigKey();
+		boolean keyOk = sec.getKey() == null || (key != null && key.equalsIgnoreCase(sec.getKey().getName()));
+		if( !sec.isPrimary(req.getClient()) || !keyOk ) {
+			log(() -> "NOTIFY for "+e.getName()+" from "+req.getClient()+" refused: not from the primary "+sec.getPrimary()
+					+(sec.getKey() == null ? "" : " signed with "+sec.getKey().getName()));
+			ret.setResponseCodeRefused();
+			return ret;
+		}
+		ret.setAuthorityAnswerOn();
+		ret.setResponseCodeNoError();
+		log(() -> "NOTIFY for "+e.getName()+" from "+req.getClient()+": checking the zone");
+		sec.notified(e);
+		return ret;
+	}
+
 	/** Upper bound of a record's size on the wire (without name compression). */
 	private static int estimateSize(RR rr) {
 		Message m = new Message();
@@ -2382,6 +2526,14 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			//  loopback address can't come from another host (the kernel drops such
 			//  packets), so local tools such as nsupdate keep working over UDP
 			log(() -> "UPDATE of "+zs.getName()+" from "+req.getClient()+" over UDP refused: "+PROP_UPDATE_ALLOW+" applies over TCP only; use TCP or a key in "+PROP_UPDATE_KEYS);
+			ret.setResponseCodeRefused();
+			return ret;
+		}
+		SecondaryZones sec = secondaries;
+		if( sec != null && sec.find(zs.getName()) != null ) {
+			//  A secondary zone is changed at its primary (and comes here with the next transfer)
+			log(() -> "UPDATE of "+zs.getName()+" from "+req.getClient()+" refused: "+sec.find(zs.getName()).getName()
+					+" is a secondary zone; send the update to its primary, "+sec.getPrimary());
 			ret.setResponseCodeRefused();
 			return ret;
 		}
@@ -3117,6 +3269,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		ZoneNotifier n = notifier;
 		if( n != null ) {
 			n.shutdown();
+		}
+		SecondaryZones sec = secondaries;
+		if( sec != null ) {
+			sec.shutdown();
 		}
 		long remaining = deadline - System.currentTimeMillis();
 		boolean ret = TCPProsessor.shutdownConnections(Math.max(1, remaining));

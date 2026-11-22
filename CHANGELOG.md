@@ -2,6 +2,15 @@
 
 ## parley-dns 2.0.0 (unreleased)
 
+### Added (2026-11-22: secondary zones)
+
+- **A server can be a secondary** for zones kept at a primary: `parley.dns.secondaryZones`,
+  `parley.dns.primaryAddress` and `parley.dns.primaryTsigKey`. It transfers each zone (AXFR over TCP, TSIG signed
+  when a key is set) at start, on the primary's NOTIFY and as the SOA's refresh time says, stores it as a zone file in
+  `parley.dns.zoneDir`, answers SERVFAIL for a zone not yet transferred or expired, and REFUSES an UPDATE of it. NOTIFY
+  from anyone but the primary is REFUSED (NOTAUTH for another zone); a server with no secondary zones answers NOTIMP as
+  before. New classes `SecondaryZones` and `ZoneTransferClient`. See the README ("Secondary zones").
+
 ### Changed (2026-11-10: logging through System.Logger, To-Do 19.5)
 
 - **Logging through `System.Logger`** (parley-core): `Message.clone` copies the level

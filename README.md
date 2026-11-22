@@ -28,7 +28,7 @@ The intent of this DNS code is to support a large number of domains with very li
  +  Zone file record types: SOA, NS, A, AAAA, CNAME, PTR, MX, TXT, SPF, HINFO, RP, SRV, CAA, HTTPS, SVCB, DS (other types are passed through unchanged when resolving)
  +  DNSSEC: zones are signed by the server itself when it has keys for them, or served as signed by another tool (see below)
 
-Not supported: incremental zone transfer (IXFR is answered with the whole zone), acting as a secondary (incoming NOTIFY gets NOTIMP), signing with NSEC3 opt-out (zones signed elsewhere with it are served), automatic trust anchor updates (RFC 5011), and the `$GENERATE` zone file directive.
+Not supported: incremental zone transfer (IXFR is answered with the whole zone, and a secondary always transfers the whole zone), signing with NSEC3 opt-out (zones signed elsewhere with it are served), automatic trust anchor updates (RFC 5011), and the `$GENERATE` zone file directive.
 
 # Zone files
 
@@ -408,11 +408,48 @@ Zone reloads and re-signing run on a thread of their own (`DnsMaintenance`), so 
 | `parley.dns.notifyKey` | none | TSIG key to sign NOTIFY messages with; the secondary's answer must then be signed too |
 | `parley.dns.notifyRetries` | 5 | Attempts per NOTIFY |
 | `parley.dns.notifyTimeout` | `2s` | First wait for a NOTIFY answer, doubled after each attempt |
+| `parley.dns.secondaryZones` | none | Zones this server is a secondary for, separated by commas or spaces. It transfers them from `parley.dns.primaryAddress` and stores each as a zone file in `parley.dns.zoneDir`; changes to them are made at the primary (see [Secondary zones](#secondary-zones)) |
+| `parley.dns.primaryAddress` | none | The primary the secondary zones come from: `host[:port]`, an address (not a name), port 53 by default. Required with `parley.dns.secondaryZones` |
+| `parley.dns.primaryTsigKey` | none | The TSIG key (a name in `parley.dns.tsigKeys`) that signs the requests to the primary; the primary's answers and its NOTIFY must be signed with it too. None: unsigned |
 | `parley.dns.tsigKeys` | none | TSIG keys (RFC 8945) as `name:algorithm:base64secret`, e.g. `xfr.example:hmac-sha256:...`. Algorithms: hmac-sha256 (recommended), hmac-sha512, hmac-sha384, hmac-sha224, hmac-sha1, hmac-md5. Generate a secret with `openssl rand -base64 32`. A request signed with a known key gets a signed response; a bad signature, an unknown key or a clock too far off (see `parley.dns.tsigFudge`) gets NOTAUTH and is not answered. A signed UPDATE or zone transfer request is acted on once. The same UPDATE sent again (a retransmission, or a replay) gets the first answer again without being applied a second time; the same transfer request gets NOTAUTH with BADTIME. Plain queries may be repeated |
 | `parley.dns.tsigKeyFile` | none | A file of TSIG keys, one `name algorithm secret` per line (`#` comments); relative to `parley.dns.dnsDir`. Keeps the secrets out of the properties file |
 | `parley.dns.tsigFudge` | `5m` | Largest clock difference (1s to 65535s) accepted in a signed request; also the fudge used when signing NOTIFY. The window is the smaller of this and the fudge in the request, so a client can't widen it |
 | `parley.dns.updateKeys` | none | TSIG key names whose signed dynamic UPDATE requests (RFC 2136, e.g. `nsupdate -k`) may change zones |
 | `parley.dns.updateAllow` | none | Addresses / networks allowed to send unsigned UPDATE requests. Over UDP this applies to this machine (loopback) only, because a UDP source address can be forged: other addresses must send over TCP (`nsupdate -v`) or sign with a key. Prefer `parley.dns.updateKeys` |
+
+### Secondary zones
+
+A server is a secondary for the zones in `parley.dns.secondaryZones`: it keeps a copy of each, taken from the primary named by `parley.dns.primaryAddress` with a zone transfer (AXFR over TCP, signed with `parley.dns.primaryTsigKey` when one is set).
+
+- **When it transfers.** At start for each zone it has no file for, when the primary sends a NOTIFY (RFC 1996) for the zone, and when the zone's SOA refresh time passes. Each time it asks for the primary's SOA first and transfers only when the primary's serial is newer (RFC 1982 serial arithmetic). A failed attempt is tried again after the SOA's retry time.
+- **What it stores.** Each transferred zone is written to `parley.dns.zoneDir` as `<zone>.txt` (a temporary file first, renamed over the old one), with every record's owner, TTL and class spelled out. The server loads it like any zone file and serves it again after a restart without waiting for a transfer. Inherited records (`$INHERIT`) arrive already merged in, so the stored zone has none.
+- **What it serves.** A zone never transferred, and no file for it, answers SERVFAIL until its first transfer. After the SOA's expire time with no contact with the primary a zone answers SERVFAIL again, until a transfer succeeds. The expire time counts from the last contact; after a restart, from the start.
+- **NOTIFY.** Accepted only from the primary's address (and signed with `parley.dns.primaryTsigKey` when one is set): NOERROR, and the zone is checked at once. Any other sender gets REFUSED; a zone this server is not a secondary for gets NOTAUTH. A server with no secondary zones still answers NOTIMP.
+- **Updates.** An UPDATE (RFC 2136) for a secondary zone is REFUSED: send it to the primary, and the change reaches the secondary with the next NOTIFY and transfer.
+- **Checks on what comes in.** A transfer that doesn't start and end with the zone's SOA, changes serial while it runs, holds a name outside the zone, or (with a key) has a message not signed with it, is thrown away and the zone we have is kept. With a key every message of the transfer must be signed, as parley-dns signs them; a primary that signs only some of them (RFC 8945 5.3.1) is not supported.
+- **DNSSEC.** The signatures a signed zone's transfer brings are stored with the zone and served as received; the secondary does no signing.
+
+The primary must allow the secondary to transfer the zone (`parley.dns.axfrAllow`, or `parley.dns.axfrKeys` with the same key) and list it in `parley.dns.notify` to send it a NOTIFY on each change. The same TSIG key, with the same name and secret, goes in `parley.dns.tsigKeys` on both servers.
+
+Example, on the secondary:
+
+```
+parley.dns.masterZone=example.com
+parley.dns.secondaryZones=example.com
+parley.dns.primaryAddress=192.0.2.10
+parley.dns.primaryTsigKey=xfr.example
+parley.dns.tsigKeys=xfr.example:hmac-sha256:c2VjcmV0...
+parley.dns.bindAddress=192.0.2.11
+```
+
+and on the primary:
+
+```
+parley.dns.axfrKeys=xfr.example
+parley.dns.notify=192.0.2.11
+parley.dns.notifyKey=xfr.example
+parley.dns.tsigKeys=xfr.example:hmac-sha256:c2VjcmV0...
+```
 
 ### DNSSEC
 
