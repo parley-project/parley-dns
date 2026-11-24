@@ -103,7 +103,7 @@ public class Message extends Utility {
 		ret.tcpFallback = tcpFallback;
 		ret.server = server;
 		ret.svrAddress = svrAddress;
-		ret.setLogLevel(getLogLevel());
+		ret.useConfigurationOf(this);
 		for(Section s: que) {
 			ret.que.add(s);
 		}
