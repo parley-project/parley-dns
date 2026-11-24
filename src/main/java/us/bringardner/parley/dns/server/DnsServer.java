@@ -41,6 +41,8 @@ import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 
+import us.bringardner.parley.core.LogLevel;
+import us.bringardner.parley.core.ParleyLogger;
 import us.bringardner.parley.core.util.AddressMatcher;
 import us.bringardner.parley.dns.Cname;
 import us.bringardner.parley.dns.DNS;
@@ -493,13 +495,38 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 				System.setProperties(prop2);
 				// the log level settings may have changed
-				refreshLogLevels();
+				applyLogLevelSetting();
 			} finally {
 				in.close();
 			}
 		} else {
 			log("Properties do not exits file="+f);
 		}
+	}
+
+	/**
+	 * Gives this server the level its settings now say: the nearest of parley.log.level.NAME (NAME is
+	 * this class's name, then each shorter name) and parley.log.level. A logger reads its level once, so
+	 * a reload of the settings has to set it. Nothing is changed when no level is set.
+	 */
+	private void applyLogLevelSetting() {
+		String name = ParleyLogger.levelName(getLoggerName());
+		String value = null;
+		while( value == null && !name.isEmpty() ) {
+			value = nonEmpty(getProperty(PROPERTY_LOG_LEVEL + "." + name));
+			int dot = name.lastIndexOf('.');
+			name = dot < 0 ? "" : name.substring(0, dot);
+		}
+		if( value == null ) {
+			value = nonEmpty(getProperty(PROPERTY_LOG_LEVEL));
+		}
+		if( value != null ) {
+			setLogLevel(LogLevel.parse(value, getLogLevel()));
+		}
+	}
+
+	private static String nonEmpty(String value) {
+		return value == null || value.trim().isEmpty() ? null : value;
 	}
 
 	public void initServer() throws IOException 	{
