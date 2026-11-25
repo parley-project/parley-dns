@@ -470,63 +470,18 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 */
 	private void loadSettingsFile() throws IOException {
 		String propertyFile = getProperty(PROP_DNS_PROPERTIES);
-		// (parley-net's confDir is a FileSource; the setting may be a filesource: URL)
-		FileSource f = (propertyFile == null || propertyFile.trim().isEmpty()
-				? us.bringardner.parley.net.server.ServerMain.confDir().getChild(DEFAULT_PROPERTIES_FILE_NAME)
-				: FileSource.of(propertyFile.trim())).getCanonicalFile();
-
-		Properties prop1 = System.getProperties();
-		//  First load the properties from the file
-		if( f.exists() ) {
-			log("Loading properties from "+f);
-			InputStream in = f.getInputStream();
-			try {
-				Properties prop2 = new Properties();
-				prop2.load(in);
-
-				//  Override with system properties
-				for(Object key  : prop1.keySet()) {
-					prop2.setProperty(key.toString(), prop1.getProperty(key.toString()));
-				}
-				log("Here are the properties we're using");
-				for(Entry<Object, Object> e : prop2.entrySet()) {
-					log(e.getKey()+"="+e.getValue());
-				}
-
-				System.setProperties(prop2);
-				// the log level settings may have changed
-				applyLogLevelSetting();
-			} finally {
-				in.close();
-			}
+		boolean named = propertyFile != null && !propertyFile.trim().isEmpty();
+		String where = named ? propertyFile.trim() : us.bringardner.parley.plugin.PluginFolders.confDir()+"/"+DEFAULT_PROPERTIES_FILE_NAME;
+		// (a file that is named has to be there; the default file needn't be)
+		Properties found = named ? readSettingsFile(where) : findSettingsFile(where);
+		if( found != null ) {
+			log("Loading properties from "+where);
+			addSettings(found);
+			// the log level settings may have changed
+			applyLogLevelSetting();
 		} else {
-			log("Properties do not exits file="+f);
+			log("Properties do not exist file="+where);
 		}
-	}
-
-	/**
-	 * Gives this server the level its settings now say: the nearest of parley.log.level.NAME (NAME is
-	 * this class's name, then each shorter name) and parley.log.level. A logger reads its level once, so
-	 * a reload of the settings has to set it. Nothing is changed when no level is set.
-	 */
-	private void applyLogLevelSetting() {
-		String name = ParleyLogger.levelName(getLoggerName());
-		String value = null;
-		while( value == null && !name.isEmpty() ) {
-			value = nonEmpty(getProperty(PROPERTY_LOG_LEVEL + "." + name));
-			int dot = name.lastIndexOf('.');
-			name = dot < 0 ? "" : name.substring(0, dot);
-		}
-		if( value == null ) {
-			value = nonEmpty(getProperty(PROPERTY_LOG_LEVEL));
-		}
-		if( value != null ) {
-			getLogger().setLevel(LogLevel.parse(value, getLogger().getLevel()));
-		}
-	}
-
-	private static String nonEmpty(String value) {
-		return value == null || value.trim().isEmpty() ? null : value;
 	}
 
 	public void initServer() throws IOException 	{
@@ -1476,7 +1431,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		//  command line. Its management bean is on the platform MBean server
 		//  (us.bringardner.parley:type=Dns,name=dns).
 		javax.management.MBeanServer mbeans = java.lang.management.ManagementFactory.getPlatformMBeanServer();
-		us.bringardner.parley.net.server.ServerMain.run("DnsServer", args, PROP_DNS_PROPERTIES, DEFAULT_PROPERTIES_FILE_NAME,
+		us.bringardner.parley.net.server.ServerMain.run("DnsServer", args,
 				() -> java.util.Collections.singletonList(service(new DnsServer(), "DNS server", bean -> {
 					javax.management.ObjectName n = new javax.management.ObjectName("us.bringardner.parley:type=Dns,name=dns");
 					mbeans.registerMBean(bean, n);
