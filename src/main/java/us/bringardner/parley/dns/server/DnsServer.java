@@ -473,10 +473,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		boolean named = propertyFile != null && !propertyFile.trim().isEmpty();
 		String where = named ? propertyFile.trim() : us.bringardner.parley.plugin.PluginFolders.confDir()+"/"+DEFAULT_PROPERTIES_FILE_NAME;
 		// (a file that is named has to be there; the default file needn't be)
-		Properties found = named ? readSettingsFile(where) : findSettingsFile(where);
+		us.bringardner.parley.core.SettingsFile found = named ? readSettingsFile(where) : findSettingsFile(where);
 		if( found != null ) {
 			log("Loading properties from "+where);
-			addSettings(found);
+			addSettings(found.getProperties());
 			// the log level settings may have changed
 			applyLogLevelSetting();
 		} else {
