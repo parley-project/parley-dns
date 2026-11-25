@@ -173,7 +173,6 @@ public class TCPProsessor extends DnsRequestProcessor implements Runnable {
 		pool.allowCoreThreadTimeOut(true);
 
 		TcpServer s = new TcpServer();
-		s.useConfigurationOf(settings);
 		s.setServerChannel(ch);
 		s.setHandlerExecutor(pool);
 		s.setReactorCount(Math.max(1, reactors));

@@ -24,6 +24,25 @@ import us.bringardner.parley.files.memory.MemoryFileSourceFactory;
  */
 public class TestDnsFiles {
 
+	/** The system properties a test set with setSystem, cleared after it */
+	private static final java.util.Set<String> SET_HERE = new java.util.HashSet<>();
+
+	private static void setSystem(java.util.Properties settings) {
+		for (String n : settings.stringPropertyNames()) {
+			System.setProperty(n, settings.getProperty(n));
+			SET_HERE.add(n);
+		}
+	}
+
+	@org.junit.jupiter.api.AfterEach
+	public void clearSystem() {
+		for (String n : SET_HERE) {
+			System.clearProperty(n);
+		}
+		SET_HERE.clear();
+	}
+
+
 	@TempDir
 	Path tmp;
 
@@ -32,7 +51,6 @@ public class TestDnsFiles {
 		assertSame(FileSourceFactory.getDefaultFactory(), DnsFiles.factory(new Properties()));
 		assertSame(FileSourceFactory.getDefaultFactory(), DnsFiles.factory(" ", null));
 		DnsServer server = new DnsServer();
-		server.setConfiguration(new Properties());
 		assertSame(FileSourceFactory.getDefaultFactory(), server.getFileSourceFactory());
 	}
 
@@ -44,8 +62,8 @@ public class TestDnsFiles {
 		assertTrue(f instanceof MemoryFileSourceFactory);
 		assertTrue(f.isConnected());
 		assertNotSame(f, DnsFiles.factory(p), "a new one each time");
+		setSystem(p);
 		DnsServer server = new DnsServer();
-		server.setConfiguration(p);
 		FileSourceFactory mine = server.getFileSourceFactory();
 		assertTrue(mine instanceof MemoryFileSourceFactory);
 		assertSame(mine, server.getFileSourceFactory(), "one per server");

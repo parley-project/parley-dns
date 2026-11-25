@@ -41,6 +41,25 @@ import us.bringardner.parley.files.FileSource;
  */
 public class TestSecondaryZones {
 
+	/** The system properties a test set with setSystem, cleared after it */
+	private static final java.util.Set<String> SET_HERE = new java.util.HashSet<>();
+
+	private static void setSystem(java.util.Properties settings) {
+		for (String n : settings.stringPropertyNames()) {
+			System.setProperty(n, settings.getProperty(n));
+			SET_HERE.add(n);
+		}
+	}
+
+	@org.junit.jupiter.api.AfterEach
+	public void clearSystem() {
+		for (String n : SET_HERE) {
+			System.clearProperty(n);
+		}
+		SET_HERE.clear();
+	}
+
+
 	@TempDir
 	static Path tmp;
 
@@ -403,8 +422,8 @@ public class TestSecondaryZones {
 		Properties config = new Properties();
 		config.setProperty(DnsServer.PROP_ZONE_DIR, zoneDir.getAbsolutePath());
 		config.setProperty(DnsServer.PROP_DEFAULT_ZONE, ZONE);
+		setSystem(config);
 		DnsServer server = new DnsServer();
-		server.setConfiguration(config);
 		server.setRecursionAvailable(false);
 		server.setTsigKeys(Tsig.KeyRing.parse(KEY_SPEC));
 		server.setSecondaryZones(ZONE, "127.0.0.1:"+p.port(), keyName, 10000);

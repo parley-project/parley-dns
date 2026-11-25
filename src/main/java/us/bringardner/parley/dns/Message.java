@@ -103,7 +103,6 @@ public class Message extends Utility {
 		ret.tcpFallback = tcpFallback;
 		ret.server = server;
 		ret.svrAddress = svrAddress;
-		ret.useConfigurationOf(this);
 		for(Section s: que) {
 			ret.que.add(s);
 		}
@@ -256,11 +255,11 @@ AA              Authoritative Answer - this bit is valid in responses,
 	}
 
 	public final void debugOff() { 
-		setLogLevel(LogLevel.INFO);
+		getLogger().setLevel(LogLevel.INFO);
 	}
 
 	public final void debugOn() { 
-		setLogLevel(LogLevel.DEBUG);
+		getLogger().setLevel(LogLevel.DEBUG);
 	}
 
 	public final void defnameOff() { 

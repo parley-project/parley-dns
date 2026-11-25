@@ -521,7 +521,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			value = nonEmpty(getProperty(PROPERTY_LOG_LEVEL));
 		}
 		if( value != null ) {
-			setLogLevel(LogLevel.parse(value, getLogLevel()));
+			getLogger().setLevel(LogLevel.parse(value, getLogger().getLevel()));
 		}
 	}
 
@@ -536,14 +536,8 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			return;
 		}
 
-		//  A server made with a configuration of its own (by an application that runs it, which has
-		//  read its settings into it) reads only that, and leaves the JVM's system
-		//  properties alone. A server alone in its JVM loads its settings file into the system properties.
-		if( getConfiguration() != null ) {
-			log("Using the server's own configuration");
-		} else {
-			loadSettingsFile();
-		}
+		//  The server loads its settings file into the system properties.
+		loadSettingsFile();
 
 		String tmp = null;
 
@@ -948,9 +942,9 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 
 
-	/** The settings: the server's own configuration, or the system properties. */
+	/** The settings: the system properties. */
 	private Properties settings() {
-		return getConfiguration() != null ? getConfiguration() : System.getProperties();
+		return System.getProperties();
 	}
 
 	/**
