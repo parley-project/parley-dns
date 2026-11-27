@@ -43,10 +43,12 @@ import us.bringardner.parley.dns.A;
 import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * Offline tests for atomic zone loading / reloading in DnsServer.
  */
+@ErrorsExpected
 public class TestZoneReload {
 
 	@TempDir

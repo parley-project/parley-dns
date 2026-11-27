@@ -46,7 +46,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import us.bringardner.parley.core.LogLevel;
 
 /**
 	This class manages a DNS Message.
@@ -252,14 +251,6 @@ AA              Authoritative Answer - this bit is valid in responses,
 			add.add(i.next());
 		}
 
-	}
-
-	public final void debugOff() { 
-		getLogger().setLevel(LogLevel.INFO);
-	}
-
-	public final void debugOn() { 
-		getLogger().setLevel(LogLevel.DEBUG);
 	}
 
 	public final void defnameOff() { 
@@ -840,7 +831,6 @@ TC              TrunCation - specifies that this message was truncated
 	 */
 	public static void main(String[] args)throws Exception{
 		Message msg = new Message();
-		msg.debugOn();
 		msg.query("2.0.0.127.relays.ordb.org",DNS.TXT,DNS.IN);
 	}
 

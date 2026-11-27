@@ -39,12 +39,14 @@ import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * A server that can't start reports why through awaitStarted() and stops what
  * it had started, instead of calling System.exit() (rec #34).
  * If System.exit() were still called, this test run would end here.
  */
+@ErrorsExpected
 public class TestStartupFailure {
 
 	@TempDir

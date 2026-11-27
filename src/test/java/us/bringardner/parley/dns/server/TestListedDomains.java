@@ -28,6 +28,7 @@ import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.Txt;
 import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * parley.dns.domainList: the listed domains (here the mail queue's queue.properties domains=) are
@@ -35,6 +36,7 @@ import us.bringardner.parley.files.FileSource;
  * the shared zone's DKIM record (the shared key) with them; and their DMARC report authorizations
  * from the master zone.
  */
+@ErrorsExpected
 public class TestListedDomains {
 
 	@TempDir

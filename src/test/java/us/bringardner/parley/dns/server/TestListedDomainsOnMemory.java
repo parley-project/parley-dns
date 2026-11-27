@@ -10,11 +10,13 @@ import org.junit.jupiter.api.Test;
 import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.files.FileSource;
 import us.bringardner.parley.files.memory.MemoryFileSourceFactory;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * {@link TestListedDomains} with the files on a memory file system (To-Do 18.15): the server reads them
  * through filesource: URLs.
  */
+@ErrorsExpected
 public class TestListedDomainsOnMemory extends TestListedDomains {
 
 	@Override

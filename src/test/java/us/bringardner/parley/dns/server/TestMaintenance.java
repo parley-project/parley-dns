@@ -12,6 +12,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * Round 5 #87 (and round 4 #60): zone reloads, dynamic records and re-signing
@@ -20,6 +21,7 @@ import us.bringardner.parley.files.FileSource;
  * re-signing (signed zones then went bogus when their signatures expired).
  * They now run on their own thread, each step guarded.
  */
+@ErrorsExpected
 public class TestMaintenance {
 
 	@TempDir

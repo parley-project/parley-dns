@@ -105,6 +105,14 @@
 			<scope>test</scope>
 		</dependency>
 		<dependency>
+			<!-- The helpers that set a level and keep expected errors out of the test output -->
+			<groupId>us.bringardner.parley</groupId>
+			<artifactId>parley-logging</artifactId>
+			<version>${project.version}</version>
+			<type>test-jar</type>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
 			<groupId>org.junit.jupiter</groupId>
 			<artifactId>junit-jupiter-engine</artifactId>
 			<version>5.11.4</version>

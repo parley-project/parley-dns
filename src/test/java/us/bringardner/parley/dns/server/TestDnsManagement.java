@@ -25,8 +25,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /** The DNS server's management bean, used as a JMX client would (through an MXBean proxy). */
+@ErrorsExpected
 public class TestDnsManagement {
 
 	@TempDir

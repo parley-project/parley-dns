@@ -34,12 +34,14 @@ import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * Catalog zones (RFC 9432): the zone a primary makes from the zones it serves, the secondary that keeps
  * every zone the catalog lists, and what happens when a zone is added, removed, or the catalog is broken.
  * The primary a secondary reads from is a real DnsServer answering over a loopback socket.
  */
+@ErrorsExpected
 public class TestCatalogZones {
 
 	@TempDir

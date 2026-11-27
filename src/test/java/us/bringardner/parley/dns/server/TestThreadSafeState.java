@@ -36,10 +36,12 @@ import org.junit.jupiter.api.Test;
 
 import us.bringardner.parley.dns.resolve.RemoteServer;
 import us.bringardner.parley.dns.resolve.ServerA;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * Offline tests for state shared between threads: RemoteServer rotation.
  */
+@ErrorsExpected
 public class TestThreadSafeState {
 
 	@Test

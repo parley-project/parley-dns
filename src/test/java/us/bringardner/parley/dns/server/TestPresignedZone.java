@@ -59,12 +59,14 @@ import us.bringardner.parley.dns.dnssec.Canonical;
 import us.bringardner.parley.dns.dnssec.DnssecKey;
 import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * Zones signed elsewhere: the fixtures were signed by BIND's
  * dnssec-signzone (NSEC, and NSEC3 with -3 -), valid until 2046, and are
  * served with their own signatures and chain.
  */
+@ErrorsExpected
 public class TestPresignedZone {
 
 	@TempDir

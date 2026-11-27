@@ -40,12 +40,14 @@ import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.server.DnsServer;
 import us.bringardner.parley.dns.server.UDPProsessor;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * Offline tests: a recursive query that can't be answered gets SERVFAIL
  * instead of silence, and recursion works over TCP. No upstream servers are
  * configured, so every cache miss fails.
  */
+@ErrorsExpected
 public class TestServFail {
 
 	private static Message request(String name, int id) {

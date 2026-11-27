@@ -33,12 +33,14 @@ import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.Tsig;
 import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * A server as a secondary: transferring a zone from a primary (TSIG signed or not), what is stored,
  * refresh, retry and expire, and what the server does with NOTIFY, queries and updates for a secondary zone.
  * The primary is a real DnsServer answering over a loopback socket, so the transfers are its real AXFR.
  */
+@ErrorsExpected
 public class TestSecondaryZones {
 
 	/** The system properties a test set with setSystem, cleared after it */

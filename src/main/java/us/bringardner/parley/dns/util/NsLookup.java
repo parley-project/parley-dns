@@ -401,7 +401,6 @@ public class NsLookup extends Utility {
 		queryError = true;
 		printError = false;
 		aNoAnswer = false;
-		msg.debugOff();
 	}
 
 	private static void interactiveLoop() {
@@ -547,11 +546,9 @@ public class NsLookup extends Utility {
 			debug = false;
 		} else if( abbrev(opt, "d2", 2) ) {
 			d2 = true;
-			msg.debugOn();
 		} else if( abbrev(opt, "nod2", 4) ) {
 			d2 = false;
-			msg.debugOff();
-		} else if( abbrev(opt, "search", 3) ) {
+			} else if( abbrev(opt, "search", 3) ) {
 			search = true;
 		} else if( abbrev(opt, "nosearch", 5) ) {
 			search = false;

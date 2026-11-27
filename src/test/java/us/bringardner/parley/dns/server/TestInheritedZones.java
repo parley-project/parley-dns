@@ -28,11 +28,13 @@ import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * $INHERIT: a domain's zone serves the shared zone's records too (parley.dns.sharedZone, read under
  * the domain's name); the domain's own records add to them or override them (by name and type).
  */
+@ErrorsExpected
 public class TestInheritedZones {
 
 	@TempDir

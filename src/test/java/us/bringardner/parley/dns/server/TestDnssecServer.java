@@ -60,6 +60,7 @@ import us.bringardner.parley.dns.dnssec.Canonical;
 import us.bringardner.parley.dns.dnssec.DnssecKey;
 import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * A signed zone served with DNSSEC (RFC 4033-4035): every answer to a DO
@@ -67,6 +68,7 @@ import us.bringardner.parley.files.FileSource;
  * (BIND's delv, dnssec-verify and ldns-verify-zone agreed with these
  * answers; see the rec #44 notes.)
  */
+@ErrorsExpected
 public class TestDnssecServer {
 
 	@TempDir

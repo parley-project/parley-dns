@@ -57,11 +57,13 @@ import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.Tsig;
 import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * Dynamic UPDATE (RFC 2136) with a journal (rec #43).
  * Also checked against dnspython's dns.update (24 cases).
  */
+@ErrorsExpected
 public class TestDynamicUpdate {
 
 	@TempDir

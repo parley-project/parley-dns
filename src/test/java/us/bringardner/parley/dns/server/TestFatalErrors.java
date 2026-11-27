@@ -41,11 +41,13 @@ import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.dns.resolve.Resolver;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * Offline tests: no System.exit from request threads; JVM errors reach
  * FatalErrorHandler, which halts only for VirtualMachineError when enabled.
  */
+@ErrorsExpected
 public class TestFatalErrors {
 
 	/** A server whose every query runs out of memory. */

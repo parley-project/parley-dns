@@ -36,12 +36,14 @@ import us.bringardner.parley.dns.DNS;
 import us.bringardner.parley.dns.Message;
 import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.Section;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * Offline tests: Resolver.resolve() must not recurse forever on CNAME loops.
  * The resolver cache is pre-loaded so no upstream query is ever sent
  * (and with no root servers configured a cache miss just returns null).
  */
+@ErrorsExpected
 public class TestCnameLoopsResolver {
 
 	private static void cacheCname(String name, String target) {

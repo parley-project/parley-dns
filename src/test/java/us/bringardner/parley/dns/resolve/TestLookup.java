@@ -53,10 +53,12 @@ import us.bringardner.parley.dns.Section;
 import us.bringardner.parley.dns.Soa;
 import us.bringardner.parley.dns.Txt;
 import us.bringardner.parley.dns.resolve.LookupResult.Status;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * Offline tests of Lookup: answers come from a map instead of the network.
  */
+@ErrorsExpected
 public class TestLookup {
 
 	private final Map<String, Message> answers = new HashMap<String, Message>();

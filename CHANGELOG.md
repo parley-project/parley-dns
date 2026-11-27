@@ -2,6 +2,13 @@
 
 ## parley-dns 2.0.0 (unreleased)
 
+### Changed (2026-11-27: logging through System.Logger)
+
+- Logging levels come only from configuration (`parley.log.level[.name]`, or the logging backend's own). `Message.debugOn()`
+  and `Message.debugOff()` are removed, because they set one object's level. NsLookup's `d2` still prints more of the
+  answers; use `-Dparley.log.level=DEBUG` for the debug log. `DnsServer` no longer applies a log level setting when
+  it reads its settings file (the level is read each time). Tests have parley-logging's test jar.
+
 ### Added (2026-11-26: catalog zones)
 
 - **Catalog zones (RFC 9432)**: `parley.dns.catalogZone`. A primary makes a catalog zone from the zones it serves

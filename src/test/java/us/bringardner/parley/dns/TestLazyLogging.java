@@ -31,18 +31,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
 
-import us.bringardner.parley.core.ParleyLogger;
-import us.bringardner.parley.core.LogLevel;
+import us.bringardner.parley.logging.ParleyLogger;
 
 /**
  * log(Supplier) only builds the message when debug logging is enabled (rec #33).
  */
 public class TestLazyLogging {
 
-	private static ParleyLogger logger(LogLevel level, ByteArrayOutputStream sink) {
-		ParleyLogger ret = new ParleyLogger();
-		ret.init("TestLazyLogging");
-		ret.setLevel(level);
+	private static ParleyLogger logger(System.Logger.Level level, ByteArrayOutputStream sink) {
+		ParleyLogger ret = new ParleyLogger("TestLazyLogging", level);
 		PrintStream ps = new PrintStream(sink, true);
 		ret.setOut(ps);
 		ret.setErr(ps);
@@ -53,7 +50,7 @@ public class TestLazyLogging {
 	public void messageNotBuiltWhenDebugIsOff() {
 		ByteArrayOutputStream sink = new ByteArrayOutputStream();
 		DnsBaseClass obj = new DnsBaseClass();
-		obj.setLogger(logger(LogLevel.ERROR, sink));
+		obj.setLogger(logger(System.Logger.Level.ERROR, sink));
 		AtomicInteger built = new AtomicInteger();
 		for(int i=0; i < 100; i++ ) {
 			obj.log(() -> "built "+built.incrementAndGet());
@@ -66,7 +63,7 @@ public class TestLazyLogging {
 	public void messageBuiltAndLoggedWhenDebugIsOn() {
 		ByteArrayOutputStream sink = new ByteArrayOutputStream();
 		DnsBaseClass obj = new DnsBaseClass();
-		obj.setLogger(logger(LogLevel.DEBUG, sink));
+		obj.setLogger(logger(System.Logger.Level.DEBUG, sink));
 		AtomicInteger built = new AtomicInteger();
 		obj.log(() -> "built "+built.incrementAndGet());
 		assertEquals(1, built.get());

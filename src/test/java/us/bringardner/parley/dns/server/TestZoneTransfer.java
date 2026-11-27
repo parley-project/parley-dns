@@ -57,10 +57,12 @@ import us.bringardner.parley.dns.Soa;
 import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * Zone transfers (AXFR, RFC 5936) and NOTIFY (RFC 1996) (rec #41).
  */
+@ErrorsExpected
 public class TestZoneTransfer {
 
 	@TempDir

@@ -41,8 +41,6 @@ import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 
-import us.bringardner.parley.core.LogLevel;
-import us.bringardner.parley.core.ParleyLogger;
 import us.bringardner.parley.core.util.AddressMatcher;
 import us.bringardner.parley.dns.Cname;
 import us.bringardner.parley.dns.DNS;
@@ -484,8 +482,6 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 		if( found != null ) {
 			log("Loading properties from "+where);
 			addSettings(found.getProperties());
-			// the log level settings may have changed
-			applyLogLevelSetting();
 		} else {
 			log("Properties do not exist file="+where);
 		}

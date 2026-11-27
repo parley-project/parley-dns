@@ -53,11 +53,13 @@ import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.Tsig;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * TSIG in the server: signed queries over UDP and TCP, TSIG errors,
  * zone transfers allowed by key, signed NOTIFY (rec #42).
  */
+@ErrorsExpected
 public class TestTsigServer {
 
 	@TempDir

@@ -45,11 +45,13 @@ import us.bringardner.parley.dns.RR;
 import us.bringardner.parley.dns.TestFiles;
 import us.bringardner.parley.dns.resolve.QueryData;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * Offline tests: the authoritative server must not recurse forever on CNAME
  * loops in its own zone data (it used to throw StackOverflowError).
  */
+@ErrorsExpected
 public class TestCnameLoopsServer {
 
 	@TempDir

@@ -30,6 +30,7 @@ import us.bringardner.parley.dns.resolve.Resolver;
 import us.bringardner.parley.dns.resolve.ResolverThread;
 import us.bringardner.parley.dns.resolve.TestHooks;
 import us.bringardner.parley.files.FileSource;
+import us.bringardner.parley.logging.testing.ErrorsExpected;
 
 /**
  * Rec #57: a recursive UDP query whose answer is cached is answered by the
@@ -37,6 +38,7 @@ import us.bringardner.parley.files.FileSource;
  * resolver thread busy (here: the queue is full) cached names used to get
  * SERVFAIL.
  */
+@ErrorsExpected
 public class TestCacheFastPath {
 
 	@TempDir
