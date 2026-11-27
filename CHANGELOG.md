@@ -2,6 +2,14 @@
 
 ## parley-dns 2.0.0 (unreleased)
 
+### Added (2026-11-26: catalog zones)
+
+- **Catalog zones (RFC 9432)**: `parley.dns.catalogZone`. A primary makes a catalog zone from the zones it serves
+  (its serial goes up when a zone is added or removed, and the secondaries get a NOTIFY for it); a secondary
+  (with `parley.dns.primaryAddress`) keeps every zone the catalog lists, besides `parley.dns.secondaryZones`. A zone the
+  catalog drops stops being served and its file is renamed `<zone>.txt.removed`; a broken or empty catalog changes nothing.
+  `DnsServer.setCatalogZone`, a `SecondaryZones` that can hold a catalog, new class `CatalogZone`. See the README ("Catalog zones").
+
 ### Added (2026-11-22: secondary zones)
 
 - **A server can be a secondary** for zones kept at a primary: `parley.dns.secondaryZones`,

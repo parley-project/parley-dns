@@ -411,6 +411,7 @@ Zone reloads and re-signing run on a thread of their own (`DnsMaintenance`), so 
 | `parley.dns.secondaryZones` | none | Zones this server is a secondary for, separated by commas or spaces. It transfers them from `parley.dns.primaryAddress` and stores each as a zone file in `parley.dns.zoneDir`; changes to them are made at the primary (see [Secondary zones](#secondary-zones)) |
 | `parley.dns.primaryAddress` | none | The primary the secondary zones come from: `host[:port]`, an address (not a name), port 53 by default. Required with `parley.dns.secondaryZones` |
 | `parley.dns.primaryTsigKey` | none | The TSIG key (a name in `parley.dns.tsigKeys`) that signs the requests to the primary; the primary's answers and its NOTIFY must be signed with it too. None: unsigned |
+| `parley.dns.catalogZone` | none | A catalog zone (RFC 9432), a zone that lists the zones of a primary, so a secondary needs no list of zones. On a primary (no `parley.dns.primaryAddress`) the server makes it from the zones it serves; on a secondary (with `parley.dns.primaryAddress`) it is the primary's catalog zone, and every zone it lists is kept as a secondary zone (see [Catalog zones](#catalog-zones)) |
 | `parley.dns.tsigKeys` | none | TSIG keys (RFC 8945) as `name:algorithm:base64secret`, e.g. `xfr.example:hmac-sha256:...`. Algorithms: hmac-sha256 (recommended), hmac-sha512, hmac-sha384, hmac-sha224, hmac-sha1, hmac-md5. Generate a secret with `openssl rand -base64 32`. A request signed with a known key gets a signed response; a bad signature, an unknown key or a clock too far off (see `parley.dns.tsigFudge`) gets NOTAUTH and is not answered. A signed UPDATE or zone transfer request is acted on once. The same UPDATE sent again (a retransmission, or a replay) gets the first answer again without being applied a second time; the same transfer request gets NOTAUTH with BADTIME. Plain queries may be repeated |
 | `parley.dns.tsigKeyFile` | none | A file of TSIG keys, one `name algorithm secret` per line (`#` comments); relative to `parley.dns.dnsDir`. Keeps the secrets out of the properties file |
 | `parley.dns.tsigFudge` | `5m` | Largest clock difference (1s to 65535s) accepted in a signed request; also the fudge used when signing NOTIFY. The window is the smaller of this and the fudge in the request, so a client can't widen it |
@@ -449,6 +450,40 @@ parley.dns.axfrKeys=xfr.example
 parley.dns.notify=192.0.2.11
 parley.dns.notifyKey=xfr.example
 parley.dns.tsigKeys=xfr.example:hmac-sha256:c2VjcmV0...
+```
+
+### Catalog zones
+
+A catalog zone (RFC 9432) is an ordinary zone whose records list the zones a primary serves. With one, a zone added at the primary reaches every secondary without anyone editing a list of zones on each of them.
+
+**On the primary** set `parley.dns.catalogZone` to a name for the catalog, such as `catalog.example.com` (it must have no zone file of its own: the server makes it). It lists every zone the server serves (zone files and listed domains), except secondary zones and the catalog itself. When a zone is added or removed the serial goes up and the secondaries get a NOTIFY for the catalog like for any zone, so they hear about it in seconds. The serial is a time in seconds, kept in `.<catalog>.catalog` in `parley.dns.zoneDir` with the list it belongs to, so it is the same after a restart while the list is. The catalog is read-only: an UPDATE for it is REFUSED. Secondaries transfer it like any zone, so the primary's `parley.dns.axfrAllow` or `parley.dns.axfrKeys` and `parley.dns.notify` apply to it too.
+
+**On a secondary** set `parley.dns.primaryAddress` and `parley.dns.catalogZone` (the primary's catalog zone). Zones in `parley.dns.secondaryZones` are kept as before; the catalog's are kept as well. Each time the catalog is transferred, or found current, the secondary:
+
+- **adds** a member it doesn't keep: the zone is transferred and stored like any secondary zone (SERVFAIL until the first transfer succeeds);
+- **removes** a member the catalog no longer lists, if it came from the catalog (a zone in `parley.dns.secondaryZones` stays): the zone is not served any more and its file is renamed `<zone>.txt.removed`, which is not loaded at a restart and can be renamed back to recover it;
+- **ignores a catalog that is broken** (no `version` property or a version other than `"2"`, a member with other than one PTR record, or two members for one zone) and logs why: the zones stay as they are;
+- **ignores a catalog with no member** while it keeps zones from it, since an empty catalog is most likely a mistake and acting on it would drop every zone (RFC 9432 section 6);
+- **does not take over a zone of its own**: a member that is already served from a zone file this server did not write from a transfer is left alone and the problem is logged.
+
+After a restart the secondary serves the files it has and reads the catalog again as soon as it starts, so it knows which zones came from the catalog. The catalog's own SOA timers apply to it like to any secondary zone.
+
+Only the parts of RFC 9432 a secondary and a primary need are implemented: schema version 2, member zones, the `invalid.` name server. The properties `coo`, `group` and `ext` are not used (they are read past, not acted on).
+
+Example:
+
+```
+# primary
+parley.dns.masterZone=example.com
+parley.dns.catalogZone=catalog.example.com
+parley.dns.notify=192.0.2.11, 192.0.2.12
+parley.dns.axfrKeys=xfr.example
+
+# each secondary
+parley.dns.masterZone=example.com
+parley.dns.catalogZone=catalog.example.com
+parley.dns.primaryAddress=192.0.2.10
+parley.dns.primaryTsigKey=xfr.example
 ```
 
 ### DNSSEC

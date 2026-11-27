@@ -7,10 +7,13 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -38,6 +41,13 @@ import us.bringardner.parley.files.FileSource;
  * <li>expire: with no successful contact for this long, the zone is not served (SERVFAIL).</li>
  * </ul>
  * A zone with no file yet is not served (SERVFAIL) until its first transfer.
+ * <p>
+ * With a catalog zone (RFC 9432, see {@link CatalogZone}) the zones to keep are also the members of that
+ * catalog, which is transferred like any zone of this server and read each time it is current: a member
+ * not kept yet is added and transferred, and a member the catalog no longer lists (one that came from
+ * the catalog, not from the list of zones) stops being served and its file is renamed to
+ * <code>&lt;zone&gt;.txt.removed</code>, which is not loaded at a restart. A catalog that is broken, or that
+ * lists no zone when we keep some from it, changes nothing.
  */
 public class SecondaryZones extends DnsBaseClass {
 
@@ -59,9 +69,29 @@ public class SecondaryZones extends DnsBaseClass {
 		private volatile long nextCheck;
 		private volatile boolean running;
 		private volatile String lastError;
+		/** the catalog zone itself */
+		private final boolean catalog;
+		/** came from the catalog's member list, not from the list of zones */
+		private final boolean fromCatalog;
 
 		Entry(String name) {
+			this(name, false, false);
+		}
+
+		Entry(String name, boolean catalog, boolean fromCatalog) {
 			this.name = name;
+			this.catalog = catalog;
+			this.fromCatalog = fromCatalog;
+		}
+
+		/** Is this the catalog zone? */
+		public boolean isCatalog() {
+			return catalog;
+		}
+
+		/** Was this zone added from the catalog (it is dropped when the catalog drops it)? */
+		public boolean isFromCatalog() {
+			return fromCatalog;
 		}
 
 		public String getName() {
@@ -104,7 +134,8 @@ public class SecondaryZones extends DnsBaseClass {
 	private final ZoneTransferClient client;
 	private final InetSocketAddress primary;
 	private final Tsig.Key key;
-	private final Map<String, Entry> zones = new LinkedHashMap<String, Entry>();
+	private final Map<String, Entry> zones = new ConcurrentHashMap<String, Entry>();
+	private final String catalogName;
 	private final ExecutorService worker = Executors.newSingleThreadExecutor(new NamedThreadFactory("SecondaryZones"));
 
 	/**
@@ -113,23 +144,49 @@ public class SecondaryZones extends DnsBaseClass {
 	 * @param key the TSIG key to sign requests with and to check answers by, or null
 	 */
 	public SecondaryZones(Host host, String zoneNames, InetSocketAddress primary, Tsig.Key key, int fudge, int timeoutMs) {
+		this(host, zoneNames, null, primary, key, fudge, timeoutMs);
+	}
+
+	/**
+	 * @param zoneNames the zones to keep, separated by commas or spaces; may be empty when there is a catalog zone
+	 * @param catalogZone the primary's catalog zone, whose members are kept too, or null
+	 * @param primary where the zones come from
+	 * @param key the TSIG key to sign requests with and to check answers by, or null
+	 */
+	public SecondaryZones(Host host, String zoneNames, String catalogZone, InetSocketAddress primary, Tsig.Key key, int fudge, int timeoutMs) {
 		this.host = host;
 		this.primary = primary;
 		this.key = key;
 		this.client = new ZoneTransferClient(primary, key, fudge, timeoutMs);
-		for(String z : zoneNames.trim().split("[,\\s]+")) {
+		for(String z : (zoneNames == null ? "" : zoneNames).trim().split("[,\\s]+")) {
 			if( !z.isEmpty() ) {
 				String n = ZoneTransferClient.strip(z).toLowerCase(Locale.ROOT);
 				zones.put(n, new Entry(n));
 			}
+		}
+		if( catalogZone != null && !catalogZone.trim().isEmpty() ) {
+			catalogName = ZoneTransferClient.strip(catalogZone).toLowerCase(Locale.ROOT);
+			zones.put(catalogName, new Entry(catalogName, true, false));
+		} else {
+			catalogName = null;
 		}
 		if( zones.isEmpty() ) {
 			throw new IllegalArgumentException("No secondary zone named");
 		}
 	}
 
+	/** A zone name as this class keeps it: lower case, no final dot. */
+	static String normalize(String name) {
+		return ZoneTransferClient.strip(name).toLowerCase(Locale.ROOT);
+	}
+
+	/** The catalog zone's name, or null. */
+	public String getCatalogName() {
+		return catalogName;
+	}
+
 	public List<Entry> getEntries() {
-		return Collections.unmodifiableList(new ArrayList<Entry>(zones.values()));
+		return Collections.unmodifiableList(new ArrayList<Entry>(new java.util.TreeMap<String, Entry>(zones).values()));
 	}
 
 	/** The secondary zone with exactly this name, or null. */
@@ -179,7 +236,7 @@ public class SecondaryZones extends DnsBaseClass {
 	 */
 	public void start() {
 		long now = System.currentTimeMillis();
-		for(Entry e : zones.values()) {
+		for(Entry e : new ArrayList<Entry>(zones.values())) {
 			boolean hasFile = false;
 			try {
 				hasFile = zoneFile(e.name).exists();
@@ -193,7 +250,7 @@ public class SecondaryZones extends DnsBaseClass {
 				e.nextCheck = now;
 			} else {
 				try {
-					transferAndStore(e, false);
+					transferAndStore(e, false, false);
 				} catch(IOException ex) {
 					fail(e, ex);
 				}
@@ -214,7 +271,7 @@ public class SecondaryZones extends DnsBaseClass {
 	 */
 	public void maintain() {
 		long now = System.currentTimeMillis();
-		for(Entry e : zones.values()) {
+		for(Entry e : new ArrayList<Entry>(zones.values())) {
 			if( e.state == State.SERVING && now - e.lastSuccess > expireMillis(e) ) {
 				e.state = State.EXPIRED;
 				logError("Zone "+e.name+" expired: the primary "+primary+" has not been reached for "+((now - e.lastSuccess)/1000)
@@ -254,12 +311,15 @@ public class SecondaryZones extends DnsBaseClass {
 		if( mine != null && e.state != State.PENDING && !serialNewer(theirs, mine.getSoa().getSerial()) ) {
 			succeed(e, mine.getSoa());
 			log(() -> "Zone "+e.name+" is current (serial "+Integer.toUnsignedString(theirs)+")");
+			if( e.catalog ) {
+				applyCatalog(mine.getRrs().stream().flatMap(List::stream).collect(Collectors.toList()), true);
+			}
 			return;
 		}
-		transferAndStore(e, true);
+		transferAndStore(e, true, true);
 	}
 
-	private void transferAndStore(Entry e, boolean reload) throws IOException {
+	private void transferAndStore(Entry e, boolean reload, boolean schedule) throws IOException {
 		ZoneTransferClient.Transfer t = client.transfer(e.name);
 		store(e.name, t);
 		Soa soa = t.getSoa();
@@ -269,6 +329,110 @@ public class SecondaryZones extends DnsBaseClass {
 		succeed(e, soa);
 		final int n = t.getRecords().size();
 		log(() -> "Zone "+e.name+" transferred from "+primary+": serial "+Integer.toUnsignedString(soa.getSerial())+", "+n+" records");
+		if( e.catalog ) {
+			applyCatalog(t.getRecords(), schedule);
+		}
+	}
+
+	/**
+	 * Bring the zones we keep from the catalog in line with its members. A catalog that is broken is
+	 * not used (the zones stay as they are), and neither is one with no member when we keep some from
+	 * the catalog: an empty catalog is most likely a mistake at the primary, and acting on it would
+	 * drop every zone (RFC 9432 section 6).
+	 *
+	 * @param schedule check the added zones now, in the background (not before the zone files are first loaded)
+	 */
+	void applyCatalog(List<RR> records, boolean schedule) {
+		Set<String> members;
+		try {
+			members = CatalogZone.members(catalogName, records);
+		} catch(IOException ex) {
+			logError("The catalog zone "+catalogName+" can't be used, the zones stay as they are: "+ex.getMessage());
+			return;
+		}
+		Set<String> kept = new LinkedHashSet<String>();
+		for(Entry e : zones.values()) {
+			if( e.fromCatalog ) {
+				kept.add(e.name);
+			}
+		}
+		if( members.isEmpty() && !kept.isEmpty() ) {
+			logError("The catalog zone "+catalogName+" lists no zone, the "+kept.size()+" zones kept from it stay as they are");
+			return;
+		}
+		boolean removed = false;
+		for(String name : kept) {
+			if( !members.contains(name) ) {
+				removed |= drop(zones.remove(name));
+			}
+		}
+		for(String name : members) {
+			if( zones.containsKey(name) ) {
+				continue;
+			}
+			if( host.getZone(name) != null && !writtenHere(name) ) {
+				logError("The catalog zone "+catalogName+" lists "+name+", which this server already serves from its own zone file: not taken from the primary");
+				continue;
+			}
+			Entry e = new Entry(name, false, true);
+			if( host.getZone(name) != null ) {
+				//  after a restart: the file a transfer wrote is served at once (and checked soon), like the zones in the list
+				e.state = State.SERVING;
+				e.lastSuccess = System.currentTimeMillis();
+				e.nextCheck = e.lastSuccess;
+			}
+			zones.put(name, e);
+			log(() -> "Zone "+name+" is in the catalog zone "+catalogName+": keeping it as a secondary zone");
+			if( schedule ) {
+				schedule(e);
+			}
+		}
+		if( removed ) {
+			try {
+				host.reloadZones();
+			} catch(IOException ex) {
+				logError("Can't load the zones again after dropping zones the catalog zone "+catalogName+" no longer lists", ex);
+			}
+		}
+	}
+
+	/**
+	 * Is the zone's file one a transfer wrote (see {@link #store}), as after a restart, and not a zone
+	 * of this server's own? Only the first line tells.
+	 */
+	private boolean writtenHere(String zoneName) {
+		try(java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(zoneFile(zoneName).getInputStream(), StandardCharsets.UTF_8))) {
+			String first = r.readLine();
+			return first != null && first.startsWith(headerStart(zoneName));
+		} catch(IOException e) {
+			return false;
+		}
+	}
+
+	private static String headerStart(String zoneName) {
+		return "; "+zoneName+": a secondary zone, transferred from ";
+	}
+
+	/** Stop keeping a zone the catalog dropped: its file becomes <zone>.txt.removed, which is not loaded. */
+	private boolean drop(Entry e) {
+		if( e == null ) {
+			return false;
+		}
+		try {
+			FileSource f = zoneFile(e.name);
+			if( f.exists() ) {
+				FileSource moved = host.getZoneDir().getChild(e.name+".txt.removed");
+				if( !f.renameTo(moved, true) ) {
+					logError("Zone "+e.name+" is no longer in the catalog zone "+catalogName+", but its file can't be renamed to "+moved.getName());
+					return false;
+				}
+			}
+			log(() -> "Zone "+e.name+" is no longer in the catalog zone "+catalogName+": not served now, its file is "+e.name+".txt.removed");
+			return true;
+		} catch(IOException ex) {
+			logError("Can't drop the zone "+e.name+" the catalog zone "+catalogName+" no longer lists", ex);
+			return false;
+		}
 	}
 
 	private void succeed(Entry e, Soa soa) {
@@ -310,7 +474,7 @@ public class SecondaryZones extends DnsBaseClass {
 	 */
 	void store(String zoneName, ZoneTransferClient.Transfer t) throws IOException {
 		StringBuilder text = new StringBuilder();
-		text.append("; ").append(zoneName).append(": a secondary zone, transferred from ").append(primary)
+		text.append(headerStart(zoneName)).append(primary)
 		.append(" (serial ").append(Integer.toUnsignedString(t.getSoa().getSerial())).append(").\n")
 		.append("; Changes are made at the primary: this file is written again by each transfer.\n");
 		text.append(Zone.recordLine(t.getSoa())).append('\n');
@@ -341,6 +505,6 @@ public class SecondaryZones extends DnsBaseClass {
 	/** The zone names, for the log. */
 	@Override
 	public String toString() {
-		return "secondary for "+zones.keySet()+" from "+primary+(key == null ? "" : " (TSIG key "+key.getName()+")");
+		return "secondary for "+new java.util.TreeSet<String>(zones.keySet())+(catalogName == null ? "" : " and the zones in the catalog zone "+catalogName)+" from "+primary+(key == null ? "" : " (TSIG key "+key.getName()+")");
 	}
 }

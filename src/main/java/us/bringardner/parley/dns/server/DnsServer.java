@@ -164,6 +164,13 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	/** The TSIG key (name) that signs the requests to the primary, and its answers and NOTIFY must be signed with. Default: none. */
 	public static final String PROP_PRIMARY_TSIG_KEY = "parley.dns.primaryTsigKey";
 	/**
+	 * A catalog zone (RFC 9432): the name of a zone listing the member zones of a primary. On a primary (no
+	 * {@link #PROP_PRIMARY_ADDRESS}) the server makes the zone itself, from the zones it serves, and raises its serial
+	 * when a zone is added or removed. On a secondary (with {@link #PROP_PRIMARY_ADDRESS}) it is the primary's
+	 * catalog zone: the server keeps every zone it lists, besides those in {@link #PROP_SECONDARY_ZONES}. Default: none.
+	 */
+	public static final String PROP_CATALOG_ZONE = "parley.dns.catalogZone";
+	/**
 	 * The listed domains: the class of the {@link us.bringardner.parley.net.server.IDomainList} that
 	 * lists them (default {@link PropertiesDomainList}); its own settings are read with this prefix
 	 * and a dot, e.g. parley.dns.domainList.file (a properties file, such as the one an application
@@ -507,6 +514,10 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			sec.start();
 		}
 		loadZones();
+		if( sec != null ) {
+			//  zones a catalog zone gave are transferred now, not at the next round of maintenance
+			sec.maintain();
+		}
 
 		int alltimeout = durationProperty(PROP_TIMEOUT, 5000);
 		int dnsPort = intProperty(PROP_PORT, Message.DNSPORT);
@@ -731,6 +742,23 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 	//  The zones this server is a secondary for (parley.dns.secondaryZones), or null
 	private volatile SecondaryZones secondaries;
+	//  The catalog zone this server makes (parley.dns.catalogZone on a primary), or null
+	private volatile String catalogZoneName;
+
+	/**
+	 * Make this server publish a catalog zone (RFC 9432) of the zones it is the primary for, under this name
+	 * (initServer reads parley.dns.catalogZone on a server with no parley.dns.primaryAddress).
+	 *
+	 * @param name the catalog zone's name, or null for none
+	 */
+	public void setCatalogZone(String name) {
+		catalogZoneName = blank(name) ? null : SecondaryZones.normalize(name);
+	}
+
+	/** The name of the catalog zone this server makes, or null. */
+	public String getCatalogZone() {
+		return catalogZoneName;
+	}
 
 	/** The secondary zones, or null when this server is a secondary for none. */
 	public SecondaryZones getSecondaries() {
@@ -746,12 +774,22 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 	 * @param keyName the TSIG key's name, or null for no key
 	 */
 	public void setSecondaryZones(String zoneNames, String primaryAddress, String keyName, int timeoutMs) {
+		setSecondaryZones(zoneNames, null, primaryAddress, keyName, timeoutMs);
+	}
+
+	/**
+	 * Make this server a secondary for the zones and for the members of the primary's catalog zone
+	 * (initServer reads parley.dns.catalogZone too).
+	 *
+	 * @param catalogZone the primary's catalog zone (RFC 9432), or null
+	 */
+	public void setSecondaryZones(String zoneNames, String catalogZone, String primaryAddress, String keyName, int timeoutMs) {
 		SecondaryZones old = secondaries;
-		if( zoneNames == null || zoneNames.trim().isEmpty() ) {
+		if( blank(zoneNames) && blank(catalogZone) ) {
 			secondaries = null;
 		} else {
 			if( primaryAddress == null || primaryAddress.trim().isEmpty() ) {
-				throw new IllegalArgumentException(PROP_PRIMARY_ADDRESS+" isn't set: it names the primary for "+PROP_SECONDARY_ZONES);
+				throw new IllegalArgumentException(PROP_PRIMARY_ADDRESS+" isn't set: it names the primary for "+PROP_SECONDARY_ZONES+" and "+PROP_CATALOG_ZONE);
 			}
 			List<InetSocketAddress> targets = ZoneNotifier.parseTargets(primaryAddress);
 			if( targets.size() != 1 ) {
@@ -787,7 +825,7 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				public void reloadZones() throws IOException {
 					loadZones();
 				}
-			}, zoneNames, targets.get(0), key, tsigFudge, timeoutMs);
+			}, zoneNames, catalogZone, targets.get(0), key, tsigFudge, timeoutMs);
 			log(secondaries.toString());
 		}
 		if( old != null ) {
@@ -841,8 +879,12 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			setNotifyTargets(stringProperty(PROP_NOTIFY),
 					intProperty(PROP_NOTIFY_RETRIES, ZoneNotifier.DEFAULT_RETRIES),
 					durationProperty(PROP_NOTIFY_TIMEOUT, ZoneNotifier.DEFAULT_TIMEOUT));
-			setSecondaryZones(stringProperty(PROP_SECONDARY_ZONES), stringProperty(PROP_PRIMARY_ADDRESS),
+			//  A catalog zone is read from the primary when there is one, and made by this server when there is none
+			String catalog = stringProperty(PROP_CATALOG_ZONE);
+			boolean consumer = !blank(stringProperty(PROP_PRIMARY_ADDRESS));
+			setSecondaryZones(stringProperty(PROP_SECONDARY_ZONES), consumer ? catalog : null, stringProperty(PROP_PRIMARY_ADDRESS),
 					stringProperty(PROP_PRIMARY_TSIG_KEY), ZoneTransferClient.DEFAULT_TIMEOUT);
+			setCatalogZone(consumer ? null : catalog);
 		} catch(IOException ex) {
 			throw new IllegalArgumentException(ex);
 		}
@@ -1114,6 +1156,9 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 				throw new IOException("The primary domain's zone, "+defaultZoneName+" ("+PROP_DEFAULT_ZONE+"), isn't in "+zoneDir+" ("+PROP_ZONE_DIR+"): it needs "+defaultZoneName+".txt there");			
 			}
 
+			//  The catalog zone (RFC 9432) listing the zones we are the primary for
+			makeCatalogZone(zones);
+
 			//  Publish everything at once
 			zoneSet = new ZoneSet(Collections.unmodifiableMap(zones), def, Collections.unmodifiableMap(byFile));
 			for(String k : new ArrayList<String>(zoneErrors.keySet())) {
@@ -1256,6 +1301,71 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 
 	private static boolean blank(String s) {
 		return s == null || s.trim().isEmpty();
+	}
+
+	/**
+	 * Add the catalog zone (parley.dns.catalogZone on a primary): a zone listing the zones in
+	 * <code>zones</code> that this server is the primary for (not the catalog itself, and not the secondary zones).
+	 * Its serial is the time (in seconds) the list last changed, kept in <code>.&lt;catalog&gt;.catalog</code> beside
+	 * the zone files, so it only goes up and is the same after a restart. A catalog that can't be made
+	 * is left out and the reason is in the zone errors; the other zones are served as before.
+	 */
+	private void makeCatalogZone(Map<String, Zone> zones) {
+		String name = catalogZoneName;
+		zoneErrors.remove("catalog zone");
+		if( name == null ) {
+			return;
+		}
+		try {
+			if( zones.containsKey(name) ) {
+				throw new IOException("There is a zone file for "+name+": the catalog zone is made by the server, so it can't have one");
+			}
+			SecondaryZones sec = secondaries;
+			java.util.TreeSet<String> members = new java.util.TreeSet<String>();
+			for(String k : zones.keySet()) {
+				if( sec == null || sec.get(k) == null ) {
+					members.add(k);
+				}
+			}
+			FileSource state = zoneDir.getChild("."+name+".catalog");
+			int serial = catalogSerial(state, members);
+			zones.put(name, new Zone(zoneDir.getChild(name+".txt"), CatalogZone.text(members, serial)));
+		} catch(IOException | RuntimeException e) {
+			zoneErrors.put("catalog zone", String.valueOf(e.getMessage()));
+			logError("Can't make the catalog zone "+name, e);
+		}
+	}
+
+	/** The catalog's serial: the one kept while the members are the same, else the time now (always above the last). */
+	private int catalogSerial(FileSource state, java.util.Set<String> members) throws IOException {
+		long last = -1;
+		java.util.Set<String> before = new java.util.TreeSet<String>();
+		if( state.exists() ) {
+			try(java.io.BufferedReader r = new java.io.BufferedReader(new java.io.InputStreamReader(state.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+				last = Long.parseLong(r.readLine().trim());
+				for(String l = r.readLine(); l != null; l = r.readLine()) {
+					if( !l.trim().isEmpty() ) {
+						before.add(l.trim());
+					}
+				}
+			} catch(NumberFormatException | NullPointerException e) {
+				last = -1;
+				before.clear();
+			}
+		}
+		if( last >= 0 && before.equals(members) ) {
+			return (int)last;
+		}
+		long next = Math.max(System.currentTimeMillis()/1000, last < 0 ? 0 : (last & 0xffffffffL)+1);
+		StringBuilder b = new StringBuilder().append(next).append('\n');
+		for(String m : members) {
+			b.append(m).append('\n');
+		}
+		try(java.io.OutputStream out = state.getOutputStream()) {
+			out.write(b.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+		}
+		log("The catalog zone's list of zones changed: serial "+next+", "+members.size()+" zones");
+		return (int)next;
 	}
 
 	/**
@@ -2510,6 +2620,13 @@ public class DnsServer  extends DnsBaseClass implements Runnable
 			//  A secondary zone is changed at its primary (and comes here with the next transfer)
 			log(() -> "UPDATE of "+zs.getName()+" from "+req.getClient()+" refused: "+sec.find(zs.getName()).getName()
 					+" is a secondary zone; send the update to its primary, "+sec.getPrimary());
+			ret.setResponseCodeRefused();
+			return ret;
+		}
+		String catalog = catalogZoneName;
+		if( catalog != null && catalog.equalsIgnoreCase(stripDot(zs.getName())) ) {
+			//  made by the server from the zones it serves
+			log(() -> "UPDATE of "+zs.getName()+" from "+req.getClient()+" refused: it is the catalog zone, which the server makes from the zones it serves");
 			ret.setResponseCodeRefused();
 			return ret;
 		}
